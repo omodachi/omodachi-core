@@ -1,0 +1,5 @@
+{
+  "op": "workspace.select",
+  "token": "fixture-invalid-token-not-a-credential",
+  "relative": "e+1"
+}

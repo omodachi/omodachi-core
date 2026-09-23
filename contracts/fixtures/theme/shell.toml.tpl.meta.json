@@ -1,0 +1,8 @@
+{
+  "source_path": "/usr/share/omarchy/default/themed/shell.toml.tpl",
+  "source_revision": "omarchy 4.0.4-1",
+  "sha256": "bdc8e76a5a9a700adaca0d2fa44a2a340584892fd507e3fcbd4f9a4843765242",
+  "bytes": 9305,
+  "copied_at": "2026-09-18",
+  "execution": "never; it is the default-value source the theme reader backfills from"
+}

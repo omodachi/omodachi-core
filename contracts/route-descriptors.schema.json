@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/route-descriptors.schema.json",
+  "title": "Route descriptor collection",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "catalog_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "$ref": "route-descriptor.schema.json"
+      }
+    },
+    "source_revision": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "contract_revision",
+    "catalog_revision",
+    "routes"
+  ],
+  "additionalProperties": false
+}

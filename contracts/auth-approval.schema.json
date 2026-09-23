@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/auth-approval.schema.json",
+  "title": "AUTH-1 host approval",
+  "description": "What a host asks a paired device when a PAM password prompt is waiting, and what the device answers. The device signs `nonce` in context; the host never sends, stores or learns the user's password, and it never sends anything the device could replay at another prompt.",
+  "$defs": {
+    "requested": {
+      "type": "object",
+      "description": "Payload of the device-targeted `auth.approval.requested` event.",
+      "required": ["approval_id", "nonce", "device_id", "service", "service_title", "user",
+                   "requester", "description", "host_id", "host_name", "requested_at",
+                   "expires_at", "timeout_seconds", "tty", "rhost"],
+      "properties": {
+        "approval_id": {"type": "string", "pattern": "^appr_[0-9a-f]{32}$"},
+        "device_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "The identity this device must sign as: the device_id of the credential this connection authenticated with. It is part of `signed_message` and it is the only signed field the device cannot derive from its own state, so the host states it per device rather than letting the device guess. A device that re-paired holds a newer local id than the credential it still connects with, and a guess there fails every approval with `biometric_signature_invalid`."
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "256 bits, single use. The pending record is dropped the moment it is decided, so a second submission with the same signature is refused."
+        },
+        "service": {"enum": ["sudo", "polkit-1", "hyprlock", "omarchy-lock-password", "su", "login"]},
+        "service_title": {"type": "string", "minLength": 1, "maxLength": 128},
+        "user": {"type": "string", "minLength": 1, "maxLength": 128},
+        "requester": {"type": "string", "minLength": 1, "maxLength": 128},
+        "tty": {"type": ["string", "null"], "maxLength": 128},
+        "rhost": {"type": ["string", "null"], "maxLength": 128},
+        "description": {"type": "string", "minLength": 1, "maxLength": 256},
+        "host_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+        "host_name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "requested_at": {"type": "integer", "minimum": 0},
+        "expires_at": {"type": "integer", "minimum": 0},
+        "timeout_seconds": {"type": "integer", "minimum": 5, "maximum": 120}
+      },
+      "additionalProperties": false
+    },
+    "resolved": {
+      "type": "object",
+      "description": "Payload of `auth.approval.resolved`. Sent to every device that was asked, so a card that is no longer answerable goes away by itself.",
+      "required": ["approval_id", "outcome", "device_id"],
+      "properties": {
+        "approval_id": {"type": "string", "pattern": "^appr_[0-9a-f]{32}$"},
+        "outcome": {"enum": ["approved", "declined", "timeout"]},
+        "device_id": {"type": ["string", "null"], "maxLength": 128}
+      },
+      "additionalProperties": false
+    },
+    "signed_message": {
+      "type": "string",
+      "description": "The exact bytes a device signs, ASCII, newline separated, with a trailing newline: \"omodachi-auth-approval-v1\", host_id, approval_id, nonce, service, user, device_id. Every field that scopes the approval is in it, so a signature cannot move between hosts, services, users, devices or prompts.",
+      "const": "omodachi-auth-approval-v1\\n<host_id>\\n<approval_id>\\n<nonce>\\n<service>\\n<user>\\n<device_id>\\n"
+    },
+    "decision": {
+      "type": "object",
+      "description": "Body of POST /v1/auth/approvals/{approval_id}. `approve` carries a base64 DER ECDSA-P256-SHA256 signature over `signed_message`; `decline` carries nothing, because refusing is the fail-safe direction and the bearer credential is enough to say no.",
+      "oneOf": [
+        {
+          "required": ["decision", "signature"],
+          "properties": {
+            "decision": {"const": "approve"},
+            "signature": {"type": "string", "minLength": 1, "maxLength": 256}
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": ["decision"],
+          "properties": {"decision": {"const": "decline"}},
+          "additionalProperties": false
+        }
+      ]
+    },
+    "enrollment": {
+      "type": "object",
+      "description": "Body of POST /v1/auth/keys. `enabled` is the device's own half of AUTH-1's two switches and must be reported explicitly; the signature proves the device holds the private half of `public_key`.",
+      "required": ["public_key", "label", "challenge", "signature", "enabled"],
+      "properties": {
+        "public_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "base64 of the uncompressed X9.63 P-256 point (04 || X || Y, 65 bytes), or of its SPKI DER wrapping."
+        },
+        "label": {"type": "string", "minLength": 1, "maxLength": 64},
+        "challenge": {"type": "string", "pattern": "^[A-Za-z0-9_-]{43}$"},
+        "signature": {"type": "string", "minLength": 1, "maxLength": 256},
+        "enabled": {"type": "boolean"},
+        "secure_enclave": {
+          "type": "boolean",
+          "description": "Whether the private key lives in the Secure Enclave. A simulator cannot, and says so rather than pretending."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

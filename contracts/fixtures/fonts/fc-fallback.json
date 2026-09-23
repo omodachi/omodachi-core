@@ -1,0 +1,21 @@
+{
+  "_": [
+    "What a fake fontconfig answers for TERM-1's probes, so the fallback chain has",
+    "a fixture that is not this machine. `match` is what `fc-match \"monospace:charset=<hex>\"`",
+    "returns; `covers` is whether `fc-list :charset=<hex>` really lists that file.",
+    "U+F835 is the case core exists to catch: fc-match answers the matched family",
+    "because fc-match matches rather than looks up, and nothing on this host carries",
+    "the point, so the link is dropped instead of published."
+  ],
+  "probes": {
+    "e0b0":  {"family": "FixtureSymbols Nerd Font", "file": "FixtureSymbols-Regular.ttf", "covers": true},
+    "e615":  {"family": "FixtureSymbols Nerd Font", "file": "FixtureSymbols-Regular.ttf", "covers": true},
+    "f00c":  {"family": "FixtureMono Nerd Font",    "file": "FixtureMono-Regular.ttf",    "covers": true},
+    "f07b":  {"family": "FixtureSymbols Nerd Font", "file": "FixtureSymbols-Regular.ttf", "covers": true},
+    "f835":  {"family": "FixtureMono Nerd Font",    "file": "FixtureMono-Regular.ttf",    "covers": false},
+    "f0249": {"family": "FixtureSymbols Nerd Font", "file": "FixtureSymbols-Regular.ttf", "covers": true},
+    "4e2d":  {"family": "FixtureCJK Mono",          "file": "FixtureCJKMono-Regular.ttc", "covers": true},
+    "3042":  {"family": "FixtureCJK Mono",          "file": "FixtureCJKMono-Regular.ttc", "covers": true},
+    "1f600": {"family": "FixtureEmoji",             "file": "FixtureEmoji-Regular.ttf",   "covers": true}
+  }
+}

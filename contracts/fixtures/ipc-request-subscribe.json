@@ -1,0 +1,6 @@
+{
+  "op": "events.subscribe",
+  "token": "fixture-invalid-token-not-a-credential",
+  "since": 11,
+  "instance_id": "daemon-instance-fixture"
+}

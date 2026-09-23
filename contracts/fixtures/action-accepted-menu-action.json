@@ -1,0 +1,47 @@
+{
+  "contract_revision": "omodachi.v1",
+  "request_id": "request-fixture-menu-action",
+  "entry_id": "about",
+  "status": "accepted",
+  "catalog_revision": "69bd6de7b64a1a2c",
+  "route": {
+    "route": "host",
+    "supported": true,
+    "argv": [
+      "omodachi-menu-action",
+      "about"
+    ],
+    "entry_id": "about"
+  },
+  "observed": {
+    "kind": "exec",
+    "before": {
+      "workspace": {
+        "id": 3,
+        "name": "3",
+        "monitor": "OMODACHI-0123456789abcdef"
+      },
+      "window": null
+    },
+    "process": {
+      "pid": 4242,
+      "exited": true,
+      "exit_code": 0
+    },
+    "after": {
+      "workspace": {
+        "id": 3,
+        "name": "3",
+        "monitor": "OMODACHI-0123456789abcdef"
+      },
+      "window": {
+        "address": "0x0000000000000001",
+        "app_id": "kitty",
+        "fullscreen": 0,
+        "floating": false,
+        "workspace_id": 3
+      }
+    },
+    "changed": true
+  }
+}

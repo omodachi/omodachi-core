@@ -1,0 +1,267 @@
+about	About	omarchy-launch-about
+system.screensaver	Screensaver	omarchy-launch-screensaver force
+system.lock	Lock	omarchy-system-lock
+system.suspend	Suspend	systemctl suspend
+system.hibernate	Hibernate	systemctl hibernate
+system.logout	Logout	omarchy-system-logout
+system.reboot	Reboot	omarchy-system-reboot
+system.shutdown	Shutdown	omarchy-system-shutdown
+learn.omarchy	Omarchy	omarchy-launch-webapp 'https://omarchy.org/manual/'
+learn.hyprland	Hyprland	omarchy-launch-webapp 'https://wiki.hypr.land/'
+learn.arch	Arch	omarchy-launch-webapp 'https://wiki.archlinux.org/title/Main_page'
+learn.neovim	Neovim	omarchy-launch-webapp 'https://www.lazyvim.org/keymaps'
+learn.bash	Bash	omarchy-launch-webapp 'https://devhints.io/bash'
+learn.tmux-keybindings	Tmux	omarchy-menu-tmux-keybindings
+learn.herdr-keybindings	Herdr	omarchy-menu-herdr-keybindings
+learn.community	Community	omarchy-launch-discord-community
+trigger.emoji	Emoji	omarchy-menu-emoji
+trigger.capture.screenshot	Screenshot	omarchy-capture-screenshot
+trigger.capture.screenrecord.stop	Stop Screenrecording	omarchy-capture-screenrecording --stop-recording
+trigger.capture.text	Text	omarchy-capture-text
+trigger.capture.qr	QR Code	omarchy-capture-qr
+trigger.capture.color	Color	pkill hyprpicker || hyprpicker -a
+trigger.capture.screenrecord.no-audio	With no audio	omarchy-capture-screenrecording
+trigger.capture.screenrecord.desktop-audio	With desktop audio	omarchy-capture-screenrecording --with-desktop-audio
+trigger.capture.screenrecord.microphone	With desktop + microphone audio	omarchy-capture-screenrecording --with-desktop-audio --with-microphone-audio
+trigger.capture.screenrecord.webcam	With desktop + microphone audio + webcam	omarchy-capture-screenrecording-with-webcam
+trigger.transcode	Transcode	omarchy-transcode
+trigger.hardware.laptop-display	Laptop Display	omarchy-hyprland-monitor-internal toggle
+trigger.hardware.mirror-display	Mirror Display	omarchy-hyprland-monitor-internal-mirror toggle
+trigger.hardware.hybrid-gpu	Hybrid GPU	omarchy-launch-floating-terminal-with-presentation omarchy-toggle-hybrid-gpu
+trigger.hardware.touchpad	Touchpad	omarchy-toggle-touchpad
+trigger.hardware.touchpad-haptics.low	low	dell-xps-touchpad-haptics set low
+trigger.hardware.touchpad-haptics.mid	mid	dell-xps-touchpad-haptics set mid
+trigger.hardware.touchpad-haptics.high	high	dell-xps-touchpad-haptics set high
+trigger.hardware.touchscreen	Touchscreen	omarchy-toggle-touchscreen
+trigger.reminder.set	Set one	omarchy-reminder -i
+trigger.reminder.show	Show all	omarchy-reminder show
+trigger.reminder.clear	Clear all	omarchy-reminder clear
+trigger.share.clipboard	Clipboard	omarchy-menu-share clipboard
+trigger.share.file	File	omarchy-menu-share file
+trigger.share.folder	Folder	omarchy-menu-share folder
+trigger.share.receive	Receive	uwsm-app -- localsend
+trigger.toggle.crash-capture	Crash Capture	omarchy-toggle-crash-capture
+trigger.toggle.nightlight	Nightlight	omarchy-toggle-nightlight
+trigger.toggle.battery-percentage	Battery Percentage	omarchy-shell omarchy.power togglePercentage
+trigger.tests.network-speedtest	Network Speed Test	omarchy-shell shell summon omarchy.speedtest
+trigger.tests.disk-speedtest	Disk Speed Test	omarchy-shell shell summon omarchy.disk-speedtest
+style.theme	Theme	theme=$(omarchy-theme-switcher); [[ -n $theme ]] && omarchy-theme-set "$theme"
+style.background	Background	background=$(omarchy-theme-bg-switcher); [[ -n $background ]] && omarchy-theme-bg-set "$background"
+style.unlock	Unlock	unlock=$(omarchy-plymouth-switcher); if [[ $unlock == default ]]; then omarchy-launch-floating-terminal-with-presentation omarchy-plymouth-reset; elif [[ -n $unlock ]]; then omarchy-launch-floating-terminal-with-presentation "omarchy-plymouth-set-by-theme $(printf %q "$unlock")"; fi
+style.bar.transparency	Transparency	omarchy-bar transparent toggle
+style.hyprland	Hyprland	omarchy-launch-config-editor "$HOME/.config/hypr/looknfeel.lua"
+style.bar.position.top	Top	omarchy-bar position top
+style.bar.position.bottom	Bottom	omarchy-bar position bottom
+style.bar.position.left	Left	omarchy-bar position left
+style.bar.position.right	Right	omarchy-bar position right
+style.about.text	Edit Text	omarchy-branding-about text
+style.about.image	Set From Image	omarchy-branding-about image
+style.about.default	Restore Default	omarchy-branding-about reset
+style.screensaver.text	Edit Text	omarchy-branding-screensaver text
+style.screensaver.image	Set From Image	omarchy-branding-screensaver image
+style.screensaver.default	Restore Default	omarchy-branding-screensaver reset
+setup.monitors	Monitors	omarchy-launch-config-editor "$HOME/.config/hypr/monitors.lua"
+setup.keybindings	Keybindings	omarchy-launch-config-editor "$HOME/.config/hypr/bindings.lua"
+setup.input	Input	omarchy-launch-config-editor "$HOME/.config/hypr/input.lua"
+setup.network.dns.dhcp	DHCP	omarchy-dns DHCP
+setup.network.dns.cloudflare	Cloudflare	omarchy-dns Cloudflare
+setup.network.dns.google	Google	omarchy-dns Google
+setup.network.dns.custom	Custom	omarchy-launch-floating-terminal-with-presentation 'omarchy-dns Custom'
+setup.network.qr	QR Code	omarchy-shell shell summon omarchy.wifiqr
+setup.default.agent.claude	Claude	omarchy-default-agent claude
+setup.default.agent.codex	Codex	omarchy-default-agent codex
+setup.default.agent.copilot	Copilot	omarchy-default-agent copilot
+setup.default.agent.crush	Crush	omarchy-default-agent crush
+setup.default.agent.cursor-agent	Cursor CLI	omarchy-default-agent cursor-agent
+setup.default.agent.gemini	Gemini	omarchy-default-agent gemini
+setup.default.agent.grok	Grok	omarchy-default-agent grok
+setup.default.agent.hermes	Hermes	omarchy-default-agent hermes
+setup.default.agent.muse	Muse Code	omarchy-default-agent muse
+setup.default.agent.omp	omp	omarchy-default-agent omp
+setup.default.agent.openclaw	OpenClaw	omarchy-default-agent openclaw
+setup.default.agent.opencode	OpenCode	omarchy-default-agent opencode
+setup.default.agent.pi	Pi	omarchy-default-agent pi
+setup.default.browser.chromium	Chromium	omarchy-default-browser chromium
+setup.default.browser.chrome	Chrome	omarchy-default-browser chrome
+setup.default.browser.brave	Brave	omarchy-default-browser brave
+setup.default.browser.brave-origin	Brave Origin	omarchy-default-browser brave-origin
+setup.default.browser.edge	Edge	omarchy-default-browser edge
+setup.default.browser.firefox	Firefox	omarchy-default-browser firefox
+setup.default.browser.zen	Zen	omarchy-default-browser zen
+setup.default.terminal.alacritty	Alacritty	omarchy-default-terminal alacritty
+setup.default.terminal.foot	Foot	omarchy-default-terminal foot
+setup.default.terminal.ghostty	Ghostty	omarchy-default-terminal ghostty
+setup.default.terminal.kitty	Kitty	omarchy-default-terminal kitty
+setup.default.editor.neovim	Neovim	omarchy-default-editor nvim
+setup.default.editor.vscode	VSCode	omarchy-default-editor code
+setup.default.editor.cursor	Cursor	omarchy-default-editor cursor
+setup.default.editor.zed	Zed	omarchy-default-editor zed
+setup.default.editor.sublime	Sublime Text	omarchy-default-editor sublime_text
+setup.default.editor.helix	Helix	omarchy-default-editor helix
+setup.default.editor.vim	Vim	omarchy-default-editor vim
+setup.default.editor.emacs	Emacs	omarchy-default-editor emacs
+setup.plugin.enable	Enable Plugin	omarchy-menu-plugin enable
+setup.plugin.disable	Disable Plugin	omarchy-menu-plugin disable
+setup.plugin.add	Add Plugin	omarchy-launch-floating-terminal-with-presentation 'omarchy-plugin-add'
+setup.plugin.clone	Clone Plugin	omarchy-menu-plugin clone
+setup.plugin.remove	Remove Plugin	omarchy-menu-plugin remove
+setup.security.fingerprint	Fingerprint	omarchy-launch-floating-terminal-with-presentation omarchy-setup-security-fingerprint
+setup.security.fido2	Fido2	omarchy-launch-floating-terminal-with-presentation omarchy-setup-security-fido2
+setup.security.sshd	SSHD	omarchy-launch-floating-terminal-with-presentation omarchy-setup-security-sshd
+setup.security.passwordless-sudo	Passwordless Sudo	omarchy-launch-floating-terminal-with-presentation omarchy-sudo-passwordless
+setup.security.sudoless-docker	Sudoless Docker	omarchy-launch-floating-terminal-with-presentation omarchy-setup-security-sudoless-docker
+setup.config.hyprland	Hyprland	omarchy-launch-config-editor "$HOME/.config/hypr/hyprland.lua"
+setup.config.hyprsunset	Hyprsunset	omarchy-launch-config-editor ~/.config/hypr/hyprsunset.conf && omarchy-restart-hyprsunset
+setup.config.xcompose	XCompose	omarchy-launch-config-editor ~/.XCompose && omarchy-restart-xcompose
+setup.direct-boot	Direct Boot	omarchy-launch-floating-terminal-with-presentation omarchy-setup-direct-boot
+setup.reset	Reset Computer	omarchy-launch-floating-terminal-with-presentation omarchy-system-factory-reset
+install.package	Package	xdg-terminal-exec --app-id=org.omarchy.terminal omarchy-pkg-install
+install.aur	AUR	xdg-terminal-exec --app-id=org.omarchy.terminal omarchy-pkg-aur-install
+install.webapp	Web App	omarchy-launch-floating-terminal-with-presentation omarchy-webapp-install
+install.tui	TUI	omarchy-launch-floating-terminal-with-presentation omarchy-tui-install
+install.style.theme	Theme	omarchy-launch-floating-terminal-with-presentation omarchy-theme-install
+install.style.background	Background	omarchy-theme-bg-install
+install.style.font.cascadia	Cascadia Mono	omarchy-install-font 'Cascadia Mono' ttf-cascadia-mono-nerd 'CaskaydiaMono Nerd Font'
+install.style.font.meslo	Meslo LG Mono	omarchy-install-font 'Meslo LG Mono' ttf-meslo-nerd 'MesloLGL Nerd Font'
+install.style.font.fira	Fira Code	omarchy-install-font 'Fira Code' ttf-firacode-nerd 'FiraCode Nerd Font'
+install.style.font.victor	Victor Code	omarchy-install-font 'Victor Code' ttf-victor-mono-nerd 'VictorMono Nerd Font'
+install.style.font.bitstream	Bitstream Vera Mono	omarchy-install-font 'Bitstream Vera Code' ttf-bitstream-vera-mono-nerd 'BitstromWera Nerd Font'
+install.style.font.iosevka	Iosevka	omarchy-install-font Iosevka ttf-iosevka-nerd 'Iosevka Nerd Font Mono'
+install.windows	Windows	omarchy-launch-floating-terminal-with-presentation 'omarchy-windows-vm install'
+install.preinstalls	Preinstalls	omarchy-launch-floating-terminal-with-presentation omarchy-install-preinstalls
+install.browser.chrome	Chrome	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-browser chrome'
+install.browser.edge	Edge	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-browser edge'
+install.browser.brave	Brave	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-browser brave'
+install.browser.brave-origin	Brave Origin	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-browser brave-origin'
+install.browser.firefox	Firefox	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-browser firefox'
+install.browser.zen	Zen	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-browser zen'
+install.service.1password	1Password	omarchy-launch-floating-terminal-with-presentation omarchy-install-service-1password
+install.service.dropbox	Dropbox	omarchy-launch-floating-terminal-with-presentation omarchy-install-service-dropbox
+install.service.spotify	Spotify	omarchy-launch-floating-terminal-with-presentation omarchy-install-service-spotify
+install.service.signal	Signal	omarchy-launch-floating-terminal-with-presentation omarchy-install-service-signal
+install.service.tailscale	Tailscale	omarchy-launch-floating-terminal-with-presentation omarchy-install-service-tailscale
+install.service.nordvpn	NordVPN	omarchy-launch-floating-terminal-with-presentation omarchy-install-service-nordvpn
+install.service.once	ONCE	omarchy-launch-floating-terminal-with-presentation omarchy-install-service-once
+install.service.bitwarden	Bitwarden	omarchy-install-and-launch Bitwarden 'bitwarden bitwarden-cli' bitwarden
+install.service.chromium-account	Chromium Account	omarchy-launch-floating-terminal-with-presentation omarchy-install-chromium-google-account
+install.editor.vscode	VSCode	omarchy-launch-floating-terminal-with-presentation omarchy-install-editor-vscode
+install.editor.cursor	Cursor	omarchy-install-and-launch Cursor cursor-bin cursor
+install.editor.zed	Zed	omarchy-launch-floating-terminal-with-presentation omarchy-install-editor-zed
+install.editor.sublime	Sublime Text	omarchy-install-and-launch 'Sublime Text' sublime-text-4 sublime_text
+install.editor.helix	Helix	omarchy-launch-floating-terminal-with-presentation omarchy-install-editor-helix
+install.editor.vim	Vim	omarchy-install-app Vim vim
+install.editor.emacs	Emacs	omarchy-launch-floating-terminal-with-presentation omarchy-install-editor-emacs
+install.terminal.alacritty	Alacritty	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-terminal alacritty'
+install.terminal.foot	Foot	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-terminal foot'
+install.terminal.ghostty	Ghostty	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-terminal ghostty'
+install.terminal.kitty	Kitty	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-terminal kitty'
+install.ai.chatgpt	ChatGPT Desktop	omarchy-launch-floating-terminal-with-presentation omarchy-install-ai-chatgpt
+install.ai.dictation	Dictation	omarchy-launch-floating-terminal-with-presentation omarchy-voxtype-install
+install.ai.grok-bot	Grok Bot	omarchy-install-and-launch 'Grok Bot' grok-bot grok-bot
+install.ai.lm-studio	LM Studio	omarchy-install-app 'LM Studio' lmstudio-bin
+install.ai.ollama	Ollama	if omarchy-cmd-present nvidia-smi; then ollama_pkg=ollama-cuda; elif omarchy-cmd-present rocminfo; then ollama_pkg=ollama-rocm; else ollama_pkg=ollama; fi; omarchy-install-app Ollama "$ollama_pkg"
+install.ai.t3-code	T3 Code	omarchy-launch-floating-terminal-with-presentation omarchy-install-ai-t3-code
+install.ai.hermes	Hermes Desktop	omarchy-launch-floating-terminal-with-presentation omarchy-install-ai-hermes
+install.ai.openclaw	OpenClaw	omarchy-launch-floating-terminal-with-presentation omarchy-install-ai-openclaw
+install.ai.perplexity	Perplexity	omarchy-install-and-launch Perplexity perplexity perplexity
+install.gaming.steam	Steam	omarchy-launch-floating-terminal-with-presentation omarchy-install-gaming-steam
+install.gaming.retroarch	RetroArch	omarchy-launch-floating-terminal-with-presentation omarchy-install-gaming-retroarch
+install.gaming.minecraft	Minecraft	omarchy-install-and-launch Minecraft minecraft-launcher minecraft-launcher
+install.gaming.geforce-now	NVIDIA GeForce NOW	omarchy-launch-floating-terminal-with-presentation omarchy-install-gaming-geforce-now
+install.gaming.xbox-cloud	Xbox Cloud Gaming	omarchy-launch-floating-terminal-with-presentation omarchy-install-gaming-xbox-cloud
+install.gaming.xbox-controllers	Xbox Controllers	omarchy-launch-floating-terminal-with-presentation omarchy-install-gaming-xbox-controllers
+install.gaming.battlenet	Battle.net	omarchy-launch-floating-terminal-with-presentation omarchy-install-gaming-battlenet
+install.gaming.lutris	Lutris	omarchy-launch-floating-terminal-with-presentation omarchy-install-gaming-lutris
+install.gaming.heroic	Heroic (Epic Games)	omarchy-launch-floating-terminal-with-presentation omarchy-install-gaming-heroic
+install.gaming.retro-launcher	RetroArch Game Launcher	omarchy-games-retro-install
+install.development.rails	Ruby on Rails	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env ruby'
+install.development.docker-dbs	Docker DB	omarchy-launch-floating-terminal-with-presentation omarchy-install-docker-dbs
+install.development.go	Go	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env go'
+install.development.python	Python	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env python'
+install.development.zig	Zig	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env zig'
+install.development.rust	Rust	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env rust'
+install.development.java	Java	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env java'
+install.development.dotnet	.NET	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env dotnet'
+install.development.ocaml	OCaml	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env ocaml'
+install.development.clojure	Clojure	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env clojure'
+install.development.scala	Scala	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env scala'
+install.development.javascript.node	Node.js	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env node'
+install.development.javascript.bun	Bun	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env bun'
+install.development.javascript.deno	Deno	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env deno'
+install.development.php.php	PHP	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env php'
+install.development.php.laravel	Laravel	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env laravel'
+install.development.php.symfony	Symfony	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env symfony'
+install.development.elixir.elixir	Elixir	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env elixir'
+install.development.elixir.phoenix	Phoenix	omarchy-launch-floating-terminal-with-presentation 'omarchy-install-dev-env phoenix'
+remove.package	Package	xdg-terminal-exec --app-id=org.omarchy.terminal omarchy-pkg-remove
+remove.webapp	Web App	omarchy-webapp-remove
+remove.tui	TUI	omarchy-tui-remove
+remove.theme	Theme	omarchy-theme-remove
+remove.dictation	Dictation	omarchy-launch-floating-terminal-with-presentation omarchy-voxtype-remove
+remove.windows	Windows	omarchy-launch-floating-terminal-with-presentation 'omarchy-windows-vm remove'
+remove.preinstalls	Preinstalls	omarchy-launch-floating-terminal-with-presentation omarchy-remove-preinstalls
+remove.security.fingerprint	Fingerprint	omarchy-launch-floating-terminal-with-presentation omarchy-remove-security-fingerprint
+remove.security.fido2	Fido2	omarchy-launch-floating-terminal-with-presentation omarchy-remove-security-fido2
+remove.security.sshd	SSHD	omarchy-launch-floating-terminal-with-presentation omarchy-remove-security-sshd
+remove.security.sudoless-docker	Sudoless Docker	omarchy-launch-floating-terminal-with-presentation omarchy-remove-security-sudoless-docker
+remove.ai.hermes	Hermes Desktop	omarchy-launch-floating-terminal-with-presentation omarchy-remove-ai-hermes
+remove.browser.chrome	Chrome	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-browser chrome'
+remove.browser.edge	Edge	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-browser edge'
+remove.browser.brave	Brave	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-browser brave'
+remove.browser.brave-origin	Brave Origin	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-browser brave-origin'
+remove.browser.firefox	Firefox	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-browser firefox'
+remove.browser.zen	Zen	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-browser zen'
+remove.service.dropbox	Dropbox	omarchy-launch-floating-terminal-with-presentation omarchy-remove-service-dropbox
+remove.service.tailscale	Tailscale	omarchy-launch-floating-terminal-with-presentation omarchy-remove-service-tailscale
+remove.gaming.steam	Steam	omarchy-launch-floating-terminal-with-presentation omarchy-remove-gaming-steam
+remove.gaming.retroarch	RetroArch	omarchy-launch-floating-terminal-with-presentation omarchy-remove-gaming-retroarch
+remove.gaming.minecraft	Minecraft	omarchy-launch-floating-terminal-with-presentation omarchy-remove-gaming-minecraft
+remove.gaming.geforce-now	NVIDIA GeForce NOW	omarchy-launch-floating-terminal-with-presentation omarchy-remove-gaming-geforce-now
+remove.gaming.xbox-cloud	Xbox Cloud Gaming	omarchy-launch-floating-terminal-with-presentation omarchy-remove-gaming-xbox-cloud
+remove.gaming.xbox-controllers	Xbox Controllers (󰂯)	omarchy-launch-floating-terminal-with-presentation omarchy-remove-gaming-xbox-controllers
+remove.gaming.battlenet	Battle.net	omarchy-launch-floating-terminal-with-presentation omarchy-remove-gaming-battlenet
+remove.gaming.lutris	Lutris	omarchy-launch-floating-terminal-with-presentation omarchy-remove-gaming-lutris
+remove.gaming.heroic	Heroic (Epic Games)	omarchy-launch-floating-terminal-with-presentation omarchy-remove-gaming-heroic
+remove.development.rails	Ruby on Rails	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env ruby'
+remove.development.go	Go	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env go'
+remove.development.python	Python	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env python'
+remove.development.zig	Zig	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env zig'
+remove.development.rust	Rust	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env rust'
+remove.development.java	Java	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env java'
+remove.development.dotnet	.NET	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env dotnet'
+remove.development.ocaml	OCaml	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env ocaml'
+remove.development.clojure	Clojure	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env clojure'
+remove.development.scala	Scala	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env scala'
+remove.development.javascript.node	Node.js	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env node'
+remove.development.javascript.bun	Bun	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env bun'
+remove.development.javascript.deno	Deno	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env deno'
+remove.development.php.php	PHP	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env php'
+remove.development.php.laravel	Laravel	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env laravel'
+remove.development.php.symfony	Symfony	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env symfony'
+remove.development.elixir.elixir	Elixir	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env elixir'
+remove.development.elixir.phoenix	Phoenix	omarchy-launch-floating-terminal-with-presentation 'omarchy-remove-dev-env phoenix'
+remove.ai.t3-code	T3 Code	omarchy-launch-floating-terminal-with-presentation omarchy-remove-ai-t3-code
+remove.ai.openclaw	OpenClaw	omarchy-launch-floating-terminal-with-presentation omarchy-remove-ai-openclaw
+remove.ai.perplexity	Perplexity	omarchy-launch-floating-terminal-with-presentation omarchy-remove-ai-perplexity
+update.omarchy	Omarchy	omarchy-launch-floating-terminal-with-presentation omarchy-update
+update.themes	Extra Themes	omarchy-launch-floating-terminal-with-presentation omarchy-theme-update
+update.firmware	Firmware	omarchy-launch-floating-terminal-with-presentation omarchy-update-firmware
+update.timezone	Timezone	omarchy-menu-timezone
+update.time	Time	omarchy-launch-floating-terminal-with-presentation omarchy-update-time
+update.channel.stable	Stable	omarchy-launch-floating-terminal-with-presentation 'omarchy-channel-set stable'
+update.channel.rc	RC	omarchy-launch-floating-terminal-with-presentation 'omarchy-channel-set rc'
+update.channel.edge	Edge	omarchy-launch-floating-terminal-with-presentation 'omarchy-channel-set edge'
+update.channel.dev	Dev	omarchy-launch-floating-terminal-with-presentation 'omarchy-channel-set dev'
+update.process.hyprsunset	Hyprsunset	omarchy-restart-hyprsunset
+update.process.shell	Shell	omarchy-restart-shell
+update.config.hyprland	Hyprland	omarchy-launch-floating-terminal-with-presentation omarchy-refresh-hyprland
+update.config.hyprsunset	Hyprsunset	omarchy-launch-floating-terminal-with-presentation omarchy-refresh-hyprsunset
+update.config.plymouth	Plymouth	omarchy-launch-floating-terminal-with-presentation omarchy-refresh-plymouth
+update.config.tmux	Tmux	omarchy-launch-floating-terminal-with-presentation omarchy-refresh-tmux
+update.config.shell	Shell	omarchy-launch-floating-terminal-with-presentation omarchy-refresh-shell
+update.hardware.audio	Audio	omarchy-launch-floating-terminal-with-presentation omarchy-restart-audio
+update.hardware.wifi	Wi-Fi	omarchy-launch-floating-terminal-with-presentation omarchy-restart-wifi
+update.hardware.bluetooth	Bluetooth	omarchy-launch-floating-terminal-with-presentation omarchy-restart-bluetooth
+update.hardware.trackpad	Trackpad	omarchy-launch-floating-terminal-with-presentation omarchy-restart-trackpad
+update.password.drive	Drive Encryption	omarchy-launch-floating-terminal-with-presentation omarchy-drive-password
+update.password.user	User	omarchy-launch-floating-terminal-with-presentation passwd

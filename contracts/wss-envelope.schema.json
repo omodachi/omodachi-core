@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/wss-envelope.schema.json",
+  "title": "WSS initial state, replay-ready or device event",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "snapshot"
+        },
+        "state": {
+          "$ref": "state.schema.json"
+        },
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "type",
+        "state",
+        "instance_id",
+        "cursor"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "ready"
+        },
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cursor": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "type",
+        "instance_id",
+        "cursor"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event": {
+          "$ref": "events.schema.json"
+        },
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "after_cursor": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Last visible cursor sent on this subscription. Validate equality with the local cursor before accepting a forward event."
+        }
+      },
+      "required": [
+        "event",
+        "instance_id"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

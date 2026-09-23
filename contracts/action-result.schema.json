@@ -1,0 +1,382 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/action-result.schema.json",
+  "title": "Prepared or accepted catalog action result",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "request_id",
+    "entry_id",
+    "status",
+    "catalog_revision",
+    "route"
+  ],
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entry_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "catalog_revision": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "PERF-5: the catalog revision core resolved this invocation against. A client may have invoked with an older one - the revision is a hint, not a gate - and adopts this so its next invocation is not optimistic about the same gap."
+    },
+    "status": {
+      "enum": [
+        "prepared",
+        "accepted",
+        "failed"
+      ]
+    },
+    "route": {
+      "$ref": "route-descriptor.schema.json"
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "observed": {
+      "type": "object",
+      "description": "What the host did: the compositor before and after the binding ran, and for an `exec` binding the process core started.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "exec",
+            "dispatch",
+            "eval",
+            "sendshortcut"
+          ]
+        },
+        "before": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "workspace": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "monitor": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "monitor"
+              ],
+              "additionalProperties": false
+            },
+            "window": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "pattern": "^0x[0-9a-fA-F]{1,32}$"
+                },
+                "app_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "fullscreen": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "floating": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "workspace_id": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "address",
+                "app_id",
+                "fullscreen",
+                "floating",
+                "workspace_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "workspace",
+            "window"
+          ],
+          "additionalProperties": false
+        },
+        "after": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "workspace": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "monitor": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "monitor"
+              ],
+              "additionalProperties": false
+            },
+            "window": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "pattern": "^0x[0-9a-fA-F]{1,32}$"
+                },
+                "app_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "fullscreen": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "floating": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                },
+                "workspace_id": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "address",
+                "app_id",
+                "fullscreen",
+                "floating",
+                "workspace_id"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "workspace",
+            "window"
+          ],
+          "additionalProperties": false
+        },
+        "changed": {
+          "type": "boolean"
+        },
+        "redirected_output": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$",
+          "description": "Present only when a live Remote session made core replay a workspace focus on the session's own output instead of wherever that workspace already lived. The value is that output."
+        },
+        "process": {
+          "type": "object",
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "exited": {
+              "type": "boolean"
+            },
+            "exit_code": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "pid",
+            "exited",
+            "exit_code"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "kind",
+        "before",
+        "after",
+        "changed"
+      ],
+      "additionalProperties": false
+    },
+    "workspace_effects": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "from_layout": {
+          "enum": [
+            "dwindle",
+            "scrolling"
+          ]
+        },
+        "layout": {
+          "enum": [
+            "dwindle",
+            "scrolling"
+          ]
+        },
+        "runtime_applied": {
+          "type": "boolean"
+        },
+        "persistent_applied": {
+          "type": "boolean"
+        },
+        "readback_confirmed": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "applied",
+            "partial",
+            "failed"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,95}$"
+        }
+      },
+      "required": [
+        "workspace_id",
+        "from_layout",
+        "layout",
+        "runtime_applied",
+        "persistent_applied",
+        "readback_confirmed",
+        "status",
+        "code"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "applied"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "runtime_applied": {
+                "const": true
+              },
+              "persistent_applied": {
+                "const": true
+              },
+              "readback_confirmed": {
+                "const": true
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "entry_id": {
+            "const": "trigger.toggle.workspace-layout"
+          },
+          "status": {
+            "const": "accepted"
+          }
+        },
+        "required": [
+          "entry_id",
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "workspace_effects"
+        ],
+        "properties": {
+          "workspace_effects": {
+            "properties": {
+              "status": {
+                "const": "applied"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

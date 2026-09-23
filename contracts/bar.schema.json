@@ -1,0 +1,276 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/bar.schema.json",
+  "title": "Semantic bar layout from shell.json",
+  "type": "object",
+  "required": [
+    "source",
+    "source_status",
+    "position",
+    "revision",
+    "modules",
+    "left",
+    "center",
+    "right",
+    "geometry"
+  ],
+  "properties": {
+    "source": {
+      "const": "shell.json"
+    },
+    "source_status": {
+      "enum": [
+        "fixture",
+        "available",
+        "unavailable"
+      ]
+    },
+    "revision": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "left": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    },
+    "center": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    },
+    "right": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/item"
+      }
+    },
+    "position": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "top",
+        "bottom",
+        "left",
+        "right",
+        null
+      ]
+    },
+    "modules": {
+      "description": "The status-bearing modules of the host's own bar, in layout order. A client joins them to left/center/right by id. status is null when the host has no reading.",
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/module"
+      }
+    },
+    "geometry": {
+      "description": "MENU-2. Where this bar is on the output a Remote session owns, in that output's logical pixels, so a client can put its own mark over the Omarchy logo. null whenever there is no session, no omarchy-bar layer on that output, or nothing measurable. Only the logo is located: the Omodachi plugin's own slot moves with every other widget beside it, so it is left alone and the host plugin decides what its icon does during a takeover.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "output",
+        "logical_size",
+        "position",
+        "bar",
+        "logo"
+      ],
+      "properties": {
+        "output": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "logical_size": {
+          "$ref": "#/$defs/size"
+        },
+        "position": {
+          "enum": [
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ]
+        },
+        "bar": {
+          "$ref": "#/$defs/rect"
+        },
+        "logo": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/rect"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": [
+        "id",
+        "role"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+        },
+        "role": {
+          "enum": [
+            "logo",
+            "workspaces",
+            "clock",
+            "system_tray",
+            "stream",
+            "focused_window",
+            "unsupported",
+            "panel",
+            "agent_usage",
+            "audio",
+            "power",
+            "network"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "module": {
+      "type": "object",
+      "required": [
+        "id",
+        "role",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+        },
+        "role": {
+          "enum": [
+            "audio",
+            "power",
+            "network"
+          ]
+        },
+        "status": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "maxProperties": 8,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,31}$"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ],
+            "maxLength": 64
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "rect": {
+      "type": "object",
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -16384,
+          "maximum": 16384
+        },
+        "y": {
+          "type": "number",
+          "minimum": -16384,
+          "maximum": 16384
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 16384
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 16384
+        }
+      },
+      "additionalProperties": false
+    },
+    "size": {
+      "type": "object",
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 16384
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 16384
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "source_status": {
+            "const": "unavailable"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "left": {
+            "maxItems": 0
+          },
+          "center": {
+            "maxItems": 0
+          },
+          "right": {
+            "maxItems": 0
+          },
+          "modules": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ]
+}

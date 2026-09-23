@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/remote-capabilities.schema.json",
+  "title": "What this host can do for a remote session",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "backends": {
+      "type": "object",
+      "properties": {
+        "sunshine": {
+          "type": "object",
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "backend": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "encoder": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transport": {
+              "type": "string"
+            },
+            "audio": {
+              "type": "boolean"
+            },
+            "codecs": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "h264",
+                  "hevc",
+                  "av1"
+                ]
+              },
+              "uniqueItems": true,
+              "contains": {
+                "const": "h264"
+              }
+            }
+          },
+          "required": [
+            "available"
+          ],
+          "additionalProperties": false
+        },
+        "vnc": {
+          "type": "object",
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "backend": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "encoder": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transport": {
+              "type": "string"
+            },
+            "audio": {
+              "type": "boolean"
+            },
+            "codecs": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "h264",
+                  "hevc",
+                  "av1"
+                ]
+              },
+              "uniqueItems": true,
+              "contains": {
+                "const": "h264"
+              }
+            }
+          },
+          "required": [
+            "available"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "sunshine",
+        "vnc"
+      ],
+      "additionalProperties": false
+    },
+    "modes": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "extend",
+          "takeover"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "placement_options": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "right",
+          "left",
+          "above",
+          "below"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "lock_local_input_supported": {
+      "type": "boolean"
+    },
+    "encoder_limits": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "max_width": {
+              "type": "integer"
+            },
+            "max_height": {
+              "type": "integer"
+            },
+            "max_pixels": {
+              "type": "integer"
+            },
+            "max_fps": {
+              "type": "integer"
+            },
+            "max_bitrate_kbps": {
+              "type": "integer"
+            },
+            "width_alignment": {
+              "type": "integer"
+            },
+            "height_alignment": {
+              "type": "integer"
+            },
+            "codecs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "max_width",
+            "max_height",
+            "max_pixels",
+            "max_fps",
+            "max_bitrate_kbps",
+            "width_alignment",
+            "height_alignment",
+            "codecs"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "default_backend": {
+      "description": "Which backend POST /v1/remote/sessions uses when the client does not name one: the host preference while it is available, otherwise the first backend that is.",
+      "enum": [
+        "sunshine",
+        "vnc"
+      ]
+    }
+  },
+  "required": [
+    "backends",
+    "modes",
+    "placement_options",
+    "lock_local_input_supported",
+    "encoder_limits",
+    "default_backend"
+  ],
+  "additionalProperties": false
+}

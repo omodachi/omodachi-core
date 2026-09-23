@@ -1,0 +1,306 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/herdr-layout.schema.json",
+  "title": "Herdr layout",
+  "description": "One Herdr session on the host projected from its own `herdr api snapshot`: workspaces, tabs and panes with focus, zoom, size and agent state. The session is the one this device selected, `omodachi` until it selects another.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "session",
+    "protocol",
+    "version",
+    "focused",
+    "workspaces",
+    "revision"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "session": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"
+    },
+    "protocol": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 64
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "focused": {
+      "type": "object",
+      "required": [
+        "workspace_id",
+        "tab_id",
+        "pane_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "workspace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tab_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pane_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "workspaces": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "number",
+          "focused",
+          "active_tab_id",
+          "agent_status",
+          "tabs"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^w[0-9]{1,9}$"
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 256
+          },
+          "number": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "focused": {
+            "type": "boolean"
+          },
+          "active_tab_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "agent_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tabs": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "label",
+                "number",
+                "focused",
+                "zoomed",
+                "agent_status",
+                "panes"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^w[0-9]{1,9}:t[0-9]{1,9}$"
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 256
+                },
+                "number": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "focused": {
+                  "type": "boolean"
+                },
+                "zoomed": {
+                  "type": "boolean"
+                },
+                "agent_status": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "panes": {
+                  "type": "array",
+                  "maxItems": 256,
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "tab_id",
+                      "workspace_id",
+                      "title",
+                      "cwd",
+                      "focused",
+                      "zoomed",
+                      "agent_status",
+                      "agent",
+                      "size",
+                      "revision"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^w[0-9]{1,9}:p[0-9]{1,9}$"
+                      },
+                      "tab_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "workspace_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "title": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "maxLength": 512
+                      },
+                      "cwd": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "maxLength": 4096
+                      },
+                      "focused": {
+                        "type": "boolean"
+                      },
+                      "zoomed": {
+                        "type": "boolean"
+                      },
+                      "agent_status": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "agent": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "name",
+                              "kind",
+                              "status"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                              "name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "kind": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "status": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "size": {
+                        "type": "object",
+                        "required": [
+                          "cols",
+                          "rows"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "cols": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "minimum": 0
+                          },
+                          "rows": {
+                            "type": [
+                              "integer",
+                              "null"
+                            ],
+                            "minimum": 0
+                          }
+                        }
+                      },
+                      "revision": {
+                        "type": [
+                          "integer",
+                          "null"
+                        ],
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

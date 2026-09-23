@@ -1,0 +1,23 @@
+{
+  "notes": "Generated from the local JSONC compiler; all input rows are synthetic fixture data.",
+  "required_ids": [
+    "root",
+    "apps",
+    "trigger",
+    "trigger.toggle.notifications",
+    "learn.herdr-keybindings",
+    "trigger.fixture-host",
+    "setup.monitors",
+    "omodachi",
+    "omodachi.desktop",
+    "omodachi.agent",
+    "omodachi.herdr"
+  ],
+  "route_expectations": {
+    "omodachi.desktop": "desktop",
+    "omodachi.agent": "terminal",
+    "omodachi.herdr": "terminal",
+    "setup.monitors": "native",
+    "trigger.fixture-host": "host"
+  }
+}

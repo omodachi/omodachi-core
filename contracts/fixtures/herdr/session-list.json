@@ -1,0 +1,25 @@
+{
+  "sessions": [
+    {
+      "default": true,
+      "name": "default",
+      "running": true,
+      "session_dir": "/home/alex/.config/herdr",
+      "socket_path": "/home/alex/.config/herdr/herdr.sock"
+    },
+    {
+      "default": false,
+      "name": "omodachi",
+      "running": true,
+      "session_dir": "/home/alex/.config/herdr/sessions/omodachi",
+      "socket_path": "/home/alex/.config/herdr/sessions/omodachi/herdr.sock"
+    },
+    {
+      "default": false,
+      "name": "herdr2-probe",
+      "running": false,
+      "session_dir": "/home/alex/.config/herdr/sessions/herdr2-probe",
+      "socket_path": "/home/alex/.config/herdr/sessions/herdr2-probe/herdr.sock"
+    }
+  ]
+}

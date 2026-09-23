@@ -1,0 +1,107 @@
+{
+  "contract_revision": "omodachi.v1",
+  "revision": "3f0af054c4448610",
+  "source_revision": "fcc7fbd06ce6a008",
+  "entries": [
+    {
+      "label": "Workspace 3",
+      "aliases": [
+        "3",
+        "workspace 3",
+        "ws 3"
+      ],
+      "surface": "host",
+      "action": "omodachi-host workspace select 3",
+      "workspace": {
+        "id": 3,
+        "operation": "select"
+      },
+      "parent": "omodachi.workspace.select",
+      "icon": "",
+      "iconFont": "",
+      "title": "",
+      "target": "",
+      "description": "",
+      "provider": "",
+      "when": "",
+      "checked": "",
+      "icon_kind": "none",
+      "id": "omodachi.workspace.select.3",
+      "kind": "action",
+      "parent_id": "omodachi.workspace.select",
+      "conditions": {
+        "when": {
+          "status": "available",
+          "value": true
+        },
+        "checked": {
+          "status": "available",
+          "value": null
+        }
+      },
+      "visible": true,
+      "checked_state": null,
+      "order": 29,
+      "route": {
+        "route": "host",
+        "supported": true,
+        "argv": [
+          "workspace.select",
+          "3"
+        ],
+        "entry_id": "omodachi.workspace.select.3",
+        "ready": true
+      }
+    },
+    {
+      "label": "Move focused window to Workspace 3",
+      "aliases": [
+        "move to 3",
+        "move workspace 3"
+      ],
+      "surface": "host",
+      "action": "omodachi-host workspace move-focused 3",
+      "when": "omodachi-focus-available",
+      "workspace": {
+        "id": 3,
+        "operation": "move_focused"
+      },
+      "parent": "omodachi.workspace.move",
+      "icon": "",
+      "iconFont": "",
+      "title": "",
+      "target": "",
+      "description": "",
+      "provider": "",
+      "checked": "",
+      "icon_kind": "none",
+      "id": "omodachi.workspace.move.3",
+      "kind": "action",
+      "parent_id": "omodachi.workspace.move",
+      "conditions": {
+        "when": {
+          "status": "available",
+          "value": true
+        },
+        "checked": {
+          "status": "available",
+          "value": null
+        }
+      },
+      "visible": true,
+      "checked_state": null,
+      "order": 30,
+      "route": {
+        "route": "host",
+        "supported": true,
+        "argv": [
+          "workspace.move",
+          "3"
+        ],
+        "entry_id": "omodachi.workspace.move.3",
+        "ready": true
+      }
+    }
+  ],
+  "query": "3"
+}

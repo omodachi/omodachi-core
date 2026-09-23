@@ -1,0 +1,123 @@
+{
+  "source": "Read-only actual Arch Omarchy package layout observed 2026-09-17; public package metadata only",
+  "files": [
+    {
+      "path": "/usr/share/omarchy/bin/omarchy-hyprland-toggle",
+      "uid": 0,
+      "mode": "0o777",
+      "kind": "symlink",
+      "executable": true,
+      "link_target": "/usr/bin/omarchy-hyprland-toggle"
+    },
+    {
+      "path": "/usr/share/omarchy/bin/omarchy-hyprland-window-gaps-toggle",
+      "uid": 0,
+      "mode": "0o777",
+      "kind": "symlink",
+      "executable": true,
+      "link_target": "/usr/bin/omarchy-hyprland-window-gaps-toggle"
+    },
+    {
+      "path": "/usr/share/omarchy/bin/omarchy-hyprland-window-single-square-aspect-toggle",
+      "uid": 0,
+      "mode": "0o777",
+      "kind": "symlink",
+      "executable": true,
+      "link_target": "/usr/bin/omarchy-hyprland-window-single-square-aspect-toggle"
+    },
+    {
+      "path": "/usr/share/omarchy/default/hypr/toggles/window-no-gaps.lua",
+      "uid": 0,
+      "mode": "0o644",
+      "kind": "file",
+      "executable": false,
+      "sha256": "22d43e72bf5b38e64b82409961c292329997c314f6c8a418b10b19c2193b1dc8"
+    },
+    {
+      "path": "/usr/share/omarchy/default/hypr/toggles/single-window-aspect-ratio.lua",
+      "uid": 0,
+      "mode": "0o644",
+      "kind": "file",
+      "executable": false,
+      "sha256": "c89793cc84bcf450116fa817db4a18b6e5e026cd2e138fd7ae595d0aec34d3bd"
+    },
+    {
+      "path": "/",
+      "uid": 0,
+      "mode": "0o555",
+      "kind": "directory"
+    },
+    {
+      "path": "/usr",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "directory"
+    },
+    {
+      "path": "/usr/share",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "directory"
+    },
+    {
+      "path": "/usr/share/omarchy",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "directory"
+    },
+    {
+      "path": "/usr/share/omarchy/bin",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "directory"
+    },
+    {
+      "path": "/usr/share/omarchy/default",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "directory"
+    },
+    {
+      "path": "/usr/share/omarchy/default/hypr",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "directory"
+    },
+    {
+      "path": "/usr/share/omarchy/default/hypr/toggles",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "directory"
+    },
+    {
+      "path": "/usr/bin",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "directory"
+    },
+    {
+      "path": "/usr/bin/omarchy-hyprland-toggle",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "file",
+      "executable": true,
+      "sha256": "32a6ea6bef5529f26f0c0ab836380e1f1ba48b6fb2cbcbea5d0a1a46d37f4f7a"
+    },
+    {
+      "path": "/usr/bin/omarchy-hyprland-window-gaps-toggle",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "file",
+      "executable": true,
+      "sha256": "3f880af65a33717a0fa39b6a24c7642cc203c807f28c6e7bd21c508a57dd0699"
+    },
+    {
+      "path": "/usr/bin/omarchy-hyprland-window-single-square-aspect-toggle",
+      "uid": 0,
+      "mode": "0o755",
+      "kind": "file",
+      "executable": true,
+      "sha256": "61b4dd6c847a0259544f88cf7029604d7c6a9f55fe26089619a816b369cbac62"
+    }
+  ]
+}

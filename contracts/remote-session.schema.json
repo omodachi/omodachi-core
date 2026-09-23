@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/remote-session.schema.json",
+  "title": "The one remote desktop session on a host",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^rs_[0-9a-f]{32}$"
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "backend": {
+      "enum": [
+        "sunshine",
+        "vnc"
+      ]
+    },
+    "mode": {
+      "enum": [
+        "extend",
+        "takeover"
+      ]
+    },
+    "state": {
+      "enum": [
+        "creating",
+        "ready",
+        "resizing",
+        "stopping",
+        "failed",
+        "released"
+      ]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "profile": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "output_id": {
+              "type": "string",
+              "pattern": "^OMODACHI-[0-9a-f]{16}$"
+            },
+            "output_mode_pixels": {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "height": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "width",
+                "height"
+              ],
+              "additionalProperties": false
+            },
+            "output_scale": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "logical_size": {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "height": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "width",
+                "height"
+              ],
+              "additionalProperties": false
+            },
+            "stream_pixels": {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "height": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "width",
+                "height"
+              ],
+              "additionalProperties": false
+            },
+            "fps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 240
+            },
+            "bitrate_kbps": {
+              "type": "integer",
+              "minimum": 64
+            },
+            "codec": {
+              "enum": [
+                "h264",
+                "hevc"
+              ]
+            },
+            "dynamic_range": {
+              "const": "sdr"
+            },
+            "transform": {
+              "const": 0
+            },
+            "strategy": {
+              "const": "headless"
+            }
+          },
+          "required": [
+            "output_id",
+            "output_mode_pixels",
+            "output_scale",
+            "logical_size",
+            "stream_pixels",
+            "fps",
+            "bitrate_kbps",
+            "codec",
+            "dynamic_range",
+            "transform",
+            "strategy"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "output": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "pattern": "^OMODACHI-[0-9a-f]{16}$"
+            },
+            "mode_pixels": {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                },
+                "height": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": [
+                "width",
+                "height"
+              ],
+              "additionalProperties": false
+            },
+            "scale": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "position": {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "integer"
+                },
+                "y": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "name",
+            "mode_pixels",
+            "scale",
+            "position"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "connection": {
+      "anyOf": [
+        {
+          "$ref": "remote-connection.schema.json"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "number"
+    },
+    "last_heartbeat": {
+      "type": "number"
+    },
+    "ttl_seconds": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "placement": {
+      "enum": [
+        "right",
+        "left",
+        "above",
+        "below"
+      ]
+    },
+    "lock_local_input": {
+      "type": "boolean"
+    },
+    "journal_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "quality": {
+      "type": "object",
+      "properties": {
+        "preset": {
+          "enum": [
+            "host",
+            "performance",
+            "balanced",
+            "quality",
+            "custom"
+          ]
+        },
+        "adaptive": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "preset",
+        "adaptive"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "id",
+    "device_id",
+    "backend",
+    "mode",
+    "state",
+    "revision",
+    "profile",
+    "output",
+    "connection",
+    "created_at",
+    "last_heartbeat",
+    "ttl_seconds",
+    "placement",
+    "lock_local_input",
+    "journal_path",
+    "reason",
+    "quality"
+  ],
+  "additionalProperties": false
+}

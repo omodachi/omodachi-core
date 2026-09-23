@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/shortcuts.schema.json",
+  "title": "Host keybinding rows",
+  "description": "GET /v1/shortcuts. One row per record the host's own omarchy-menu-keybindings publishes. A row carries what core would run (`execution`) but never a command a client could send back; invocation names the opaque `action_ref`.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "revision",
+    "source",
+    "available",
+    "reason",
+    "items"
+  ],
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "const": "hyprland"
+    },
+    "available": {
+      "type": "boolean"
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "shortcut_display",
+          "order",
+          "enabled",
+          "disabled_reason",
+          "disabled_reason_detail",
+          "action_ref",
+          "requires_target",
+          "execution",
+          "hidden"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^omodachi\\.shortcut\\.[0-9a-f]{24}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shortcut_display": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "disabled_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "binding_adapter_unavailable",
+              null
+            ]
+          },
+          "disabled_reason_detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "action_ref": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^omodachi\\.shortcut\\.[0-9a-f]{24}$"
+          },
+          "requires_target": {
+            "type": "boolean",
+            "description": "The binding acts on the focused window. A hint only: the row stays enabled, and invoking it with nothing focused answers status `failed` with code `no_focused_window`."
+          },
+          "hidden": {
+            "type": "boolean",
+            "description": "CLIP-1. Leave this row out of a keybindings list by default. True exactly for a row the host publishes with no executable binding, which is a row no client can ever run. A client may offer a switch that shows them anyway; it must not run them."
+          },
+          "execution": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "required": [
+              "kind",
+              "detail"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": [
+                  "exec",
+                  "dispatch",
+                  "eval",
+                  "sendshortcut"
+                ]
+              },
+              "detail": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "enabled": {
+                  "const": false
+                }
+              },
+              "required": [
+                "enabled"
+              ]
+            },
+            "then": {
+              "properties": {
+                "action_ref": {
+                  "type": "null"
+                },
+                "execution": {
+                  "type": "null"
+                },
+                "disabled_reason": {
+                  "const": "binding_adapter_unavailable"
+                },
+                "disabled_reason_detail": {
+                  "type": "string"
+                },
+                "requires_target": {
+                  "const": false
+                },
+                "hidden": {
+                  "const": true
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "action_ref": {
+                  "type": "string"
+                },
+                "execution": {
+                  "type": "object"
+                },
+                "disabled_reason": {
+                  "type": "null"
+                },
+                "disabled_reason_detail": {
+                  "type": "null"
+                },
+                "hidden": {
+                  "const": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}

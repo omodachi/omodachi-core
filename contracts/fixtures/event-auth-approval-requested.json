@@ -1,0 +1,25 @@
+{
+  "seq": 1,
+  "event_id": "evt_00000001",
+  "type": "auth.approval.requested",
+  "device_id": "ipad-fixture",
+  "payload": {
+    "approval_id": "appr_02020202020202020202020202020202",
+    "nonce": "fixture-nonce-3xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "service": "sudo",
+    "service_title": "Administrator command",
+    "user": "alex",
+    "requester": "alex",
+    "tty": "pts/3",
+    "rhost": null,
+    "description": "Administrator command on pts/3",
+    "host_id": "0123456789abcdef0123456789abcdef",
+    "host_name": "omarchy",
+    "requested_at": 1789430400,
+    "expires_at": 1789430445,
+    "timeout_seconds": 45,
+    "device_id": "ipad-fixture"
+  },
+  "ts": 1789430400.0,
+  "contract_revision": "omodachi.v1"
+}

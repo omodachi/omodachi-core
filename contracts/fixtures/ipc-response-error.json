@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "error": "ValueError",
+  "message": "invalid device credential"
+}

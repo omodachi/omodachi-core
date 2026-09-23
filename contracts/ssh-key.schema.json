@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/ssh-key.schema.json",
+  "title": "UX-4 the SSH key this device offers",
+  "description": "PUT /v1/ssh/key. An authenticated device states the public key it is now holding, and the host writes it in place of whatever line that device had. The device is the one on the credential and never a field in the body, so a credential can only ever replace its own line. A reinstalled companion keeps its credential and loses the key it was paired with; without this, the only way back is to pair again, which is the one thing an already-paired device does not think to do.",
+  "type": "object",
+  "required": ["contract_revision", "device_id", "authorized", "changed", "reason",
+               "fingerprint", "removed", "replaced"],
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "The device on this request's credential. It is echoed so the client can see which identity the host authenticated it as, which is the same drift this endpoint exists for."
+    },
+    "authorized": {"const": true},
+    "changed": {
+      "type": "boolean",
+      "description": "False when the host already held exactly this key for this device and nothing was written."
+    },
+    "reason": {
+      "enum": ["added", "replaced", "already_authorized"],
+      "description": "`added` - the device had no line. `replaced` - it had one or more, and they are gone. `already_authorized` - one line, the same key, untouched."
+    },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^SHA256:[A-Za-z0-9+/]{43}$",
+      "description": "The key the host now holds for this device, as `ssh-keygen -lf` and `omodachi-host ssh list` print it."
+    },
+    "removed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 64,
+      "description": "How many of this device's own lines were deleted. Never counts a line this host does not own."
+    },
+    "replaced": {
+      "type": "array",
+      "maxItems": 64,
+      "description": "The fingerprints that stopped working, so the journal says what was taken away and not only what was granted.",
+      "items": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"}
+    }
+  },
+  "additionalProperties": false
+}

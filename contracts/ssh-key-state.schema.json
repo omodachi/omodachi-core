@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/ssh-key-state.schema.json",
+  "title": "UX-4 the SSH key this host holds for one device",
+  "description": "GET /v1/ssh/key. An inventory, never a key: fingerprints only, and only for the device on the request's credential. It exists so a companion can find out that the host's `authorized_keys` line and its own private half have come apart before the terminal fails, rather than after.",
+  "type": "object",
+  "required": ["contract_revision", "device_id", "authorized", "fingerprint", "fingerprints"],
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "The device on this request's credential, echoed. A device that reinstalled can hold a credential issued to an identity other than the one it calls itself, and this is the host's own answer to which one it is."
+    },
+    "authorized": {
+      "type": "boolean",
+      "description": "Whether this host holds any key for this device at all. False is the state a reinstalled device that was never re-paired finds itself in."
+    },
+    "fingerprint": {
+      "type": ["string", "null"],
+      "pattern": "^SHA256:[A-Za-z0-9+/]{43}$",
+      "description": "The newest owned line, which for this module's own lines is the last one in the file. Null when the host holds none."
+    },
+    "fingerprints": {
+      "type": "array",
+      "maxItems": 64,
+      "description": "Every owned line for this device, oldest first. More than one means a drift that `omodachi-host ssh list --prune` cleans up.",
+      "items": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"}
+    }
+  },
+  "additionalProperties": false
+}

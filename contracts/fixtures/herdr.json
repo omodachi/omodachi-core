@@ -1,0 +1,30 @@
+{
+  "server_installed": true,
+  "server_running": true,
+  "socket_available": true,
+  "schema_probe": "available",
+  "supported_kinds": [
+    "claude",
+    "codex",
+    "grok",
+    "hermes",
+    "opencode"
+  ],
+  "agents": [
+    {
+      "agent_id": "default",
+      "kind": "codex",
+      "status": "working",
+      "pane_id": "pane-fixture-01",
+      "pane_available": true,
+      "target": {
+        "agent_id": "default",
+        "pane_id": "pane-fixture-01"
+      }
+    }
+  ],
+  "pane_count": 2,
+  "checked_at": "2026-09-15T00:00:00Z",
+  "diagnostics": [],
+  "contract_revision": "omodachi.v1"
+}

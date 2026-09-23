@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/capabilities.schema.json",
+  "title": "Device-level capabilities",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "sunshine": {
+      "type": "boolean"
+    },
+    "terminal": {
+      "type": "boolean"
+    },
+    "desktop": {
+      "type": "boolean"
+    },
+    "native": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "demo": {
+      "type": "boolean"
+    },
+    "remote_backends": {
+      "type": "object",
+      "properties": {
+        "sunshine": {
+          "type": "object",
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "backend": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "encoder": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transport": {
+              "type": "string"
+            },
+            "audio": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "available"
+          ],
+          "additionalProperties": false
+        },
+        "vnc": {
+          "type": "object",
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "backend": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "encoder": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "transport": {
+              "type": "string"
+            },
+            "audio": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "available"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "sunshine",
+        "vnc"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "contract_revision",
+    "sunshine",
+    "terminal",
+    "desktop",
+    "native"
+  ],
+  "additionalProperties": false
+}

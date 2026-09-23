@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/ipc-envelope.schema.json",
+  "title": "IPC response or event envelope",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "result": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "ok",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "const": false
+        },
+        "error": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "ok",
+        "error",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "event": {
+          "$ref": "events.schema.json"
+        },
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "after_cursor": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Last visible cursor sent on this subscription. Validate equality with the local cursor before accepting a forward event."
+        }
+      },
+      "required": [
+        "event",
+        "instance_id"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

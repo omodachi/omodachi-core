@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/theme.schema.json",
+  "title": "Host theme",
+  "description": "The current Omarchy theme as Omarchy itself rendered it: the palette from the Omodachi template under ~/.config/omarchy/themed, the design tokens from the generated shell.toml backfilled with Omarchy's own defaults, and the wallpaper's digest. No value here is derived by Omodachi.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "name",
+    "mode",
+    "colors",
+    "shell",
+    "background",
+    "revision"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "mode": {
+      "enum": [
+        "dark",
+        "light"
+      ]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "colors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accent",
+        "selection",
+        "muted",
+        "background",
+        "dark_background",
+        "darker_background",
+        "lighter_background",
+        "foreground",
+        "bright_foreground",
+        "light_foreground",
+        "dark_foreground",
+        "red",
+        "yellow",
+        "orange",
+        "green",
+        "cyan",
+        "blue",
+        "magenta",
+        "brown",
+        "bright_red",
+        "bright_yellow",
+        "bright_green",
+        "bright_cyan",
+        "bright_blue",
+        "bright_magenta"
+      ],
+      "properties": {
+        "accent": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "selection": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "muted": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "background": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "dark_background": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "darker_background": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "lighter_background": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "foreground": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "bright_foreground": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "light_foreground": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "dark_foreground": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "red": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "yellow": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "orange": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "green": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "cyan": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "blue": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "magenta": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "brown": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "bright_red": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "bright_yellow": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "bright_green": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "bright_cyan": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "bright_blue": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        },
+        "bright_magenta": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{6}$"
+        }
+      }
+    },
+    "shell": {
+      "type": "object",
+      "description": "Every section of the host's shell.toml; the seven named here always exist.",
+      "required": [
+        "bar",
+        "controls",
+        "spacing",
+        "font",
+        "menu",
+        "popups",
+        "hyprland"
+      ],
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "propertyNames": {
+          "pattern": "^[a-z][a-z0-9-]*$"
+        }
+      }
+    },
+    "background": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "sha256",
+            "bytes",
+            "content_type"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "content_type": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 128
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}

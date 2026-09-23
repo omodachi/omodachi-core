@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/audio-input.schema.json",
+  "title": "Existing-lease microphone WebSocket channel",
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "properties": {
+        "contract_revision": {
+          "const": "omodachi.v1"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "transport": {
+          "const": "websocket"
+        },
+        "endpoint": {
+          "const": "/v1/remote/sessions/{session_id}/audio"
+        },
+        "format": {
+          "const": "s16le"
+        },
+        "rate": {
+          "const": 48000
+        },
+        "channels": {
+          "const": 1
+        },
+        "frame_samples": {
+          "const": 960
+        },
+        "frame_bytes": {
+          "const": 1920
+        },
+        "max_queued_frames": {
+          "const": 3
+        },
+        "reason": {
+          "enum": [
+            "ready",
+            "audio_backend_not_installed",
+            "audio_backend_unavailable",
+            "audio_input_cleanup_pending"
+          ]
+        }
+      },
+      "required": [
+        "contract_revision",
+        "supported",
+        "available",
+        "active",
+        "transport",
+        "endpoint",
+        "format",
+        "rate",
+        "channels",
+        "frame_samples",
+        "frame_bytes",
+        "max_queued_frames",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "begin": {
+      "type": "object",
+      "properties": {
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "format": {
+          "const": "s16le"
+        },
+        "rate": {
+          "const": 48000
+        },
+        "channels": {
+          "const": 1
+        },
+        "frame_samples": {
+          "const": 960
+        }
+      },
+      "required": [
+        "generation",
+        "format",
+        "rate",
+        "channels",
+        "frame_samples"
+      ],
+      "additionalProperties": false
+    },
+    "begun": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "begun"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "format": {
+          "const": "s16le"
+        },
+        "rate": {
+          "const": 48000
+        },
+        "channels": {
+          "const": 1
+        },
+        "frame_samples": {
+          "const": 960
+        },
+        "frame_bytes": {
+          "const": 1920
+        },
+        "max_queued_frames": {
+          "const": 3
+        }
+      },
+      "required": [
+        "type",
+        "generation",
+        "format",
+        "rate",
+        "channels",
+        "frame_samples",
+        "frame_bytes",
+        "max_queued_frames"
+      ],
+      "additionalProperties": false
+    },
+    "accepted": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "accepted"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "type",
+        "generation",
+        "sequence"
+      ],
+      "additionalProperties": false
+    },
+    "rejected": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "rejected"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,95}$"
+        }
+      },
+      "required": [
+        "type",
+        "generation",
+        "sequence",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "end": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "end"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "reason": {
+          "enum": [
+            "user_disabled",
+            "route_changed",
+            "session_end",
+            "disconnected"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "generation"
+      ],
+      "additionalProperties": false
+    },
+    "ended": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "ended"
+        },
+        "generation": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "type",
+        "generation"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

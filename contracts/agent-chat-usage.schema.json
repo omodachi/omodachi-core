@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-usage.schema.json",
+  "title": "Default-agent context and quota usage",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "agent_id": {
+      "const": "default"
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "tokens": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "rate_limits": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tokens",
+        "rate_limits",
+        "model",
+        "effort"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "activeFlags": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "waitingOnApproval",
+              "waitingOnUserInput"
+            ]
+          }
+        },
+        "waiting": {
+          "enum": [
+            "approval",
+            "user_input",
+            null
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "activeFlags",
+        "waiting"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "contract_revision",
+    "agent_id",
+    "usage",
+    "status"
+  ],
+  "additionalProperties": false
+}

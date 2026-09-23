@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/schemas/herdr-status.schema.json",
+  "title": "Read-only Herdr status",
+  "type": "object",
+  "properties": {
+    "server_installed": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "server_running": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "socket_available": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "supported_kinds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "idle",
+              "working",
+              "blocked",
+              "done",
+              "unknown"
+            ]
+          },
+          "pane_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pane_available": {
+            "type": "boolean"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "agent_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pane_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "agent_id",
+              "pane_id"
+            ],
+            "additionalProperties": false
+          },
+          "last_changed_at": {
+            "type": "string",
+            "minLength": 1,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "agent_id",
+          "kind",
+          "status",
+          "pane_id",
+          "pane_available"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "pane_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "checked_at": {
+      "type": "string",
+      "minLength": 1,
+      "format": "date-time"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "schema_probe": {
+      "enum": [
+        "available",
+        "missing",
+        "unreadable",
+        "not_running",
+        "unsupported"
+      ]
+    },
+    "contract_revision": {
+      "const": "omodachi.v1"
+    }
+  },
+  "required": [
+    "server_installed",
+    "server_running",
+    "socket_available",
+    "supported_kinds",
+    "agents",
+    "pane_count",
+    "checked_at",
+    "diagnostics",
+    "schema_probe"
+  ],
+  "additionalProperties": false
+}

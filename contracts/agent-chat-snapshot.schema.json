@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-snapshot.schema.json",
+  "title": "Default-agent chat snapshot",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "identity": {
+      "type": "object",
+      "properties": {
+        "hostID": {
+          "type": "string"
+        },
+        "agentID": {
+          "const": "default"
+        },
+        "provider": {
+          "const": "codex"
+        },
+        "providerSessionID": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hostID",
+        "agentID",
+        "provider",
+        "providerSessionID"
+      ],
+      "additionalProperties": false
+    },
+    "rows": {
+      "type": "array"
+    },
+    "activeTurn": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "acceptedRequestIDs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pendingApprovals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "commandExecution",
+              "fileChange",
+              "permissions",
+              "userInput"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object"
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "accept",
+                "acceptForSession",
+                "decline",
+                "cancel"
+              ]
+            }
+          }
+        },
+        "required": [
+          "request_id",
+          "kind",
+          "summary",
+          "details",
+          "decisions"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "activeFlags": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "waitingOnApproval",
+              "waitingOnUserInput"
+            ]
+          }
+        },
+        "waiting": {
+          "enum": [
+            "approval",
+            "user_input",
+            null
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "activeFlags",
+        "waiting"
+      ],
+      "additionalProperties": false
+    },
+    "usage": {
+      "type": "object",
+      "properties": {
+        "tokens": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "rate_limits": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tokens",
+        "rate_limits",
+        "model",
+        "effort"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "identity",
+    "rows",
+    "activeTurn",
+    "sequence",
+    "acceptedRequestIDs",
+    "pendingApprovals",
+    "status",
+    "usage"
+  ],
+  "additionalProperties": false
+}

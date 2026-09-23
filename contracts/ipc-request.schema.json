@@ -1,0 +1,947 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/ipc-request.schema.json",
+  "title": "Authenticated local IPC request",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "health"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "state"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "capabilities"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "herdr"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "catalog"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "panel.summon"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "view": {
+          "enum": [
+            "overview",
+            "keybindings",
+            "settings"
+          ]
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "events"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "since": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "events.subscribe"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "since": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "actions.invoke"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "catalog_revision": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+            },
+            {
+              "type": "integer",
+              "minimum": 0
+            }
+          ]
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "integer",
+              "boolean"
+            ]
+          },
+          "maxProperties": 16
+        },
+        "state_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspace_binding": {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "instance_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+            }
+          },
+          "required": [
+            "revision",
+            "instance_id"
+          ],
+          "additionalProperties": false
+        },
+        "execution_context": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "surface": {
+                  "const": "omarchy"
+                }
+              },
+              "required": [
+                "surface"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "surface": {
+                  "const": "remote"
+                },
+                "session_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "connection_generation": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "geometry_epoch": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "required": [
+                "surface",
+                "session_id",
+                "connection_generation",
+                "geometry_epoch"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "required": [
+        "op",
+        "token",
+        "entry_id",
+        "request_id",
+        "catalog_revision"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "entry_id": {
+                "const": "trigger.toggle.workspace-layout"
+              }
+            },
+            "required": [
+              "entry_id"
+            ]
+          },
+          "then": {
+            "required": [
+              "state_revision",
+              "params"
+            ],
+            "not": {
+              "required": [
+                "target_token"
+              ]
+            },
+            "properties": {
+              "state_revision": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "params": {
+                "type": "object",
+                "properties": {
+                  "workspace_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10
+                  },
+                  "from_layout": {
+                    "enum": [
+                      "dwindle",
+                      "scrolling"
+                    ]
+                  },
+                  "layout": {
+                    "enum": [
+                      "dwindle",
+                      "scrolling"
+                    ]
+                  }
+                },
+                "required": [
+                  "workspace_id",
+                  "from_layout",
+                  "layout"
+                ],
+                "additionalProperties": false,
+                "not": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "from_layout": {
+                          "const": "dwindle"
+                        },
+                        "layout": {
+                          "const": "dwindle"
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "from_layout": {
+                          "const": "scrolling"
+                        },
+                        "layout": {
+                          "const": "scrolling"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "workspace_binding"
+            ]
+          },
+          "then": {
+            "properties": {
+              "entry_id": {
+                "const": "trigger.toggle.workspace-layout"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "object",
+      "description": "Select a workspace. Exactly one of `workspace_id` and `relative`: `relative` is `e+1`/`e-1` and the host names the neighbour from the collection it publishes, so a client never computes one from a stale snapshot. With a Remote session open the selection acts on the session's own output.",
+      "properties": {
+        "op": {
+          "const": "workspace.select"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workspace_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "relative": {
+          "enum": [
+            "e+1",
+            "e-1"
+          ]
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "workspace_id"
+          ],
+          "not": {
+            "required": [
+              "relative"
+            ]
+          }
+        },
+        {
+          "required": [
+            "relative"
+          ],
+          "not": {
+            "required": [
+              "workspace_id"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "control.wake"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.capabilities"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.status"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.recover"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "op",
+        "token"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.start"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "viewport_points": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "orientation": {
+          "enum": [
+            "portrait",
+            "portrait_upside_down",
+            "landscape_left",
+            "landscape_right"
+          ]
+        },
+        "logical_long_edge": {
+          "type": "number",
+          "minimum": 320,
+          "maximum": 4096
+        },
+        "quality": {
+          "type": "object",
+          "properties": {
+            "max_pixels": {
+              "type": "integer"
+            },
+            "fps": {
+              "type": "integer"
+            },
+            "bitrate_kbps": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "max_pixels",
+            "fps",
+            "bitrate_kbps"
+          ],
+          "additionalProperties": false
+        },
+        "decoder": {
+          "type": "object",
+          "properties": {
+            "max_width": {
+              "type": "integer"
+            },
+            "max_height": {
+              "type": "integer"
+            },
+            "max_pixels": {
+              "type": "integer"
+            },
+            "max_fps": {
+              "type": "integer"
+            },
+            "max_bitrate_kbps": {
+              "type": "integer"
+            },
+            "codecs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "max_width",
+            "max_height",
+            "max_pixels",
+            "max_fps",
+            "max_bitrate_kbps",
+            "codecs"
+          ],
+          "additionalProperties": false
+        },
+        "backend": {
+          "enum": [
+            "sunshine",
+            "vnc"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "extend",
+            "takeover"
+          ]
+        },
+        "placement": {
+          "enum": [
+            "right",
+            "left",
+            "above",
+            "below"
+          ]
+        },
+        "lock_local_input": {
+          "type": "boolean"
+        },
+        "ttl_seconds": {
+          "type": "number"
+        },
+        "quality_preset": {
+          "enum": [
+            "host",
+            "performance",
+            "balanced",
+            "quality",
+            "custom"
+          ]
+        },
+        "adaptive": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "op",
+        "token",
+        "viewport_points",
+        "orientation",
+        "logical_long_edge",
+        "quality",
+        "decoder"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.get"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^rs_[0-9a-f]{32}$"
+        }
+      },
+      "required": [
+        "op",
+        "token",
+        "session_id"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.heartbeat"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^rs_[0-9a-f]{32}$"
+        }
+      },
+      "required": [
+        "op",
+        "token",
+        "session_id"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.stop"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^rs_[0-9a-f]{32}$"
+        }
+      },
+      "required": [
+        "op",
+        "token",
+        "session_id"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.resize"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^rs_[0-9a-f]{32}$"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "viewport_points": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "orientation": {
+          "enum": [
+            "portrait",
+            "portrait_upside_down",
+            "landscape_left",
+            "landscape_right"
+          ]
+        },
+        "logical_long_edge": {
+          "type": "number",
+          "minimum": 320,
+          "maximum": 4096
+        },
+        "quality": {
+          "type": "object",
+          "properties": {
+            "max_pixels": {
+              "type": "integer"
+            },
+            "fps": {
+              "type": "integer"
+            },
+            "bitrate_kbps": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "max_pixels",
+            "fps",
+            "bitrate_kbps"
+          ],
+          "additionalProperties": false
+        },
+        "decoder": {
+          "type": "object",
+          "properties": {
+            "max_width": {
+              "type": "integer"
+            },
+            "max_height": {
+              "type": "integer"
+            },
+            "max_pixels": {
+              "type": "integer"
+            },
+            "max_fps": {
+              "type": "integer"
+            },
+            "max_bitrate_kbps": {
+              "type": "integer"
+            },
+            "codecs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "max_width",
+            "max_height",
+            "max_pixels",
+            "max_fps",
+            "max_bitrate_kbps",
+            "codecs"
+          ],
+          "additionalProperties": false
+        },
+        "quality_preset": {
+          "enum": [
+            "host",
+            "performance",
+            "balanced",
+            "quality",
+            "custom"
+          ]
+        },
+        "adaptive": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "op",
+        "token",
+        "session_id",
+        "expected_revision"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.backend"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^rs_[0-9a-f]{32}$"
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "backend": {
+          "enum": [
+            "sunshine",
+            "vnc"
+          ]
+        }
+      },
+      "required": [
+        "op",
+        "token",
+        "session_id",
+        "expected_revision",
+        "backend"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.presented"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^rs_[0-9a-f]{32}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "decoded_pixels": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "video_rect_points": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "op",
+        "token",
+        "session_id",
+        "revision",
+        "decoded_pixels",
+        "video_rect_points"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

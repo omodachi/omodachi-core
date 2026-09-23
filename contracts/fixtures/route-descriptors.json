@@ -1,0 +1,302 @@
+{
+  "catalog_revision": "3f0af054c4448610",
+  "source_revision": "fcc7fbd06ce6a008",
+  "routes": [
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "fixture-toggle-notifications"
+      ],
+      "entry_id": "trigger.toggle.notifications",
+      "ready": true
+    },
+    {
+      "route": "terminal",
+      "supported": true,
+      "argv": [
+        "printf",
+        "install-demo"
+      ],
+      "entry_id": "install.demo",
+      "ready": true
+    },
+    {
+      "route": "terminal",
+      "supported": true,
+      "argv": [
+        "printf",
+        "update-demo"
+      ],
+      "entry_id": "update.demo",
+      "ready": true
+    },
+    {
+      "route": "terminal",
+      "supported": true,
+      "argv": [
+        "printf",
+        "about-demo"
+      ],
+      "entry_id": "about.demo",
+      "ready": true
+    },
+    {
+      "route": "terminal",
+      "supported": true,
+      "argv": [
+        "printf",
+        "demo"
+      ],
+      "entry_id": "learn.demo",
+      "ready": true
+    },
+    {
+      "route": "native",
+      "supported": true,
+      "native_view": "shortcuts",
+      "entry_id": "learn.keybindings",
+      "ready": true
+    },
+    {
+      "route": "desktop",
+      "supported": true,
+      "entry_id": "omodachi.desktop",
+      "ready": false,
+      "readiness_reason": "capability_unavailable"
+    },
+    {
+      "route": "terminal",
+      "supported": true,
+      "argv": [
+        "herdr",
+        "agent",
+        "attach",
+        "default"
+      ],
+      "entry_id": "omodachi.agent",
+      "ready": true
+    },
+    {
+      "route": "terminal",
+      "supported": true,
+      "argv": [
+        "herdr",
+        "session",
+        "attach",
+        "session-fixture-01"
+      ],
+      "entry_id": "omodachi.herdr",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.select",
+        "1"
+      ],
+      "entry_id": "omodachi.workspace.select.1",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.move",
+        "1"
+      ],
+      "entry_id": "omodachi.workspace.move.1",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.select",
+        "2"
+      ],
+      "entry_id": "omodachi.workspace.select.2",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.move",
+        "2"
+      ],
+      "entry_id": "omodachi.workspace.move.2",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.select",
+        "3"
+      ],
+      "entry_id": "omodachi.workspace.select.3",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.move",
+        "3"
+      ],
+      "entry_id": "omodachi.workspace.move.3",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.select",
+        "4"
+      ],
+      "entry_id": "omodachi.workspace.select.4",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.move",
+        "4"
+      ],
+      "entry_id": "omodachi.workspace.move.4",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.select",
+        "5"
+      ],
+      "entry_id": "omodachi.workspace.select.5",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.move",
+        "5"
+      ],
+      "entry_id": "omodachi.workspace.move.5",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.select",
+        "6"
+      ],
+      "entry_id": "omodachi.workspace.select.6",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.move",
+        "6"
+      ],
+      "entry_id": "omodachi.workspace.move.6",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.select",
+        "7"
+      ],
+      "entry_id": "omodachi.workspace.select.7",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.move",
+        "7"
+      ],
+      "entry_id": "omodachi.workspace.move.7",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.select",
+        "8"
+      ],
+      "entry_id": "omodachi.workspace.select.8",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.move",
+        "8"
+      ],
+      "entry_id": "omodachi.workspace.move.8",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.select",
+        "9"
+      ],
+      "entry_id": "omodachi.workspace.select.9",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.move",
+        "9"
+      ],
+      "entry_id": "omodachi.workspace.move.9",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.select",
+        "10"
+      ],
+      "entry_id": "omodachi.workspace.select.10",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "workspace.move",
+        "10"
+      ],
+      "entry_id": "omodachi.workspace.move.10",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": false,
+      "reason": "route adapter is not registered",
+      "entry_id": "apps.demo",
+      "ready": false,
+      "readiness_reason": "route adapter is not registered"
+    }
+  ],
+  "contract_revision": "omodachi.v1"
+}

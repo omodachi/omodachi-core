@@ -1,0 +1,19 @@
+{
+  "enabled": true,
+  "host_id": "0123456789abcdef0123456789abcdef",
+  "host_name": "omarchy",
+  "device_id": "ipad-fixture",
+  "challenge": "fixture-nonce-4xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "enrolled": true,
+  "keys": [
+    {
+      "device_id": "ipad-fixture",
+      "algorithm": "ecdsa-p256-sha256",
+      "enabled": true,
+      "enrolled_at": 1789430400,
+      "label": "Leo's iPad",
+      "secure_enclave": true
+    }
+  ],
+  "contract_revision": "omodachi.v1"
+}

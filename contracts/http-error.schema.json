@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/http-error.schema.json",
+  "title": "HTTPS resource error",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "description": "CORE-2. Present on a 401 `permission_denied` for a credential the host refused, and nowhere else: which refusal it is, because each has a different next step. `credential_expired` - one approval away from working again (re-pair); `credential_revoked` / `device_purged` - taken back on purpose on the computer; `unknown_credential` - not a credential this host signed (another installation, or a damaged token).",
+          "enum": [
+            "credential_expired",
+            "credential_revoked",
+            "device_purged",
+            "unknown_credential"
+          ]
+        },
+        "detail": {
+          "description": "Bounded, code-specific context. Only the codes remote-api.md documents carry one; every value is a string, an integer or a boolean.",
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 8,
+          "additionalProperties": {
+            "type": [
+              "string",
+              "integer",
+              "boolean"
+            ]
+          }
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "contract_revision",
+    "error"
+  ],
+  "additionalProperties": false
+}

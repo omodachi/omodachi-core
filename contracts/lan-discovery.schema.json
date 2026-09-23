@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/lan-discovery.schema.json",
+  "title": "Untrusted public Companion discovery hint",
+  "type": "object",
+  "properties": {
+    "service_type": {
+      "const": "_omodachi._tcp.local."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63
+    },
+    "server": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.local\\.$"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "addresses": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true
+    },
+    "scheme": {
+      "const": "https"
+    },
+    "path": {
+      "const": "/"
+    },
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "authorization_required": {
+      "const": true
+    },
+    "trust_state": {
+      "const": "unverified"
+    },
+    "pairing_state": {
+      "const": "unknown"
+    },
+    "origin_hint": {
+      "type": "string",
+      "pattern": "^https://[a-z0-9-]+\\.local:[0-9]+$"
+    },
+    "host_id": {
+      "description": "Stable installation identity, or null on a host without one.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "host_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 63
+    },
+    "fingerprint_prefix": {
+      "description": "First 16 hex of the certificate fingerprint. A label for telling hosts apart in a list, never the pinned value; the full fingerprint comes from /health and only a pairing claim turns it into trust.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{16}$"
+    }
+  },
+  "required": [
+    "service_type",
+    "name",
+    "server",
+    "port",
+    "addresses",
+    "scheme",
+    "path",
+    "contract_revision",
+    "authorization_required",
+    "trust_state",
+    "pairing_state",
+    "origin_hint",
+    "host_id",
+    "host_name",
+    "fingerprint_prefix"
+  ],
+  "additionalProperties": false
+}

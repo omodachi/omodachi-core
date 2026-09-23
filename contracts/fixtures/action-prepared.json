@@ -1,0 +1,18 @@
+{
+  "contract_revision": "omodachi.v1",
+  "request_id": "request-fixture-prepared",
+  "entry_id": "omodachi.agent",
+  "status": "prepared",
+  "catalog_revision": "3f0af054c4448610",
+  "route": {
+    "route": "terminal",
+    "supported": true,
+    "argv": [
+      "herdr",
+      "agent",
+      "attach",
+      "default"
+    ],
+    "entry_id": "omodachi.agent"
+  }
+}

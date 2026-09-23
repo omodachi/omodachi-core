@@ -1,0 +1,81 @@
+{
+  "type": "object",
+  "properties": {
+    "available": {
+      "type": "boolean"
+    },
+    "agent_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "snapshot": {
+      "$ref": "schemas/herdr-status.schema.json"
+    },
+    "agent_count_scope": {
+      "enum": [
+        "default_agent_only"
+      ]
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "pane_available": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "idle",
+            "working",
+            "blocked",
+            "done",
+            "unknown"
+          ]
+        },
+        "default_agent": {
+          "$ref": "schemas/default-agent-capabilities.schema.json"
+        },
+        "last_confirmed": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "schemas/default-agent-capabilities.schema.json"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "exists",
+        "pane_available",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "contract_revision": {
+      "const": "omodachi.v1"
+    }
+  },
+  "required": [
+    "contract_revision",
+    "available",
+    "agent_count",
+    "agent_count_scope",
+    "snapshot",
+    "agent"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/herdr-resource.schema.json",
+  "title": "Device Herdr resource"
+}

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "stale_target",
+    "message": "Refresh the catalog and target before invoking."
+  },
+  "contract_revision": "omodachi.v1"
+}

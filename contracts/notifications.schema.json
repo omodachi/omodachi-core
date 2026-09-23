@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/notifications.schema.json",
+  "title": "Mirrored Omarchy notifications",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "notifications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[0-9]{1,16}-[0-9]{1,12}$"
+          },
+          "app": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "glyph": {
+            "type": "string"
+          },
+          "urgency": {
+            "enum": [
+              "low",
+              "normal",
+              "critical"
+            ]
+          },
+          "timestamp": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "has_action": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "app",
+          "summary",
+          "body",
+          "glyph",
+          "urgency",
+          "timestamp",
+          "has_action",
+          "active"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "cursor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "history_limit": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "required": [
+    "contract_revision",
+    "notifications",
+    "cursor",
+    "limit",
+    "history_limit"
+  ],
+  "additionalProperties": false
+}

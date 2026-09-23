@@ -1,0 +1,10 @@
+{
+  "op": "actions.invoke",
+  "token": "fixture-invalid-token-not-a-credential",
+  "entry_id": "omodachi.workspace.move.3",
+  "request_id": "request-fixture-workspace-move",
+  "catalog_revision": "3f0af054c4448610",
+  "params": {},
+  "state_revision": 11,
+  "target_token": "window-token-fixture-01"
+}

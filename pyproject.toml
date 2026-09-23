@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omodachi-core"
+version = "0.2.0"
+description = "Omodachi host hub and protocol primitives"
+requires-python = ">=3.11"
+dependencies = ["aiohttp>=3.12,<4", "zeroconf>=0.151,<0.152"]
+
+[project.optional-dependencies]
+test = ["jsonschema>=4.24,<5"]
+
+[project.scripts]
+omodachid = "omodachi_core.cli:daemon_main"
+omodachi-host = "omodachi_core.cli:host_main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.setuptools.package-data]
+omodachi_core = ["data/*.jsonc", "data/*.json", "data/desktop_launcher/*"]

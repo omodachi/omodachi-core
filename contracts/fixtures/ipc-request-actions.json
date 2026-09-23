@@ -1,0 +1,8 @@
+{
+  "op": "actions.invoke",
+  "token": "fixture-invalid-token-not-a-credential",
+  "entry_id": "omodachi.agent",
+  "request_id": "request-fixture-01",
+  "catalog_revision": "3f0af054c4448610",
+  "params": {}
+}

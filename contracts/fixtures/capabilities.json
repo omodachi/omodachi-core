@@ -1,0 +1,10 @@
+{
+  "contract_revision": "omodachi.v1",
+  "sunshine": false,
+  "terminal": true,
+  "desktop": false,
+  "native": [
+    "shortcuts"
+  ],
+  "demo": true
+}

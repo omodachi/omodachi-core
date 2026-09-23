@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hyprland_instance": "auto",
+  "sunshine_socket": "/run/user/1000/omodachi-sunshine/pairing.sock",
+  "journal_dir": "/home/alex/.local/state/omodachi/remote",
+  "render_density": 2.0,
+  "encoder_limits": {
+    "max_width": 4096,
+    "max_height": 4096,
+    "max_pixels": 16777216,
+    "max_fps": 60,
+    "max_bitrate_kbps": 40000,
+    "width_alignment": 2,
+    "height_alignment": 2,
+    "codecs": [
+      "h264"
+    ]
+  }
+}

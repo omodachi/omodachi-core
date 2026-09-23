@@ -1,0 +1,9 @@
+{
+  "_comment": "CORE-2 \u00a74, re-pinned by STREAM-1b. What this core release installs besides itself, pinned. `sunshine_package` is the managed Sunshine fork build this core was tested against: `url` is a versioned release asset (never releases/latest); `{repository}` is sunshine_package.SUNSHINE_REPOSITORY, so the one owner constant still decides where it lives, `sha256` is what that archive must hash to, `version` is the fork commit it was built from. `satisfied_by` lists fork commits whose installed build the installer accepts as this version without downloading, because nothing between them and `version` changes the runtime. It is empty for 328d231: that commit is the first fork that accepts an HEVC profile and reports `desktop.status.encoders`, so every earlier build (17c6043, e58627a) is a different runtime and must be replaced. `scripts/install_host.py --sunshine-package <url|path>` overrides the pin; `--sunshine-package latest` is the explicit choice of the newest release.",
+  "sunshine_package": {
+    "version": "328d231",
+    "url": "{repository}/releases/download/sunshine-328d231/omodachi-sunshine-328d231-x86_64.tar.zst",
+    "sha256": "0f5a8f0b4e654bde7bac3e82fc878c888b4d5f3011a2d6416a6f067b6dc565d9",
+    "satisfied_by": []
+  }
+}

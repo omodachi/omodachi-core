@@ -1,0 +1,30 @@
+{
+  "omarchy_default_agent": "codex",
+  "omarchy_probe": "available",
+  "herdr_supported_kinds": [
+    "claude",
+    "codex",
+    "grok",
+    "hermes",
+    "opencode"
+  ],
+  "herdr_probe": "available",
+  "default_agent_exists": true,
+  "default_agent_probe": "available",
+  "pane_probe": "available",
+  "agent_id": "default",
+  "pane_id": "pane-fixture-01",
+  "pane_available": true,
+  "agent_status": "blocked",
+  "configured_kind": "codex",
+  "actual_kind": "claude",
+  "kind_mismatch": true,
+  "herdr_available": true,
+  "checked_at": "2026-09-15T00:00:00Z",
+  "diagnostics": [],
+  "configured": true,
+  "kind_supported": true,
+  "ready_to_attach": false,
+  "ready_to_start": false,
+  "contract_revision": "omodachi.v1"
+}

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/route-descriptor.schema.json",
+  "title": "Reviewed route descriptor",
+  "type": "object",
+  "properties": {
+    "route": {
+      "enum": [
+        "host",
+        "terminal",
+        "desktop",
+        "native"
+      ]
+    },
+    "supported": {
+      "type": "boolean"
+    },
+    "argv": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "native_view": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entry_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "command": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ready": {
+      "type": "boolean"
+    },
+    "readiness_reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "confirm": {
+      "const": true,
+      "description": "MENU-4 / Study 04 A-68: the row changes the machine (power and session, erasing, updating, security or boot configuration). A client asks for a second tap before it invokes it. Absent means no confirmation is asked."
+    }
+  },
+  "required": [
+    "route",
+    "supported"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "route": {
+            "const": "native"
+          },
+          "supported": {
+            "const": true
+          }
+        },
+        "required": [
+          "route",
+          "supported"
+        ]
+      },
+      "then": {
+        "required": [
+          "native_view"
+        ]
+      }
+    }
+  ]
+}

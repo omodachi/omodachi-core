@@ -1,0 +1,14 @@
+{
+  "seq": 12,
+  "event_id": "evt_00000012",
+  "type": "panel.summon",
+  "device_id": "device-fixture-redacted",
+  "payload": {
+    "session_id": "rs_0123456789abcdef0123456789abcdef",
+    "revision": 4,
+    "expires_in_seconds": 60.0,
+    "view": "settings"
+  },
+  "ts": 1789430400.0,
+  "contract_revision": "omodachi.v1"
+}

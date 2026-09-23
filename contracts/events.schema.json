@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/events.schema.json",
+  "title": "Device event",
+  "type": "object",
+  "properties": {
+    "seq": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "device_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    },
+    "ts": {
+      "type": "number"
+    },
+    "contract_revision": {
+      "const": "omodachi.v1"
+    }
+  },
+  "required": [
+    "seq",
+    "event_id",
+    "type",
+    "device_id",
+    "payload",
+    "ts"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "not": {
+              "const": "resync.required"
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "seq": {
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "catalog.changed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": [
+              "catalog",
+              "revision"
+            ],
+            "properties": {
+              "catalog": {
+                "type": "object",
+                "description": "Which catalog is current. The rows are read back from GET /v1/state or GET /v1/catalog; PERF-4 took them out of the event so the retained history is not a thousand copies of them.",
+                "required": [
+                  "contract_revision",
+                  "revision",
+                  "source_revision"
+                ],
+                "properties": {
+                  "contract_revision": {
+                    "const": "omodachi.v1"
+                  },
+                  "revision": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_revision": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "resync.required"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": [
+              "since",
+              "cursor",
+              "reason",
+              "snapshot_required",
+              "instance_id"
+            ],
+            "properties": {
+              "since": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cursor": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "snapshot_required": {
+                "const": true
+              },
+              "instance_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "remote.session.changed"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^rs_[0-9a-f]{32}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "state": {
+                "enum": [
+                  "creating",
+                  "ready",
+                  "resizing",
+                  "stopping",
+                  "failed",
+                  "released"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "id",
+              "revision",
+              "state"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "voice.transcript"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "chars": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "text",
+              "chars",
+              "status"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "notification.posted"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "$ref": "notifications.schema.json#/properties/notifications/items"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "panel.summon"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "payload": {
+            "type": "object",
+            "required": [
+              "session_id",
+              "revision",
+              "expires_in_seconds",
+              "view"
+            ],
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "pattern": "^rs_[0-9a-f]{32}$"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "expires_in_seconds": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "view": {
+                "enum": [
+                  "overview",
+                  "keybindings",
+                  "settings"
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "auth.approval.requested"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "AUTH-1 approvals are always addressed. An untargeted approval would be an approval anybody listening could answer."
+          },
+          "payload": {
+            "$ref": "auth-approval.schema.json#/$defs/requested"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "auth.approval.resolved"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "payload": {
+            "$ref": "auth-approval.schema.json#/$defs/resolved"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "clipboard.changed"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "description": "CLIP-1. The host's clipboard changed. The text is not here and never will be: a client that wants it asks GET /v1/clipboard, so the content is not retained in the event history or in any subscriber queue.",
+            "required": [
+              "sequence",
+              "bytes",
+              "mime"
+            ],
+            "properties": {
+              "sequence": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Counts the changes this daemon has announced, so a client that missed one knows it did."
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65536,
+                "description": "The length of the text, which is what a client needs to decide whether to fetch it."
+              },
+              "mime": {
+                "const": "text/plain"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  ]
+}

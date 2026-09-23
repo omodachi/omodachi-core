@@ -1,0 +1,31 @@
+{
+  "provenance": "Exact owned module rows recorded by main Linux no-record probe; includes no recorded audio or private configuration.",
+  "json_modules": [
+    {
+      "name": "module-remap-source",
+      "argument": "source_name=omodachi-mic-g1-bf6858a6076c3d56c0b9fa5e1cd3ca62-source master=omodachi-mic-g1-bf6858a6076c3d56c0b9fa5e1cd3ca62.monitor format=s16le rate=48000 channels=1 channel_map=mono source_properties=device.description=omodachi-mic-g1-bf6858a6076c3d56c0b9fa5e1cd3ca62-source",
+      "usage_counter": "n/a",
+      "properties": {
+        "module.author": "Wim Taymans <wim.taymans@gmail.com>",
+        "module.description": "Remap source channels",
+        "module.usage": "source_name=<name for the source> source_properties=<properties for the source> master=<name of source to filter> master_channel_map=<channel map> format=<sample format> rate=<sample rate> channels=<number of channels> channel_map=<channel map> resample_method=<resampler> remix=<remix channels?>",
+        "module.version": "1.6.8"
+      }
+    },
+    {
+      "name": "module-null-sink",
+      "argument": "sink_name=omodachi-mic-g1-bf6858a6076c3d56c0b9fa5e1cd3ca62 format=s16le rate=48000 channels=1 channel_map=mono sink_properties=device.description=omodachi-mic-g1-bf6858a6076c3d56c0b9fa5e1cd3ca62",
+      "usage_counter": "n/a",
+      "properties": {
+        "module.author": "Wim Taymans <wim.taymans@gmail.com>",
+        "module.description": "A NULL sink",
+        "module.usage": "sink_name=<name of sink> sink_properties=<properties for the sink> format=<sample format> rate=<sample rate> channels=<number of channels> channel_map=<channel map>",
+        "module.version": "1.6.8"
+      }
+    }
+  ],
+  "ids_by_module_name": {
+    "module-remap-source": 536870917,
+    "module-null-sink": 536870918
+  }
+}

@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/schemas/default-agent-capabilities.schema.json",
+  "title": "Read-only default agent capabilities",
+  "type": "object",
+  "properties": {
+    "omarchy_default_agent": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "omarchy_probe": {
+      "enum": [
+        "available",
+        "missing",
+        "unreadable",
+        "not_running",
+        "unsupported"
+      ]
+    },
+    "herdr_supported_kinds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "herdr_probe": {
+      "enum": [
+        "available",
+        "missing",
+        "unreadable",
+        "not_running",
+        "unsupported"
+      ]
+    },
+    "default_agent_exists": {
+      "type": "boolean"
+    },
+    "default_agent_probe": {
+      "enum": [
+        "available",
+        "missing",
+        "unreadable",
+        "not_running",
+        "unsupported"
+      ]
+    },
+    "agent_id": {
+      "const": "default"
+    },
+    "pane_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pane_available": {
+      "type": "boolean"
+    },
+    "pane_probe": {
+      "enum": [
+        "available",
+        "missing",
+        "unreadable",
+        "not_running",
+        "unsupported"
+      ]
+    },
+    "agent_status": {
+      "enum": [
+        "idle",
+        "working",
+        "blocked",
+        "done",
+        "unknown"
+      ]
+    },
+    "configured_kind": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actual_kind": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "kind_mismatch": {
+      "type": "boolean"
+    },
+    "herdr_available": {
+      "type": "boolean"
+    },
+    "checked_at": {
+      "type": "string",
+      "minLength": 1,
+      "format": "date-time"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "configured": {
+      "type": "boolean"
+    },
+    "kind_supported": {
+      "type": "boolean"
+    },
+    "ready_to_attach": {
+      "type": "boolean"
+    },
+    "ready_to_start": {
+      "type": "boolean"
+    },
+    "contract_revision": {
+      "const": "omodachi.v1"
+    }
+  },
+  "required": [
+    "omarchy_default_agent",
+    "omarchy_probe",
+    "herdr_supported_kinds",
+    "herdr_probe",
+    "default_agent_exists",
+    "default_agent_probe",
+    "agent_id",
+    "pane_id",
+    "pane_available",
+    "agent_status",
+    "configured_kind",
+    "actual_kind",
+    "kind_mismatch",
+    "herdr_available",
+    "checked_at",
+    "diagnostics",
+    "configured",
+    "kind_supported",
+    "ready_to_attach",
+    "ready_to_start",
+    "pane_probe"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "pane_available": {
+            "const": true
+          }
+        },
+        "required": [
+          "pane_available"
+        ]
+      },
+      "then": {
+        "properties": {
+          "pane_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "ready_to_attach": {
+            "const": true
+          }
+        },
+        "required": [
+          "ready_to_attach"
+        ]
+      },
+      "then": {
+        "properties": {
+          "default_agent_exists": {
+            "const": true
+          },
+          "pane_available": {
+            "const": true
+          },
+          "kind_supported": {
+            "const": true
+          },
+          "kind_mismatch": {
+            "const": false
+          },
+          "herdr_available": {
+            "const": true
+          }
+        }
+      }
+    }
+  ]
+}

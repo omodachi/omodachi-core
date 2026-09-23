@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-approvals.schema.json",
+  "title": "Pending default-agent approvals",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "agent_id": {
+      "const": "default"
+    },
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "commandExecution",
+              "fileChange",
+              "permissions",
+              "userInput"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object"
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "accept",
+                "acceptForSession",
+                "decline",
+                "cancel"
+              ]
+            }
+          }
+        },
+        "required": [
+          "request_id",
+          "kind",
+          "summary",
+          "details",
+          "decisions"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "contract_revision",
+    "agent_id",
+    "requests"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,9 @@
+{
+  "device_id": "device-fixture-redacted",
+  "credential": "fixture-redacted-device-credential",
+  "issued_at": 1791421200,
+  "credential_expires_at": 1794013200,
+  "renewable_at": 1793408400,
+  "previous_credential_expires_at": 1791507600,
+  "contract_revision": "omodachi.v1"
+}

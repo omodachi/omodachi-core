@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/lan-discovery-config.schema.json",
+  "title": "Explicit offline LAN discovery setup",
+  "type": "object",
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 63
+    },
+    "server_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.local\\.$"
+    },
+    "interface_addresses": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true
+    },
+    "https_origin": {
+      "type": "string",
+      "pattern": "^https://[^/?#]+(?::[1-9][0-9]{0,4})?$"
+    },
+    "wheelhouse": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "display_name",
+    "server_name",
+    "interface_addresses",
+    "https_origin",
+    "wheelhouse"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/fonts.schema.json",
+  "title": "Host fonts",
+  "description": "The monospace family fontconfig resolves on the host, the families it falls back to for the code points that family does not carry, and Omarchy's private icon font. Each row's sha256 is the ETag of GET /v1/fonts/{id}.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "revision",
+    "fonts",
+    "fallback_chain"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "fonts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 24,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "family",
+          "path",
+          "sha256",
+          "bytes",
+          "content_type"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "description": "mono-regular, mono-bold, icons, or fallback-<slug> for a link of fallback_chain.",
+            "type": "string",
+            "pattern": "^(mono-regular|mono-bold|icons|fallback-[a-z][a-z0-9-]{0,31})$"
+          },
+          "role": {
+            "enum": [
+              "mono",
+              "icons",
+              "fallback"
+            ]
+          },
+          "family": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "content_type": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 128
+          }
+        }
+      }
+    },
+    "fallback_chain": {
+      "description": "What fontconfig answers for the code points the matched monospace family does not carry, in the order a client should register them. Probed with fc-match \"monospace:charset=<hex>\" and confirmed with fc-list :charset=, because fc-match matches rather than looks up.",
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": [
+          "coverage",
+          "family",
+          "font",
+          "probes"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "coverage": {
+            "enum": [
+              "symbols",
+              "cjk",
+              "emoji"
+            ]
+          },
+          "family": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "font": {
+            "description": "The id of the row carrying this file, or null when the host will not serve it.",
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^(mono-regular|mono-bold|icons|fallback-[a-z][a-z0-9-]{0,31})$"
+          },
+          "probes": {
+            "description": "The code points this family answered, as U+XXXX.",
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 32,
+            "items": {
+              "type": "string",
+              "pattern": "^U\\+[0-9A-F]{4,6}$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

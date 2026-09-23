@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/remote-connection.schema.json",
+  "title": "How the client reaches the remote screen",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "const": "sunshine"
+        },
+        "host": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "https_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "app_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "output_id": {
+          "type": "string",
+          "pattern": "^OMODACHI-[0-9a-f]{16}$"
+        },
+        "stream_pixels": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "fps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240
+        }
+      },
+      "required": [
+        "backend",
+        "host",
+        "https_port",
+        "app_name",
+        "output_id",
+        "stream_pixels",
+        "fps"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "backend": {
+          "const": "vnc"
+        },
+        "transport": {
+          "const": "wss"
+        },
+        "output_id": {
+          "type": "string",
+          "pattern": "^OMODACHI-[0-9a-f]{16}$"
+        },
+        "framebuffer_pixels": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "additionalProperties": false,
+          "description": "The framebuffer WayVNC settles on: the owned output's buffer pixels (`profile.output_mode_pixels`). Served from the first NewFBSize rect onwards."
+        },
+        "initial_framebuffer_pixels": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "integer",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "additionalProperties": false,
+          "description": "What this session's client will be told in ServerInit. Core settles WayVNC before the client gets a bridge, so this is normally the same as `framebuffer_pixels`; when the host could not settle it, it is the compositor's logical size and the client must follow one NewFBSize correction to `framebuffer_pixels`."
+        },
+        "path": {
+          "description": "The authenticated WebSocket the client opens on the same pinned TLS connection. Binary messages are raw RFB bytes in both directions.",
+          "type": "string",
+          "pattern": "^/v1/remote/sessions/rs_[0-9a-f]{32}/vnc$"
+        }
+      },
+      "required": [
+        "backend",
+        "transport",
+        "path",
+        "output_id",
+        "initial_framebuffer_pixels",
+        "framebuffer_pixels"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

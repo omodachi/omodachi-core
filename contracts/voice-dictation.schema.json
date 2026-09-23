@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/voice-dictation.schema.json",
+  "title": "Result of starting or stopping one dictation",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "state": {
+      "const": "recording"
+    },
+    "target": {
+      "enum": [
+        "client",
+        "host",
+        "both"
+      ]
+    },
+    "source_name": {
+      "const": "omodachi_mic"
+    },
+    "previous_device": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "config_changed": {
+      "type": "boolean"
+    },
+    "text": {
+      "type": "string"
+    },
+    "chars": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "status": {
+      "type": "string"
+    },
+    "delivered_to_host": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "route": {
+      "enum": [
+        "config",
+        "default_source"
+      ]
+    }
+  },
+  "required": [
+    "contract_revision",
+    "target"
+  ],
+  "additionalProperties": false
+}

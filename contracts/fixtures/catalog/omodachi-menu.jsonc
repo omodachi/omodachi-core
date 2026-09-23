@@ -1,0 +1,10 @@
+{
+  "omodachi": {"label": "Omodachi", "icon": "󰣇"},
+  "omodachi.desktop": {"label": "Remote screen", "surface": "desktop"},
+  "omodachi.agent": {"label": "Agent", "surface": "terminal"},
+  "omodachi.herdr": {"label": "Herdr", "surface": "terminal"},
+  "setup.monitors": {
+    "surface": "native:display-settings",
+    "icon": "󰍹",
+  },
+}

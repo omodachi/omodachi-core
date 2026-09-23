@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.local/contracts/pairing-claim.schema.json",
+  "title": "Pairing claim response",
+  "description": "POST /v1/pairing/requests/{id}/claim. On an approved request it returns the device credential together with the host identity the client pins: the certificate fingerprint and the addresses this host answers on. `grants` says which of the three things the one approval covers actually landed, and `ssh` is where the terminal lives so no user has to type it. A pending request returns the same shape without credential fields.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "request_id",
+    "device_id",
+    "device_name",
+    "status",
+    "expires_at",
+    "ssh_public_key",
+    "ssh_fingerprint",
+    "grants",
+    "host_id",
+    "host_name",
+    "tls_fingerprint_sha256",
+    "endpoints",
+    "ssh",
+    "remote_addr"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "request_id": {
+      "type": "string",
+      "pattern": "^pair_[0-9a-f]{32}$"
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "device_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "approved",
+        "rejected",
+        "claimed"
+      ]
+    },
+    "expires_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "credential": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "issued_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "credential_expires_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "host_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "host_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 63
+    },
+    "tls_fingerprint_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "endpoints": {
+      "description": "Every non-loopback address the daemon answers on, with its bound port.",
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": [
+          "host",
+          "port"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 45
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        }
+      }
+    },
+    "ssh_public_key": {
+      "description": "The single-line OpenSSH public key this request carried, if any.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 16384
+    },
+    "ssh_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
+    },
+    "grants": {
+      "description": "One approval, three grants. `companion` is this credential, `media` the Sunshine streaming certificate, `ssh` the authorized_keys line.",
+      "type": "object",
+      "required": [
+        "companion",
+        "media",
+        "ssh"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "companion": {
+          "type": "boolean"
+        },
+        "media": {
+          "type": "boolean"
+        },
+        "ssh": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ssh": {
+      "description": "Where this host's terminal is. The client fills its SSH surface from here instead of asking.",
+      "type": "object",
+      "required": [
+        "user",
+        "host",
+        "port"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "user": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "host": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "remote_addr": {
+      "description": "The peer address the request arrived from, shown to whoever approves it. Null when the host could not read one. It is never authorization.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 45
+    }
+  }
+}

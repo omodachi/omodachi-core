@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/voice-capabilities.schema.json",
+  "title": "Voice uplink, dictation and level capabilities",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "voice_uplink_enabled": {
+      "type": "boolean"
+    },
+    "uplink": {
+      "type": "object",
+      "properties": {
+        "supported": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "transport": {
+          "const": "websocket"
+        },
+        "endpoint": {
+          "const": "/v1/voice/uplink"
+        },
+        "source_name": {
+          "const": "omodachi_mic"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "const": "s16le"
+        },
+        "rate": {
+          "const": 48000
+        },
+        "channels": {
+          "const": 1
+        },
+        "frame_samples": {
+          "const": 960
+        },
+        "frame_bytes": {
+          "const": 1920
+        },
+        "max_queued_frames": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "supported",
+        "available",
+        "active",
+        "transport",
+        "endpoint",
+        "source_name",
+        "reason",
+        "format",
+        "rate",
+        "channels",
+        "frame_samples",
+        "frame_bytes",
+        "max_queued_frames"
+      ],
+      "additionalProperties": false
+    },
+    "dictation": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "client",
+              "host",
+              "both"
+            ]
+          }
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "route": {
+          "enum": [
+            "config",
+            "default_source"
+          ]
+        }
+      },
+      "required": [
+        "available",
+        "active",
+        "targets",
+        "reason",
+        "route"
+      ],
+      "additionalProperties": false
+    },
+    "levels": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "hz": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "available",
+        "hz"
+      ],
+      "additionalProperties": false
+    },
+    "voxtype": {
+      "type": "object",
+      "properties": {
+        "installed": {
+          "type": "boolean"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "wait_supported": {
+          "type": "boolean"
+        },
+        "service_active": {
+          "type": "boolean"
+        },
+        "state": {
+          "enum": [
+            "idle",
+            "recording",
+            "transcribing",
+            null
+          ]
+        },
+        "device": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_name": {
+          "const": "omodachi_mic"
+        },
+        "levels": {
+          "type": "boolean"
+        },
+        "install_command": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "names_sources": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "installed",
+        "supported",
+        "wait_supported",
+        "service_active",
+        "state",
+        "device",
+        "source_name",
+        "levels",
+        "install_command",
+        "reason",
+        "devices",
+        "names_sources"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "contract_revision",
+    "voice_uplink_enabled",
+    "uplink",
+    "dictation",
+    "levels",
+    "voxtype"
+  ],
+  "additionalProperties": false
+}

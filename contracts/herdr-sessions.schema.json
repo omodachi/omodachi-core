@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/herdr-sessions.schema.json",
+  "title": "Herdr sessions",
+  "description": "Every Herdr session on the host, as `herdr session list --json` enumerates them, with the shape each one's own `api snapshot` reports and the one this device is looking at.",
+  "type": "object",
+  "required": ["contract_revision", "selected", "owned", "sessions"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "selected": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+    "owned": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+    "sessions": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "required": ["name", "running", "owned", "herdr_default", "readable",
+                     "workspaces", "tabs", "panes", "agents", "protocol", "version"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+          "running": {"type": "boolean"},
+          "owned": {"type": "boolean"},
+          "herdr_default": {"type": "boolean"},
+          "readable": {"type": "boolean"},
+          "workspaces": {"type": ["integer", "null"], "minimum": 0},
+          "tabs": {"type": ["integer", "null"], "minimum": 0},
+          "panes": {"type": ["integer", "null"], "minimum": 0},
+          "agents": {"type": ["integer", "null"], "minimum": 0},
+          "protocol": {"type": ["integer", "null"], "minimum": 0},
+          "version": {"type": ["string", "null"], "maxLength": 64}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.local/contracts/health.schema.json",
+  "title": "Unauthenticated host health",
+  "description": "GET /health and the IPC health op. It carries no device data. The fingerprint is the trust anchor a companion pins when a pairing claim succeeds; reading it here proves nothing on its own. `pairing.mode` is the one word a companion needs before it taps: `open` means a request needs no invitation, `invite` means this host has been locked and the app asks for the 43-character one-shot.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "service",
+    "sunshine_required",
+    "host_id",
+    "tls_fingerprint_sha256",
+    "pairing",
+    "resources"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "service": {
+      "const": "omodachid"
+    },
+    "sunshine_required": {
+      "type": "boolean"
+    },
+    "host_id": {
+      "description": "Stable per-installation identity; null before the host identity is installed.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "tls_fingerprint_sha256": {
+      "description": "SHA-256 over the served certificate DER, lowercase hex; null when the daemon serves no certificate.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "pairing": {
+      "description": "How this host answers a pairing request that carries no invitation. `open` accepts it as pending, `invite` refuses it with pairing_invitation_required. Reading this authorizes nothing: approval is still a local, same-UID decision.",
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "open",
+            "invite"
+          ]
+        }
+      }
+    },
+    "resources": {
+      "description": "PERF-4 §0: what the daemon is holding. Null on a host too old to answer, and any individual reading is null where the platform does not expose it. It is a reading only; nothing acts on it.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "started_at",
+        "uptime_seconds",
+        "rss_bytes",
+        "open_files",
+        "asyncio_tasks",
+        "threads",
+        "event_history",
+        "event_subscribers",
+        "event_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "started_at": {
+          "type": "number"
+        },
+        "uptime_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "rss_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "open_files": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "asyncio_tasks": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "threads": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "event_history": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "event_subscribers": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "event_cursor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "condition_shells_total": {
+          "description": "MENU-3: menu-condition shells spawned since start; null without the condition engine (demo).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "condition_shells_5m": {
+          "description": "MENU-3: menu-condition shells spawned in the last five minutes; 0 while nothing happens.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

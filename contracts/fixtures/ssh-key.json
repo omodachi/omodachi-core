@@ -1,0 +1,12 @@
+{
+  "contract_revision": "omodachi.v1",
+  "device_id": "device-fixture-redacted",
+  "authorized": true,
+  "changed": true,
+  "reason": "replaced",
+  "fingerprint": "SHA256:oIVTIburEfZKUwOmv9YkLGMk4rLhYLrW27NcxmLbxTU",
+  "removed": 1,
+  "replaced": [
+    "SHA256:ZkAslGjFiUHdGf/WUL8rQvkib4PTvQatUV0OUQSncCA"
+  ]
+}

@@ -1,0 +1,468 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/state.schema.json",
+  "title": "Device-level state snapshot",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "event_cursor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "instance_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "device_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "host": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "connected": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "fixture",
+            "local"
+          ]
+        },
+        "graphical_state": {
+          "enum": [
+            "fixture",
+            "available",
+            "unavailable"
+          ]
+        },
+        "catalog_stale": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "connected"
+      ],
+      "additionalProperties": false
+    },
+    "workspace": {
+      "type": "object",
+      "properties": {
+        "active": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label",
+              "active",
+              "window_count",
+              "occupied",
+              "persistent",
+              "select_entry_id",
+              "move_entry_id"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2147483647
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "active": {
+                "type": "boolean"
+              },
+              "window_count": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 10000
+              },
+              "occupied": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "persistent": {
+                "type": "boolean",
+                "description": "Part of the fixed 1-5 set the official bar always draws."
+              },
+              "select_entry_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "pattern": "^omodachi\\.workspace\\.select\\.(?:[1-9]|10)$"
+              },
+              "move_entry_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "pattern": "^omodachi\\.workspace\\.move\\.(?:[1-9]|10)$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "layout_binding": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                "instance_id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+                },
+                "workspace_id": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10
+                },
+                "layout": {
+                  "enum": [
+                    "dwindle",
+                    "scrolling"
+                  ]
+                }
+              },
+              "required": [
+                "workspace_id",
+                "layout",
+                "revision",
+                "instance_id"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "active"
+      ],
+      "additionalProperties": false
+    },
+    "focus": {
+      "type": "object",
+      "properties": {
+        "window": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "app_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "app_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "icon": {
+          "description": "The focused window's icon as its desktop entry declares it. An XDG icon name or an absolute path is fetched from GET /v1/icons/{name}.",
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1024
+        },
+        "icon_kind": {
+          "enum": [
+            "glyph",
+            "xdg",
+            "path",
+            "none"
+          ]
+        }
+      },
+      "required": [
+        "window"
+      ],
+      "additionalProperties": false
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "pane_available": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "idle",
+            "working",
+            "blocked",
+            "done",
+            "unknown",
+            "waiting_on_approval",
+            "waiting_on_user_input"
+          ]
+        },
+        "default_agent": {
+          "$ref": "schemas/default-agent-capabilities.schema.json"
+        },
+        "last_confirmed": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "schemas/default-agent-capabilities.schema.json"
+            }
+          ]
+        },
+        "chat": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "status": {
+              "$ref": "agent-chat-snapshot.schema.json#/properties/status"
+            },
+            "pending_approvals": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "status",
+            "pending_approvals"
+          ],
+          "additionalProperties": false
+        },
+        "usage": {
+          "$ref": "agent-chat-snapshot.schema.json#/properties/usage"
+        }
+      },
+      "required": [
+        "kind",
+        "exists",
+        "pane_available",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "herdr": {
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "agent_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "snapshot": {
+          "$ref": "schemas/herdr-status.schema.json"
+        },
+        "agent_count_scope": {
+          "enum": [
+            "default_agent_only"
+          ]
+        }
+      },
+      "required": [
+        "available",
+        "agent_count"
+      ],
+      "additionalProperties": false
+    },
+    "notifications": {
+      "type": "object",
+      "properties": {
+        "dnd": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "dnd"
+      ],
+      "additionalProperties": false
+    },
+    "remote": {
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "enum": [
+            "offline",
+            "creating",
+            "ready",
+            "resizing",
+            "stopping",
+            "failed",
+            "released"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "extend",
+            "takeover",
+            null
+          ]
+        },
+        "backend": {
+          "enum": [
+            "sunshine",
+            "vnc",
+            null
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "session_id",
+        "state",
+        "mode",
+        "backend",
+        "revision"
+      ],
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "$ref": "capabilities.schema.json"
+    },
+    "catalog": {
+      "anyOf": [
+        {
+          "$ref": "catalog.schema.json"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "revision": {
+              "type": "null"
+            },
+            "entries": {
+              "type": "array",
+              "items": {},
+              "maxItems": 0
+            }
+          },
+          "required": [
+            "revision",
+            "entries"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "bar": {
+      "$ref": "bar.schema.json"
+    },
+    "remote_bar": {
+      "$ref": "remote-bar.schema.json"
+    },
+    "wake": {
+      "type": "object",
+      "required": [
+        "screensaver_active",
+        "display_asleep",
+        "locked"
+      ],
+      "properties": {
+        "screensaver_active": {
+          "type": "boolean"
+        },
+        "display_asleep": {
+          "type": "boolean"
+        },
+        "locked": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "wake_pending": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "contract_revision",
+    "revision",
+    "event_cursor",
+    "instance_id",
+    "device_id",
+    "host",
+    "workspace",
+    "focus",
+    "agent",
+    "herdr",
+    "capabilities",
+    "catalog",
+    "remote",
+    "notifications"
+  ],
+  "additionalProperties": false
+}

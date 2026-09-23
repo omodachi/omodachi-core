@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.local/contracts/pairing-renew.schema.json",
+  "title": "Pairing renewal response",
+  "description": "POST /v1/pairing/renew (CORE-2 \u00a71), body `{}`. Trades a credential in the last week of its life (from `renewable_at` in GET /v1/pairing/credential) for a new one. The credential that was presented keeps working until `previous_credential_expires_at` (24 h grace) so a lost reply costs nothing. Refusals: 401 `permission_denied` with `error.reason` for a revoked, purged, expired or unknown credential (renewal is never a way back in); 409 `credential_renewal_not_due` with `detail.expires_at` and `detail.renewable_at` before the window; 409 `plugin_credential` for the host panel's own credential.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "device_id",
+    "credential",
+    "issued_at",
+    "credential_expires_at",
+    "renewable_at",
+    "previous_credential_expires_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "credential": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "issued_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "credential_expires_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "renewable_at": {
+      "type": "integer"
+    },
+    "previous_credential_expires_at": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}

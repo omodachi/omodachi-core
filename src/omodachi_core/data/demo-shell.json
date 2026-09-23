@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "_fixture": "Synthetic Omodachi demo using the verified Omarchy v4.0.3 shell.json shape. omodachi.stream is a project-defined semantic slot, not an upstream installed widget.",
+  "bar": {
+    "id": "omarchy.bar",
+    "position": "top",
+    "centerAnchor": "omarchy.clock",
+    "layout": {
+      "left": [
+        {"id": "omarchy.menu"},
+        {"id": "omarchy.workspaces"},
+        {"id": "omarchy.active-window", "maxWidth": 280}
+      ],
+      "center": [
+        {"id": "omarchy.clock", "format": "HH:mm"}
+      ],
+      "right": [
+        {"id": "omarchy.tray"},
+        {"id": "omarchy.agents"},
+        {"id": "omarchy.network"},
+        {"id": "omarchy.audio"},
+        {"id": "omarchy.power"},
+        {"id": "omodachi.stream"}
+      ]
+    }
+  },
+  "plugins": []
+}

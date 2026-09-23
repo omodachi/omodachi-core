@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/notifications-dnd.schema.json",
+  "title": "Do-not-disturb state",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "dnd": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "contract_revision",
+    "dnd"
+  ],
+  "additionalProperties": false
+}

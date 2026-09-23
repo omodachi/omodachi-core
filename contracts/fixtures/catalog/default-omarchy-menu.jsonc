@@ -1,0 +1,23 @@
+{
+  // Minimal representative Omarchy menu fixture
+  "apps": {"label": "Apps", "icon": "󰀻"},
+  "trigger": {"label": "Trigger", "icon": "󰓅"},
+  "trigger.toggle.notifications": {
+    "label": "Notifications",
+    "icon": "󰂚",
+    "aliases": ["notify", "alerts"],
+    "action": "omarchy-toggle-notifications",
+    "checked": "omarchy-state is-set notifications",
+  },
+  "learn.herdr-keybindings": {
+    "label": "Herdr keybindings",
+    "icon": "󰌌",
+    "action": "omarchy-launch-terminal herdr keybindings",
+    "when": "command -v herdr",
+    "provider": {"kind": "static"},
+  },
+  "trigger.fixture-host": {
+    "label": "Notifications (host route fixture)",
+    "action": "omarchy-toggle-notifications",
+  },
+}

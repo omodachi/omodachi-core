@@ -1,0 +1,10 @@
+{
+  "error": {
+    "code": "icon_not_found",
+    "message": "icon_not_found",
+    "detail": {
+      "fallback": "application"
+    }
+  },
+  "contract_revision": "omodachi.v1"
+}

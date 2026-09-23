@@ -1,0 +1,9 @@
+{
+  "contract_revision": "omodachi.v1",
+  "device_id": "device-fixture-redacted",
+  "authorized": true,
+  "fingerprint": "SHA256:oIVTIburEfZKUwOmv9YkLGMk4rLhYLrW27NcxmLbxTU",
+  "fingerprints": [
+    "SHA256:oIVTIburEfZKUwOmv9YkLGMk4rLhYLrW27NcxmLbxTU"
+  ]
+}

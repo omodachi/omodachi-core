@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/auth-keys.schema.json",
+  "title": "AUTH-1 enrolled approval keys",
+  "description": "GET /v1/auth/keys. Shows both of AUTH-1's switches: `enabled` is the host preference, and each key carries the device's own. A public key is never returned - the list is an inventory, not a key distribution point.",
+  "type": "object",
+  "required": ["contract_revision", "enabled", "host_id", "host_name", "device_id", "challenge",
+               "enrolled", "keys"],
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "enabled": {
+      "type": "boolean",
+      "description": "The host's `biometric_auth` preference. False means no approval is ever raised, whatever any device has registered."
+    },
+    "host_id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "host_name": {"type": "string", "minLength": 1, "maxLength": 128},
+    "device_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "challenge": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$",
+      "description": "One-shot, 300 s, per device. Enrolling signs it, and it is spent whether or not the signature was good."
+    },
+    "enrolled": {"type": "boolean"},
+    "keys": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "required": ["device_id", "label", "enrolled_at", "secure_enclave", "algorithm", "enabled"],
+        "properties": {
+          "device_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "label": {"type": "string", "minLength": 1, "maxLength": 64},
+          "enrolled_at": {"type": "integer", "minimum": 0},
+          "secure_enclave": {"type": "boolean"},
+          "algorithm": {"const": "ecdsa-p256-sha256"},
+          "enabled": {
+            "type": "boolean",
+            "description": "The device's own switch, as the device reported it. A key with this false is registered and not in any audience."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

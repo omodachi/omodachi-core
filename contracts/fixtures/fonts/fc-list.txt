@@ -1,0 +1,4 @@
+contracts/fixtures/fonts/FixtureMono-Italic.ttf: FixtureMono Nerd Font,FixtureMono NF:style=Italic
+contracts/fixtures/fonts/FixtureMono-Regular.ttf: FixtureMono Nerd Font,FixtureMono NF:style=Regular
+contracts/fixtures/fonts/FixtureMono-Bold.ttf: FixtureMono Nerd Font,FixtureMono NF:style=Bold
+contracts/fixtures/fonts/Other-Regular.ttf: Other Mono:style=Regular

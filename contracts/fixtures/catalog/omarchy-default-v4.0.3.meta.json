@@ -1,0 +1,10 @@
+{
+  "source_path": "omodachi-web/docs/design-research/source-evidence/omarchy/default/omarchy/omarchy-menu.jsonc",
+  "source_revision": "omarchy-v4.0.3",
+  "sha256": "be045265428df0facabedd3bb9f28d45792b209e9ff847a1ea92d60fc3c310b8",
+  "bytes": 54160,
+  "copied_at": "2026-09-15",
+  "execution": "never; catalog/route fixture only",
+  "source_commit": "2fbac0c8e88eca704af1650ce721a494bd11a3d0",
+  "provenance_file": "omodachi-web/docs/design-research/source-evidence/controls-provenance.json"
+}

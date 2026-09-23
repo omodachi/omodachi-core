@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/notification-action.schema.json",
+  "title": "Result of invoking or dismissing one notification",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "id": {
+      "type": "string"
+    },
+    "action": {
+      "enum": [
+        "invoke",
+        "dismiss"
+      ]
+    },
+    "result": {
+      "enum": [
+        "ok",
+        "none"
+      ]
+    }
+  },
+  "required": [
+    "contract_revision",
+    "id",
+    "action",
+    "result"
+  ],
+  "additionalProperties": false
+}

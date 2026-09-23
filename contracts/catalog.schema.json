@@ -1,0 +1,419 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/catalog.schema.json",
+  "title": "Single merged catalog",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parent": {
+            "type": "string",
+            "minLength": 0
+          },
+          "kind": {
+            "enum": [
+              "menu",
+              "action",
+              "link",
+              "app"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "minLength": 0
+          },
+          "icon": {
+            "type": "string",
+            "minLength": 0
+          },
+          "iconFont": {
+            "type": "string",
+            "minLength": 0
+          },
+          "icon_kind": {
+            "description": "What `icon` holds: a drawable code point, an XDG icon name, an absolute path, or nothing. A name or a path is fetched as bytes from GET /v1/icons/{name}.",
+            "enum": [
+              "glyph",
+              "xdg",
+              "path",
+              "none"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 0
+          },
+          "description": {
+            "type": "string",
+            "minLength": 0
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "action": {
+            "type": "string",
+            "minLength": 0
+          },
+          "target": {
+            "type": "string",
+            "minLength": 0
+          },
+          "provider": {
+            "type": [
+              "string",
+              "object"
+            ]
+          },
+          "when": {
+            "type": "string",
+            "minLength": 0
+          },
+          "checked": {
+            "type": "string",
+            "minLength": 0
+          },
+          "surface": {
+            "type": "string",
+            "pattern": "^(host|terminal|desktop|native:[a-z][a-z0-9-]*)$"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "providerMenu": {
+            "type": "string",
+            "minLength": 1
+          },
+          "conditions": {
+            "type": "object",
+            "properties": {
+              "when": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "available",
+                      "unavailable",
+                      "unknown"
+                    ]
+                  },
+                  "value": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "status",
+                  "value"
+                ],
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "status": {
+                          "const": "unavailable"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "value": {
+                          "type": "null"
+                        }
+                      },
+                      "required": [
+                        "reason"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "status": {
+                          "const": "unknown"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "value": {
+                          "type": "null"
+                        }
+                      },
+                      "required": [
+                        "reason"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "checked": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "available",
+                      "unavailable",
+                      "unknown"
+                    ]
+                  },
+                  "value": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "status",
+                  "value"
+                ],
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "status": {
+                          "const": "unavailable"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "value": {
+                          "type": "null"
+                        }
+                      },
+                      "required": [
+                        "reason"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "status": {
+                          "const": "unknown"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "value": {
+                          "type": "null"
+                        }
+                      },
+                      "required": [
+                        "reason"
+                      ]
+                    }
+                  }
+                ]
+              },
+              "disabled": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "available",
+                      "unavailable",
+                      "unknown"
+                    ]
+                  },
+                  "value": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "status",
+                  "value"
+                ],
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "status": {
+                          "const": "unavailable"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "value": {
+                          "type": "null"
+                        }
+                      },
+                      "required": [
+                        "reason"
+                      ]
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "status": {
+                          "const": "unknown"
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "value": {
+                          "type": "null"
+                        }
+                      },
+                      "required": [
+                        "reason"
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "required": [
+              "when",
+              "checked"
+            ],
+            "additionalProperties": false
+          },
+          "visible": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "checked_state": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "provider_state": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "enum": [
+                  "available",
+                  "unavailable"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "row_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          "route": {
+            "$ref": "route-descriptor.schema.json"
+          },
+          "workspace": {
+            "type": "object",
+            "required": [
+              "id",
+              "operation"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              },
+              "operation": {
+                "enum": [
+                  "select",
+                  "move_focused"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "disabled": {
+            "type": "string",
+            "minLength": 0,
+            "description": "MENU-3: optional bash expression; true greys the row (route.readiness_reason condition_disabled)."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "parent_id",
+          "label",
+          "icon",
+          "iconFont",
+          "aliases",
+          "action",
+          "target",
+          "provider",
+          "when",
+          "checked",
+          "icon_kind"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "query": {
+      "type": "string",
+      "maxLength": 128
+    }
+  },
+  "required": [
+    "revision",
+    "entries"
+  ],
+  "additionalProperties": false
+}

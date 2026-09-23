@@ -1,0 +1,36 @@
+{
+  "provenance": "omodachi-core/docs/owned-audio-node-relationship-main-2026-09-17.json",
+  "reader_started": false,
+  "pcm_sent": false,
+  "owned": {
+    "session_nonce": "49aed8517806d178c693b6aeb6378a35",
+    "sink_name": "omodachi-metaprobe-g1-49aed8517806d178c693b6aeb6378a35",
+    "source_name": "omodachi-metaprobe-g1-49aed8517806d178c693b6aeb6378a35-source",
+    "sink_index": 10554,
+    "source_index": 10559,
+    "sink_module_id": 536870916,
+    "remap_module_id": 536870917
+  },
+  "sinks": [
+    {
+      "index": 10554,
+      "name": "omodachi-metaprobe-g1-49aed8517806d178c693b6aeb6378a35",
+      "owner_module": 536870916,
+      "monitor_source": "omodachi-metaprobe-g1-49aed8517806d178c693b6aeb6378a35.monitor"
+    }
+  ],
+  "sources": [
+    {
+      "index": 10554,
+      "name": "omodachi-metaprobe-g1-49aed8517806d178c693b6aeb6378a35.monitor",
+      "owner_module": 536870916,
+      "monitor_source": "omodachi-metaprobe-g1-49aed8517806d178c693b6aeb6378a35"
+    },
+    {
+      "index": 10559,
+      "name": "omodachi-metaprobe-g1-49aed8517806d178c693b6aeb6378a35-source",
+      "owner_module": 536870917,
+      "monitor_source": ""
+    }
+  ]
+}

@@ -1,0 +1,317 @@
+{
+  "omodachi": {
+    "label": "Omodachi",
+    "icon": ""
+  },
+  "omodachi.desktop": {
+    "label": "Remote screen",
+    "surface": "desktop"
+  },
+  "omodachi.agent": {
+    "label": "Agent",
+    "surface": "terminal"
+  },
+  "omodachi.herdr": {
+    "label": "Herdr",
+    "surface": "terminal"
+  },
+  "omodachi.workspace": {
+    "label": "Workspaces",
+    "aliases": [
+      "workspace",
+      "ws"
+    ]
+  },
+  "omodachi.workspace.select": {
+    "label": "Switch workspace"
+  },
+  "omodachi.workspace.move": {
+    "label": "Move focused window"
+  },
+  "omodachi.workspace.select.1": {
+    "label": "Workspace 1",
+    "aliases": [
+      "1",
+      "workspace 1",
+      "ws 1"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace select 1",
+    "workspace": {
+      "id": 1,
+      "operation": "select"
+    }
+  },
+  "omodachi.workspace.move.1": {
+    "label": "Move focused window to Workspace 1",
+    "aliases": [
+      "move to 1",
+      "move workspace 1"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace move-focused 1",
+    "when": "omodachi-focus-available",
+    "workspace": {
+      "id": 1,
+      "operation": "move_focused"
+    }
+  },
+  "omodachi.workspace.select.2": {
+    "label": "Workspace 2",
+    "aliases": [
+      "2",
+      "workspace 2",
+      "ws 2"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace select 2",
+    "workspace": {
+      "id": 2,
+      "operation": "select"
+    }
+  },
+  "omodachi.workspace.move.2": {
+    "label": "Move focused window to Workspace 2",
+    "aliases": [
+      "move to 2",
+      "move workspace 2"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace move-focused 2",
+    "when": "omodachi-focus-available",
+    "workspace": {
+      "id": 2,
+      "operation": "move_focused"
+    }
+  },
+  "omodachi.workspace.select.3": {
+    "label": "Workspace 3",
+    "aliases": [
+      "3",
+      "workspace 3",
+      "ws 3"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace select 3",
+    "workspace": {
+      "id": 3,
+      "operation": "select"
+    }
+  },
+  "omodachi.workspace.move.3": {
+    "label": "Move focused window to Workspace 3",
+    "aliases": [
+      "move to 3",
+      "move workspace 3"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace move-focused 3",
+    "when": "omodachi-focus-available",
+    "workspace": {
+      "id": 3,
+      "operation": "move_focused"
+    }
+  },
+  "omodachi.workspace.select.4": {
+    "label": "Workspace 4",
+    "aliases": [
+      "4",
+      "workspace 4",
+      "ws 4"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace select 4",
+    "workspace": {
+      "id": 4,
+      "operation": "select"
+    }
+  },
+  "omodachi.workspace.move.4": {
+    "label": "Move focused window to Workspace 4",
+    "aliases": [
+      "move to 4",
+      "move workspace 4"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace move-focused 4",
+    "when": "omodachi-focus-available",
+    "workspace": {
+      "id": 4,
+      "operation": "move_focused"
+    }
+  },
+  "omodachi.workspace.select.5": {
+    "label": "Workspace 5",
+    "aliases": [
+      "5",
+      "workspace 5",
+      "ws 5"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace select 5",
+    "workspace": {
+      "id": 5,
+      "operation": "select"
+    }
+  },
+  "omodachi.workspace.move.5": {
+    "label": "Move focused window to Workspace 5",
+    "aliases": [
+      "move to 5",
+      "move workspace 5"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace move-focused 5",
+    "when": "omodachi-focus-available",
+    "workspace": {
+      "id": 5,
+      "operation": "move_focused"
+    }
+  },
+  "omodachi.workspace.select.6": {
+    "label": "Workspace 6",
+    "aliases": [
+      "6",
+      "workspace 6",
+      "ws 6"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace select 6",
+    "workspace": {
+      "id": 6,
+      "operation": "select"
+    }
+  },
+  "omodachi.workspace.move.6": {
+    "label": "Move focused window to Workspace 6",
+    "aliases": [
+      "move to 6",
+      "move workspace 6"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace move-focused 6",
+    "when": "omodachi-focus-available",
+    "workspace": {
+      "id": 6,
+      "operation": "move_focused"
+    }
+  },
+  "omodachi.workspace.select.7": {
+    "label": "Workspace 7",
+    "aliases": [
+      "7",
+      "workspace 7",
+      "ws 7"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace select 7",
+    "workspace": {
+      "id": 7,
+      "operation": "select"
+    }
+  },
+  "omodachi.workspace.move.7": {
+    "label": "Move focused window to Workspace 7",
+    "aliases": [
+      "move to 7",
+      "move workspace 7"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace move-focused 7",
+    "when": "omodachi-focus-available",
+    "workspace": {
+      "id": 7,
+      "operation": "move_focused"
+    }
+  },
+  "omodachi.workspace.select.8": {
+    "label": "Workspace 8",
+    "aliases": [
+      "8",
+      "workspace 8",
+      "ws 8"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace select 8",
+    "workspace": {
+      "id": 8,
+      "operation": "select"
+    }
+  },
+  "omodachi.workspace.move.8": {
+    "label": "Move focused window to Workspace 8",
+    "aliases": [
+      "move to 8",
+      "move workspace 8"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace move-focused 8",
+    "when": "omodachi-focus-available",
+    "workspace": {
+      "id": 8,
+      "operation": "move_focused"
+    }
+  },
+  "omodachi.workspace.select.9": {
+    "label": "Workspace 9",
+    "aliases": [
+      "9",
+      "workspace 9",
+      "ws 9"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace select 9",
+    "workspace": {
+      "id": 9,
+      "operation": "select"
+    }
+  },
+  "omodachi.workspace.move.9": {
+    "label": "Move focused window to Workspace 9",
+    "aliases": [
+      "move to 9",
+      "move workspace 9"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace move-focused 9",
+    "when": "omodachi-focus-available",
+    "workspace": {
+      "id": 9,
+      "operation": "move_focused"
+    }
+  },
+  "omodachi.workspace.select.10": {
+    "label": "Workspace 10",
+    "aliases": [
+      "10",
+      "workspace 10",
+      "ws 10"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace select 10",
+    "workspace": {
+      "id": 10,
+      "operation": "select"
+    }
+  },
+  "omodachi.workspace.move.10": {
+    "label": "Move focused window to Workspace 10",
+    "aliases": [
+      "move to 10",
+      "move workspace 10"
+    ],
+    "surface": "host",
+    "action": "omodachi-host workspace move-focused 10",
+    "when": "omodachi-focus-available",
+    "workspace": {
+      "id": 10,
+      "operation": "move_focused"
+    }
+  },
+  "learn.keybindings": {
+    "label": "Keybindings",
+    "icon": "",
+    "action": "omarchy-menu-keybindings",
+    "provider": "omodachi.keybindings"
+  }
+}

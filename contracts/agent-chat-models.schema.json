@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-models.schema.json",
+  "title": "Models and reasoning efforts the provider advertises",
+  "type": "object",
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "default": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hidden": {
+            "type": "boolean"
+          },
+          "is_default": {
+            "type": "boolean"
+          },
+          "default_effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "efforts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "display_name",
+          "description",
+          "hidden",
+          "is_default",
+          "default_effort",
+          "efforts"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "contract_revision",
+    "models",
+    "default"
+  ],
+  "additionalProperties": false
+}

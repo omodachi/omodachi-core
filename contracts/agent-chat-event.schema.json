@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-event.schema.json",
+  "title": "One chat event on /v1/agent/default/chat/events",
+  "type": "object",
+  "properties": {
+    "identity": {
+      "type": "object"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "event": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": [
+            "message",
+            "tool",
+            "turnStarted",
+            "turnFinished",
+            "turnFailed",
+            "connectionLost",
+            "agent.approval.requested",
+            "agent.approval.resolved",
+            "agent.status.changed",
+            "agent.usage.updated",
+            "agent.auth.refreshed",
+            "agent.request.declined"
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ]
+    }
+  },
+  "required": [
+    "identity",
+    "sequence",
+    "event"
+  ],
+  "additionalProperties": false
+}

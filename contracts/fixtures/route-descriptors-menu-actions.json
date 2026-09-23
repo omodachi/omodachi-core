@@ -1,0 +1,2914 @@
+{
+  "catalog_revision": "69bd6de7b64a1a2c",
+  "source_revision": "55ca819effbf8e99",
+  "routes": [
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "about"
+      ],
+      "entry_id": "about",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "system.screensaver"
+      ],
+      "entry_id": "system.screensaver",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "system.lock"
+      ],
+      "entry_id": "system.lock",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "system.suspend"
+      ],
+      "entry_id": "system.suspend",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "system.hibernate"
+      ],
+      "entry_id": "system.hibernate",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "system.logout"
+      ],
+      "entry_id": "system.logout",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "system.reboot"
+      ],
+      "entry_id": "system.reboot",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "system.shutdown"
+      ],
+      "entry_id": "system.shutdown",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "learn.keybindings"
+      ],
+      "entry_id": "learn.keybindings",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "learn.omarchy"
+      ],
+      "entry_id": "learn.omarchy",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "learn.hyprland"
+      ],
+      "entry_id": "learn.hyprland",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "learn.arch"
+      ],
+      "entry_id": "learn.arch",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "learn.neovim"
+      ],
+      "entry_id": "learn.neovim",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "learn.bash"
+      ],
+      "entry_id": "learn.bash",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "learn.tmux-keybindings"
+      ],
+      "entry_id": "learn.tmux-keybindings",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "learn.herdr-keybindings"
+      ],
+      "entry_id": "learn.herdr-keybindings",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "learn.community"
+      ],
+      "entry_id": "learn.community",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.emoji"
+      ],
+      "entry_id": "trigger.emoji",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.capture.screenshot"
+      ],
+      "entry_id": "trigger.capture.screenshot",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.capture.screenrecord.stop"
+      ],
+      "entry_id": "trigger.capture.screenrecord.stop",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.capture.text"
+      ],
+      "entry_id": "trigger.capture.text",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.capture.qr"
+      ],
+      "entry_id": "trigger.capture.qr",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.capture.color"
+      ],
+      "entry_id": "trigger.capture.color",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.capture.screenrecord.no-audio"
+      ],
+      "entry_id": "trigger.capture.screenrecord.no-audio",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.capture.screenrecord.desktop-audio"
+      ],
+      "entry_id": "trigger.capture.screenrecord.desktop-audio",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.capture.screenrecord.microphone"
+      ],
+      "entry_id": "trigger.capture.screenrecord.microphone",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.capture.screenrecord.webcam"
+      ],
+      "entry_id": "trigger.capture.screenrecord.webcam",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.transcode"
+      ],
+      "entry_id": "trigger.transcode",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.hardware.laptop-display"
+      ],
+      "entry_id": "trigger.hardware.laptop-display",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.hardware.mirror-display"
+      ],
+      "entry_id": "trigger.hardware.mirror-display",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.hardware.hybrid-gpu"
+      ],
+      "entry_id": "trigger.hardware.hybrid-gpu",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.hardware.touchpad"
+      ],
+      "entry_id": "trigger.hardware.touchpad",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.hardware.touchpad-haptics.low"
+      ],
+      "entry_id": "trigger.hardware.touchpad-haptics.low",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.hardware.touchpad-haptics.mid"
+      ],
+      "entry_id": "trigger.hardware.touchpad-haptics.mid",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.hardware.touchpad-haptics.high"
+      ],
+      "entry_id": "trigger.hardware.touchpad-haptics.high",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.hardware.touchscreen"
+      ],
+      "entry_id": "trigger.hardware.touchscreen",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.reminder.set"
+      ],
+      "entry_id": "trigger.reminder.set",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.reminder.show"
+      ],
+      "entry_id": "trigger.reminder.show",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.reminder.clear"
+      ],
+      "entry_id": "trigger.reminder.clear",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.share.clipboard"
+      ],
+      "entry_id": "trigger.share.clipboard",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.share.file"
+      ],
+      "entry_id": "trigger.share.file",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.share.folder"
+      ],
+      "entry_id": "trigger.share.folder",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.share.receive"
+      ],
+      "entry_id": "trigger.share.receive",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.toggle.idle-lock"
+      ],
+      "entry_id": "trigger.toggle.idle-lock",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.toggle.notifications"
+      ],
+      "entry_id": "trigger.toggle.notifications",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.toggle.crash-capture"
+      ],
+      "entry_id": "trigger.toggle.crash-capture",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.toggle.screensaver"
+      ],
+      "entry_id": "trigger.toggle.screensaver",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.toggle.nightlight"
+      ],
+      "entry_id": "trigger.toggle.nightlight",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.toggle.top-bar"
+      ],
+      "entry_id": "trigger.toggle.top-bar",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.toggle.battery-percentage"
+      ],
+      "entry_id": "trigger.toggle.battery-percentage",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": false,
+      "reason": "route adapter is not registered",
+      "entry_id": "trigger.toggle.workspace-layout",
+      "ready": false,
+      "readiness_reason": "route adapter is not registered"
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.toggle.window-gaps"
+      ],
+      "entry_id": "trigger.toggle.window-gaps",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.toggle.one-window-ratio"
+      ],
+      "entry_id": "trigger.toggle.one-window-ratio",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.tests.network-speedtest"
+      ],
+      "entry_id": "trigger.tests.network-speedtest",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "trigger.tests.disk-speedtest"
+      ],
+      "entry_id": "trigger.tests.disk-speedtest",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.theme"
+      ],
+      "entry_id": "style.theme",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.background"
+      ],
+      "entry_id": "style.background",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.unlock"
+      ],
+      "entry_id": "style.unlock",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.bar.transparency"
+      ],
+      "entry_id": "style.bar.transparency",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.hyprland"
+      ],
+      "entry_id": "style.hyprland",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.bar.position.top"
+      ],
+      "entry_id": "style.bar.position.top",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.bar.position.bottom"
+      ],
+      "entry_id": "style.bar.position.bottom",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.bar.position.left"
+      ],
+      "entry_id": "style.bar.position.left",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.bar.position.right"
+      ],
+      "entry_id": "style.bar.position.right",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.about.text"
+      ],
+      "entry_id": "style.about.text",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.about.image"
+      ],
+      "entry_id": "style.about.image",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.about.default"
+      ],
+      "entry_id": "style.about.default",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.screensaver.text"
+      ],
+      "entry_id": "style.screensaver.text",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.screensaver.image"
+      ],
+      "entry_id": "style.screensaver.image",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "style.screensaver.default"
+      ],
+      "entry_id": "style.screensaver.default",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.monitors"
+      ],
+      "entry_id": "setup.monitors",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.keybindings"
+      ],
+      "entry_id": "setup.keybindings",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.input"
+      ],
+      "entry_id": "setup.input",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.network.dns.dhcp"
+      ],
+      "entry_id": "setup.network.dns.dhcp",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.network.dns.cloudflare"
+      ],
+      "entry_id": "setup.network.dns.cloudflare",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.network.dns.google"
+      ],
+      "entry_id": "setup.network.dns.google",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.network.dns.custom"
+      ],
+      "entry_id": "setup.network.dns.custom",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.network.qr"
+      ],
+      "entry_id": "setup.network.qr",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.agy"
+      ],
+      "entry_id": "setup.default.agent.agy",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.claude"
+      ],
+      "entry_id": "setup.default.agent.claude",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.codex"
+      ],
+      "entry_id": "setup.default.agent.codex",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.copilot"
+      ],
+      "entry_id": "setup.default.agent.copilot",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.crush"
+      ],
+      "entry_id": "setup.default.agent.crush",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.cursor-agent"
+      ],
+      "entry_id": "setup.default.agent.cursor-agent",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.grok"
+      ],
+      "entry_id": "setup.default.agent.grok",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.hermes"
+      ],
+      "entry_id": "setup.default.agent.hermes",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.muse"
+      ],
+      "entry_id": "setup.default.agent.muse",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.omp"
+      ],
+      "entry_id": "setup.default.agent.omp",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.openclaw"
+      ],
+      "entry_id": "setup.default.agent.openclaw",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.opencode"
+      ],
+      "entry_id": "setup.default.agent.opencode",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.ori"
+      ],
+      "entry_id": "setup.default.agent.ori",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.agent.pi"
+      ],
+      "entry_id": "setup.default.agent.pi",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.browser.chromium"
+      ],
+      "entry_id": "setup.default.browser.chromium",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.browser.chrome"
+      ],
+      "entry_id": "setup.default.browser.chrome",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.browser.brave"
+      ],
+      "entry_id": "setup.default.browser.brave",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.browser.brave-origin"
+      ],
+      "entry_id": "setup.default.browser.brave-origin",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.browser.edge"
+      ],
+      "entry_id": "setup.default.browser.edge",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.browser.firefox"
+      ],
+      "entry_id": "setup.default.browser.firefox",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.browser.zen"
+      ],
+      "entry_id": "setup.default.browser.zen",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.terminal.alacritty"
+      ],
+      "entry_id": "setup.default.terminal.alacritty",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.terminal.foot"
+      ],
+      "entry_id": "setup.default.terminal.foot",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.terminal.ghostty"
+      ],
+      "entry_id": "setup.default.terminal.ghostty",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.terminal.kitty"
+      ],
+      "entry_id": "setup.default.terminal.kitty",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.editor.neovim"
+      ],
+      "entry_id": "setup.default.editor.neovim",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.editor.vscode"
+      ],
+      "entry_id": "setup.default.editor.vscode",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.editor.cursor"
+      ],
+      "entry_id": "setup.default.editor.cursor",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.editor.zed"
+      ],
+      "entry_id": "setup.default.editor.zed",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.editor.sublime"
+      ],
+      "entry_id": "setup.default.editor.sublime",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.editor.helix"
+      ],
+      "entry_id": "setup.default.editor.helix",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.editor.vim"
+      ],
+      "entry_id": "setup.default.editor.vim",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.default.editor.emacs"
+      ],
+      "entry_id": "setup.default.editor.emacs",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.plugin.enable"
+      ],
+      "entry_id": "setup.plugin.enable",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.plugin.disable"
+      ],
+      "entry_id": "setup.plugin.disable",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.plugin.add"
+      ],
+      "entry_id": "setup.plugin.add",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.plugin.clone"
+      ],
+      "entry_id": "setup.plugin.clone",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.plugin.remove"
+      ],
+      "entry_id": "setup.plugin.remove",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.security.fingerprint"
+      ],
+      "entry_id": "setup.security.fingerprint",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.security.fido2"
+      ],
+      "entry_id": "setup.security.fido2",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.security.sshd"
+      ],
+      "entry_id": "setup.security.sshd",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.security.passwordless-sudo"
+      ],
+      "entry_id": "setup.security.passwordless-sudo",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.security.sudoless-docker"
+      ],
+      "entry_id": "setup.security.sudoless-docker",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.config.hyprland"
+      ],
+      "entry_id": "setup.config.hyprland",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.config.hyprsunset"
+      ],
+      "entry_id": "setup.config.hyprsunset",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.config.xcompose"
+      ],
+      "entry_id": "setup.config.xcompose",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.direct-boot"
+      ],
+      "entry_id": "setup.direct-boot",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "setup.reset"
+      ],
+      "entry_id": "setup.reset",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.package"
+      ],
+      "entry_id": "install.package",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.aur"
+      ],
+      "entry_id": "install.aur",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.style.theme"
+      ],
+      "entry_id": "install.style.theme",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.style.background"
+      ],
+      "entry_id": "install.style.background",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.style.font.cascadia"
+      ],
+      "entry_id": "install.style.font.cascadia",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.style.font.meslo"
+      ],
+      "entry_id": "install.style.font.meslo",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.style.font.fira"
+      ],
+      "entry_id": "install.style.font.fira",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.style.font.victor"
+      ],
+      "entry_id": "install.style.font.victor",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.style.font.bitstream"
+      ],
+      "entry_id": "install.style.font.bitstream",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.style.font.iosevka"
+      ],
+      "entry_id": "install.style.font.iosevka",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.webapp"
+      ],
+      "entry_id": "install.webapp",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.tui"
+      ],
+      "entry_id": "install.tui",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.windows"
+      ],
+      "entry_id": "install.windows",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.preinstalls"
+      ],
+      "entry_id": "install.preinstalls",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.browser.chrome"
+      ],
+      "entry_id": "install.browser.chrome",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.browser.edge"
+      ],
+      "entry_id": "install.browser.edge",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.browser.brave"
+      ],
+      "entry_id": "install.browser.brave",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.browser.brave-origin"
+      ],
+      "entry_id": "install.browser.brave-origin",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.browser.firefox"
+      ],
+      "entry_id": "install.browser.firefox",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.browser.zen"
+      ],
+      "entry_id": "install.browser.zen",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.service.1password"
+      ],
+      "entry_id": "install.service.1password",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.service.dropbox"
+      ],
+      "entry_id": "install.service.dropbox",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.service.spotify"
+      ],
+      "entry_id": "install.service.spotify",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.service.signal"
+      ],
+      "entry_id": "install.service.signal",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.service.tailscale"
+      ],
+      "entry_id": "install.service.tailscale",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.service.nordvpn"
+      ],
+      "entry_id": "install.service.nordvpn",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.service.once"
+      ],
+      "entry_id": "install.service.once",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.service.bitwarden"
+      ],
+      "entry_id": "install.service.bitwarden",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.service.chromium-account"
+      ],
+      "entry_id": "install.service.chromium-account",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.editor.vscode"
+      ],
+      "entry_id": "install.editor.vscode",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.editor.cursor"
+      ],
+      "entry_id": "install.editor.cursor",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.editor.zed"
+      ],
+      "entry_id": "install.editor.zed",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.editor.sublime"
+      ],
+      "entry_id": "install.editor.sublime",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.editor.helix"
+      ],
+      "entry_id": "install.editor.helix",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.editor.vim"
+      ],
+      "entry_id": "install.editor.vim",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.editor.emacs"
+      ],
+      "entry_id": "install.editor.emacs",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.terminal.alacritty"
+      ],
+      "entry_id": "install.terminal.alacritty",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.terminal.foot"
+      ],
+      "entry_id": "install.terminal.foot",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.terminal.ghostty"
+      ],
+      "entry_id": "install.terminal.ghostty",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.terminal.kitty"
+      ],
+      "entry_id": "install.terminal.kitty",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.ai.chatgpt"
+      ],
+      "entry_id": "install.ai.chatgpt",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.ai.claude"
+      ],
+      "entry_id": "install.ai.claude",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.ai.dictation"
+      ],
+      "entry_id": "install.ai.dictation",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.ai.grok-bot"
+      ],
+      "entry_id": "install.ai.grok-bot",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.ai.hermes"
+      ],
+      "entry_id": "install.ai.hermes",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.ai.lm-studio"
+      ],
+      "entry_id": "install.ai.lm-studio",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.ai.ollama"
+      ],
+      "entry_id": "install.ai.ollama",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.ai.openclaw"
+      ],
+      "entry_id": "install.ai.openclaw",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.ai.perplexity"
+      ],
+      "entry_id": "install.ai.perplexity",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.ai.t3-code"
+      ],
+      "entry_id": "install.ai.t3-code",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.gaming.steam"
+      ],
+      "entry_id": "install.gaming.steam",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.gaming.retroarch"
+      ],
+      "entry_id": "install.gaming.retroarch",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.gaming.minecraft"
+      ],
+      "entry_id": "install.gaming.minecraft",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.gaming.geforce-now"
+      ],
+      "entry_id": "install.gaming.geforce-now",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.gaming.xbox-cloud"
+      ],
+      "entry_id": "install.gaming.xbox-cloud",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.gaming.xbox-controllers"
+      ],
+      "entry_id": "install.gaming.xbox-controllers",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.gaming.battlenet"
+      ],
+      "entry_id": "install.gaming.battlenet",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.gaming.lutris"
+      ],
+      "entry_id": "install.gaming.lutris",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.gaming.heroic"
+      ],
+      "entry_id": "install.gaming.heroic",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.gaming.retro-launcher"
+      ],
+      "entry_id": "install.gaming.retro-launcher",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.rails"
+      ],
+      "entry_id": "install.development.rails",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.docker-dbs"
+      ],
+      "entry_id": "install.development.docker-dbs",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.go"
+      ],
+      "entry_id": "install.development.go",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.python"
+      ],
+      "entry_id": "install.development.python",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.zig"
+      ],
+      "entry_id": "install.development.zig",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.rust"
+      ],
+      "entry_id": "install.development.rust",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.java"
+      ],
+      "entry_id": "install.development.java",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.dotnet"
+      ],
+      "entry_id": "install.development.dotnet",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.ocaml"
+      ],
+      "entry_id": "install.development.ocaml",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.clojure"
+      ],
+      "entry_id": "install.development.clojure",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.scala"
+      ],
+      "entry_id": "install.development.scala",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.javascript.node"
+      ],
+      "entry_id": "install.development.javascript.node",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.javascript.bun"
+      ],
+      "entry_id": "install.development.javascript.bun",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.javascript.deno"
+      ],
+      "entry_id": "install.development.javascript.deno",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.php.php"
+      ],
+      "entry_id": "install.development.php.php",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.php.laravel"
+      ],
+      "entry_id": "install.development.php.laravel",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.php.symfony"
+      ],
+      "entry_id": "install.development.php.symfony",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.elixir.elixir"
+      ],
+      "entry_id": "install.development.elixir.elixir",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "install.development.elixir.phoenix"
+      ],
+      "entry_id": "install.development.elixir.phoenix",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.package"
+      ],
+      "entry_id": "remove.package",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.theme"
+      ],
+      "entry_id": "remove.theme",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.webapp"
+      ],
+      "entry_id": "remove.webapp",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.tui"
+      ],
+      "entry_id": "remove.tui",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.windows"
+      ],
+      "entry_id": "remove.windows",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.preinstalls"
+      ],
+      "entry_id": "remove.preinstalls",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.security.fingerprint"
+      ],
+      "entry_id": "remove.security.fingerprint",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.security.fido2"
+      ],
+      "entry_id": "remove.security.fido2",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.security.sshd"
+      ],
+      "entry_id": "remove.security.sshd",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.security.sudoless-docker"
+      ],
+      "entry_id": "remove.security.sudoless-docker",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.ai.hermes"
+      ],
+      "entry_id": "remove.ai.hermes",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.browser.chrome"
+      ],
+      "entry_id": "remove.browser.chrome",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.browser.edge"
+      ],
+      "entry_id": "remove.browser.edge",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.browser.brave"
+      ],
+      "entry_id": "remove.browser.brave",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.browser.brave-origin"
+      ],
+      "entry_id": "remove.browser.brave-origin",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.browser.firefox"
+      ],
+      "entry_id": "remove.browser.firefox",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.browser.zen"
+      ],
+      "entry_id": "remove.browser.zen",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.service.dropbox"
+      ],
+      "entry_id": "remove.service.dropbox",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.service.tailscale"
+      ],
+      "entry_id": "remove.service.tailscale",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.ai.chatgpt"
+      ],
+      "entry_id": "remove.ai.chatgpt",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.ai.claude"
+      ],
+      "entry_id": "remove.ai.claude",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.ai.dictation"
+      ],
+      "entry_id": "remove.ai.dictation",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.ai.grok-bot"
+      ],
+      "entry_id": "remove.ai.grok-bot",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.ai.lm-studio"
+      ],
+      "entry_id": "remove.ai.lm-studio",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.ai.ollama"
+      ],
+      "entry_id": "remove.ai.ollama",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.ai.openclaw"
+      ],
+      "entry_id": "remove.ai.openclaw",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.ai.perplexity"
+      ],
+      "entry_id": "remove.ai.perplexity",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.ai.t3-code"
+      ],
+      "entry_id": "remove.ai.t3-code",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.gaming.steam"
+      ],
+      "entry_id": "remove.gaming.steam",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.gaming.retroarch"
+      ],
+      "entry_id": "remove.gaming.retroarch",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.gaming.minecraft"
+      ],
+      "entry_id": "remove.gaming.minecraft",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.gaming.geforce-now"
+      ],
+      "entry_id": "remove.gaming.geforce-now",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.gaming.xbox-cloud"
+      ],
+      "entry_id": "remove.gaming.xbox-cloud",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.gaming.xbox-controllers"
+      ],
+      "entry_id": "remove.gaming.xbox-controllers",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.gaming.battlenet"
+      ],
+      "entry_id": "remove.gaming.battlenet",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.gaming.lutris"
+      ],
+      "entry_id": "remove.gaming.lutris",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.gaming.heroic"
+      ],
+      "entry_id": "remove.gaming.heroic",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.rails"
+      ],
+      "entry_id": "remove.development.rails",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.go"
+      ],
+      "entry_id": "remove.development.go",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.python"
+      ],
+      "entry_id": "remove.development.python",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.zig"
+      ],
+      "entry_id": "remove.development.zig",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.rust"
+      ],
+      "entry_id": "remove.development.rust",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.java"
+      ],
+      "entry_id": "remove.development.java",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.dotnet"
+      ],
+      "entry_id": "remove.development.dotnet",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.ocaml"
+      ],
+      "entry_id": "remove.development.ocaml",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.clojure"
+      ],
+      "entry_id": "remove.development.clojure",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.scala"
+      ],
+      "entry_id": "remove.development.scala",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.javascript.node"
+      ],
+      "entry_id": "remove.development.javascript.node",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.javascript.bun"
+      ],
+      "entry_id": "remove.development.javascript.bun",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.javascript.deno"
+      ],
+      "entry_id": "remove.development.javascript.deno",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.php.php"
+      ],
+      "entry_id": "remove.development.php.php",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.php.laravel"
+      ],
+      "entry_id": "remove.development.php.laravel",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.php.symfony"
+      ],
+      "entry_id": "remove.development.php.symfony",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.elixir.elixir"
+      ],
+      "entry_id": "remove.development.elixir.elixir",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "remove.development.elixir.phoenix"
+      ],
+      "entry_id": "remove.development.elixir.phoenix",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.omarchy"
+      ],
+      "entry_id": "update.omarchy",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.themes"
+      ],
+      "entry_id": "update.themes",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.firmware"
+      ],
+      "entry_id": "update.firmware",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.timezone"
+      ],
+      "entry_id": "update.timezone",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.time"
+      ],
+      "entry_id": "update.time",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.channel.stable"
+      ],
+      "entry_id": "update.channel.stable",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.channel.rc"
+      ],
+      "entry_id": "update.channel.rc",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.channel.edge"
+      ],
+      "entry_id": "update.channel.edge",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.channel.dev"
+      ],
+      "entry_id": "update.channel.dev",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.process.hyprsunset"
+      ],
+      "entry_id": "update.process.hyprsunset",
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.process.shell"
+      ],
+      "entry_id": "update.process.shell",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.config.hyprland"
+      ],
+      "entry_id": "update.config.hyprland",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.config.hyprsunset"
+      ],
+      "entry_id": "update.config.hyprsunset",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.config.plymouth"
+      ],
+      "entry_id": "update.config.plymouth",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.config.tmux"
+      ],
+      "entry_id": "update.config.tmux",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.config.shell"
+      ],
+      "entry_id": "update.config.shell",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.hardware.audio"
+      ],
+      "entry_id": "update.hardware.audio",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.hardware.wifi"
+      ],
+      "entry_id": "update.hardware.wifi",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.hardware.bluetooth"
+      ],
+      "entry_id": "update.hardware.bluetooth",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.hardware.trackpad"
+      ],
+      "entry_id": "update.hardware.trackpad",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.password.drive"
+      ],
+      "entry_id": "update.password.drive",
+      "confirm": true,
+      "ready": true
+    },
+    {
+      "route": "host",
+      "supported": true,
+      "argv": [
+        "omodachi-menu-action",
+        "update.password.user"
+      ],
+      "entry_id": "update.password.user",
+      "confirm": true,
+      "ready": true
+    }
+  ],
+  "contract_revision": "omodachi.v1"
+}

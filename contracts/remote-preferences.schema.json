@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/remote-preferences.schema.json",
+  "title": "Host Remote defaults captured for the next session",
+  "type": "object",
+  "properties": {
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "values": {
+      "type": "object",
+      "properties": {
+        "quality": {
+          "enum": [
+            "balanced",
+            "quality",
+            "performance"
+          ]
+        },
+        "host_audio_playback": {
+          "type": "boolean"
+        },
+        "allow_dynamic_resolution": {
+          "type": "boolean"
+        },
+        "voice_uplink": {
+          "type": "boolean"
+        },
+        "remote_backend": {
+          "enum": [
+            "sunshine",
+            "vnc"
+          ]
+        },
+        "pairing_mode": {
+          "description": "PAIR-2: whether a pairing request may arrive without an invitation. It never decides whether one is approved.",
+          "enum": [
+            "open",
+            "invite"
+          ]
+        }
+      },
+      "required": [
+        "quality",
+        "host_audio_playback",
+        "allow_dynamic_resolution",
+        "voice_uplink",
+        "remote_backend",
+        "pairing_mode"
+      ],
+      "additionalProperties": false
+    },
+    "scope": {
+      "const": "host_remote"
+    },
+    "applies_to": {
+      "const": "next_session"
+    },
+    "profile_defaults": {
+      "type": "object",
+      "properties": {
+        "quality": {
+          "type": "object",
+          "properties": {
+            "fps": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            },
+            "bitrate_kbps": {
+              "type": "integer",
+              "minimum": 64,
+              "maximum": 20000
+            }
+          },
+          "required": [
+            "fps",
+            "bitrate_kbps"
+          ],
+          "additionalProperties": false
+        },
+        "preset": {
+          "enum": [
+            "performance",
+            "balanced",
+            "quality"
+          ]
+        },
+        "presets": {
+          "type": "object",
+          "properties": {
+            "performance": {
+              "type": "object",
+              "properties": {
+                "fps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 60
+                },
+                "bitrate_kbps": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 20000
+                }
+              },
+              "required": [
+                "fps",
+                "bitrate_kbps"
+              ],
+              "additionalProperties": false
+            },
+            "balanced": {
+              "type": "object",
+              "properties": {
+                "fps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 60
+                },
+                "bitrate_kbps": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 20000
+                }
+              },
+              "required": [
+                "fps",
+                "bitrate_kbps"
+              ],
+              "additionalProperties": false
+            },
+            "quality": {
+              "type": "object",
+              "properties": {
+                "fps": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 60
+                },
+                "bitrate_kbps": {
+                  "type": "integer",
+                  "minimum": 64,
+                  "maximum": 20000
+                }
+              },
+              "required": [
+                "fps",
+                "bitrate_kbps"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "performance",
+            "balanced",
+            "quality"
+          ],
+          "additionalProperties": false
+        },
+        "custom": {
+          "type": "object",
+          "properties": {
+            "fps": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "minItems": 1,
+              "uniqueItems": true
+            },
+            "min_bitrate_kbps": {
+              "type": "integer",
+              "minimum": 64
+            },
+            "max_bitrate_kbps": {
+              "type": "integer",
+              "minimum": 64,
+              "maximum": 250000
+            }
+          },
+          "required": [
+            "fps",
+            "min_bitrate_kbps",
+            "max_bitrate_kbps"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "quality",
+        "preset",
+        "presets",
+        "custom"
+      ],
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "profile_defaults": {
+          "const": true
+        },
+        "host_audio_default": {
+          "const": true
+        },
+        "adaptive_control_available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "profile_defaults",
+        "host_audio_default",
+        "adaptive_control_available"
+      ],
+      "additionalProperties": false
+    },
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "permission_effect": {
+      "const": "subsequent_output_change_requests"
+    }
+  },
+  "required": [
+    "revision",
+    "values",
+    "scope",
+    "applies_to",
+    "profile_defaults",
+    "runtime",
+    "permission_effect"
+  ],
+  "additionalProperties": false
+}

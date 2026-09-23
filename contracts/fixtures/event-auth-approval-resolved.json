@@ -1,0 +1,13 @@
+{
+  "seq": 2,
+  "event_id": "evt_00000002",
+  "type": "auth.approval.resolved",
+  "device_id": "ipad-fixture",
+  "payload": {
+    "approval_id": "appr_02020202020202020202020202020202",
+    "outcome": "approved",
+    "device_id": "ipad-fixture"
+  },
+  "ts": 1789430400.0,
+  "contract_revision": "omodachi.v1"
+}

@@ -1,0 +1,48 @@
+{
+  "contract_revision": "omodachi.v1",
+  "request_id": "request-fixture-shortcut",
+  "entry_id": "omodachi.shortcut.9d875406641062ece3f134b1",
+  "status": "accepted",
+  "catalog_revision": "f510faeef3e91fc2",
+  "route": {
+    "route": "host",
+    "supported": true,
+    "argv": [
+      "omodachi-keybinding",
+      "omodachi.shortcut.9d875406641062ece3f134b1"
+    ],
+    "entry_id": "omodachi.shortcut.9d875406641062ece3f134b1"
+  },
+  "observed": {
+    "kind": "eval",
+    "before": {
+      "workspace": {
+        "id": 3,
+        "name": "3",
+        "monitor": "OMODACHI-0123456789abcdef"
+      },
+      "window": {
+        "address": "0x0000000000000001",
+        "app_id": "kitty",
+        "fullscreen": 0,
+        "floating": false,
+        "workspace_id": 3
+      }
+    },
+    "after": {
+      "workspace": {
+        "id": 3,
+        "name": "3",
+        "monitor": "OMODACHI-0123456789abcdef"
+      },
+      "window": {
+        "address": "0x0000000000000001",
+        "app_id": "kitty",
+        "fullscreen": 0,
+        "floating": false,
+        "workspace_id": 3
+      }
+    },
+    "changed": false
+  }
+}

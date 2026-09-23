@@ -1,0 +1,13 @@
+{
+  "seq": 13,
+  "event_id": "evt_00000013",
+  "type": "clipboard.changed",
+  "device_id": null,
+  "payload": {
+    "sequence": 1,
+    "bytes": 11,
+    "mime": "text/plain"
+  },
+  "ts": 1789430400.0,
+  "contract_revision": "omodachi.v1"
+}

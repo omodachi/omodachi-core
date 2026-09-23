@@ -1,0 +1,16 @@
+{
+  // Synthetic, sanitized developer fixture; no real host operations.
+  "apps": {"label":"Apps","provider":"fixture.apps"},
+  "learn": {"label":"Learn"}, "trigger": {"label":"Trigger"},
+  "style": {"label":"Style"}, "setup": {"label":"Setup"},
+  "install": {"label":"Install"}, "remove": {"label":"Remove"},
+  "update": {"label":"Update"}, "about": {"label":"About"},
+  "system": {"label":"System"},
+  "trigger.toggle": {"label":"Toggle"},
+  "trigger.toggle.notifications": {"label":"Notifications", "aliases":["quiet"], "action":"fixture-toggle-notifications", "checked":"fixture.notifications"},
+  "install.demo": {"label":"Install demonstration","action":"omarchy-launch-terminal 'printf install-demo'"},
+  "update.demo": {"label":"Update demonstration","action":"omarchy-launch-terminal 'printf update-demo'"},
+  "about.demo": {"label":"About demonstration","action":"omarchy-launch-terminal 'printf about-demo'"},
+  "learn.demo": {"label":"Terminal demonstration", "action":"omarchy-launch-terminal 'printf demo'"},
+  "learn.keybindings": {"label":"Keybindings", "action":"omarchy-menu-keybindings"}
+}

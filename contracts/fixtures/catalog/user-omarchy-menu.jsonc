@@ -1,0 +1,12 @@
+{
+  // User extension overrides only selected fields and appends new rows.
+  "trigger.toggle.notifications": {
+    "label": "Quiet notifications",
+    "aliases": ["quiet", "notify"],
+    "checked": "omarchy-state is-set quiet-notifications",
+  },
+  "setup.monitors": {
+    "label": "Monitors",
+    "action": "omarchy-launch-config-editor monitors.lua",
+  },
+}

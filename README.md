@@ -3,6 +3,12 @@
 The host daemon of Omodachi: the part that owns the real data and the real
 actions on an [Omarchy](https://omarchy.org) computer.
 
+<p>
+  <img src="https://omodachi.app/img/shots/vm-02-install.webp" width="720" alt="The panel's Install button running the host installer in a terminal on a fresh Omarchy install">
+</p>
+
+<sub>The installer fetching this repository at its pinned commit on a fresh Omarchy VM. More at <a href="https://omodachi.app">omodachi.app</a>.</sub>
+
 ## Where this sits
 
 Omodachi turns an iPhone or iPad into an extension of an Omarchy desktop. It

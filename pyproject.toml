@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=68"]
+# RELEASE-6: exact, and the same version requirements/host.lock pins with its hash.
+# The host installs with --no-build-isolation, so this is the setuptools that is
+# already in the venv from the lock; pip --check-build-dependencies enforces it.
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +10,10 @@ name = "omodachi-core"
 version = "0.2.0"
 description = "Omodachi host hub and protocol primitives"
 requires-python = ">=3.11"
-dependencies = ["aiohttp>=3.12,<4", "zeroconf>=0.151,<0.152"]
+# Exact pins matching requirements/host.lock, which also holds every transitive
+# dependency with its sha256. The host never resolves these: it installs the lock
+# with --require-hashes --no-deps and this package with --no-deps.
+dependencies = ["aiohttp==3.14.3", "zeroconf==0.151.3"]
 
 [project.optional-dependencies]
 test = ["jsonschema>=4.24,<5"]

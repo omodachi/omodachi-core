@@ -8,8 +8,16 @@ only so a tap on the logo could be turned into a recall, and it paid for that by
 owning the `menu` kind, by rewriting the user's `shell.json` on install, and by
 having to track upstream.
 
-One source:
+Two sources:
 
+* `omarchy-shell omodachi barGeometry` (REMOTE-SAFE-1): the Omodachi plugin's
+  own bar widget, which lives inside every screen's bar, reports where that
+  bar's `omarchy.menu` slot actually is, in output-local logical px. It is the
+  only reading that knows a logo the user moved into `center` (Leo's layout -
+  a centred group's position depends on every other widget's width) and the
+  one that follows the plugin moving the bar's end sections inward to clear
+  the device's corners. When it answers for the session's output, its logo is
+  the answer, including "no logo on this bar".
 * `hyprctl layers -j` for the `omarchy-bar` layer surface. The document is
   keyed by output name and each entry is `{x, y, w, h, namespace}` in the
   compositor's **layout** coordinates (logical pixels, the same space
@@ -17,6 +25,11 @@ One source:
   subtracting that output's origin. The bar not being there - because the user
   hid it, or because the shell is restarting - is an answer, not an error:
   geometry is then `None` and the App falls back to its corner handle (A-67).
+
+Without the plugin's answer (plugin not in the bar, older plugin, shell busy)
+the logo is modelled from the layer as before: first entry of the leading
+section only. That fallback is also right about the corners: without the
+plugin nothing moved them.
 
 **Only the logo.** The Omodachi plugin's own bar slot is deliberately *not*
 located: it is one widget among a dozen third-party ones, its position moves
@@ -55,6 +68,9 @@ VERTICAL = ("left", "right")
 LOGO_ID = "omarchy.menu"
 #: A bar wider or taller than this is not a bar.
 MAX_EDGE = 16384
+#: REMOTE-SAFE-1. The plugin's read-only report (`Service.qml` IpcHandler
+#: `omodachi.barGeometry`). A getter on our own target - never a shell setter.
+PLUGIN_COMMAND = ("/usr/share/omarchy/bin/omarchy-shell", "omodachi", "barGeometry")
 
 # ---------------------------------------------------------------------------
 # The two numbers that decide where the logo actually is (UX-3 §3)
@@ -281,6 +297,51 @@ def measured_position(rect, logical_size):
     return None
 
 
+def plugin_rows(text) -> list | None:
+    """The plugin's report, or None when it could not be read as one.
+
+    `omarchy-shell` exits 0 even when the target or function is unknown and
+    prints qs's complaint instead, so anything that is not a JSON list of
+    objects is simply "no answer".
+    """
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(value, list) or len(value) > 64:
+        return None
+    return [row for row in value if isinstance(row, dict)]
+
+
+def plugin_logo(rows, output_name, logical_size):
+    """`(answered, rect)` for one output from the plugin's report.
+
+    `answered` is False when the plugin said nothing about this output (then
+    the layer model decides). When it did answer, `rect` is its logo - or None
+    when that bar has no visible `omarchy.menu`, or the rectangle is not inside
+    the output, which is again the truth rather than a guess.
+    """
+    if not rows or not isinstance(output_name, str) or not output_name:
+        return False, None
+    row = next((row for row in rows if row.get("output") == output_name), None)
+    if row is None:
+        return False, None
+    logo = row.get("logo")
+    if not isinstance(logo, dict):
+        return True, None
+    try:
+        rect = _rect(logo["x"], logo["y"], logo["width"], logo["height"])
+    except (KeyError, TypeError, ValueError):
+        return True, None
+    if not _valid(rect):
+        return True, None
+    width, height = logical_size["width"], logical_size["height"]
+    if rect["x"] < -1 or rect["y"] < -1 or rect["x"] + rect["width"] > width + 1 \
+            or rect["y"] + rect["height"] > height + 1:
+        return True, None
+    return True, rect
+
+
 def compose(*, output, logical_size, position, layer, sections, style: BarStyle | None = None):
     """The published `state.bar.geometry`, or `None` when there is no bar."""
     if layer is None or not isinstance(output, str) or not output:
@@ -344,9 +405,33 @@ class BarGeometry:
         self._read_at = None
         self._style = None
         self._style_at = None
+        self._plugin = None
+        self._plugin_at = None
 
     def mark_dirty(self) -> None:
         self._read_at = None
+        self._plugin_at = None
+
+    def plugin(self) -> list | None:
+        """The plugin's report, on the same throttle as the layer.
+
+        Only ever called for a live session (`snapshot` returns before it
+        otherwise), so an idle host never spawns a `qs` for this.
+        """
+        now = self.clock()
+        if self._plugin_at is not None and now - self._plugin_at < self.throttle:
+            return self._plugin
+        self._plugin_at = now
+        try:
+            environment = dict(self.environment())
+            # `qs` is Qt: under LANG=C it logs its locale fallback on every run
+            # (CORE-2 §3). `omarchy-shell` refuses to run without OMARCHY_PATH.
+            environment.update({"OMARCHY_PATH": "/usr/share/omarchy", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"})
+            value = plugin_rows(self.runner(PLUGIN_COMMAND, environment))
+        except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError):
+            value = None
+        self._plugin = value
+        return value
 
     def layers(self) -> dict | None:
         now = self.clock()
@@ -385,5 +470,11 @@ class BarGeometry:
         if document is None:
             return None
         layer = bar_layer(document, output["name"], origin=output["origin"])
-        return compose(output=output["name"], logical_size=output["logical_size"], position=position,
-                       layer=layer, sections=sections, style=self.style())
+        geometry = compose(output=output["name"], logical_size=output["logical_size"], position=position,
+                           layer=layer, sections=sections, style=self.style())
+        if geometry is None:
+            return None
+        answered, logo = plugin_logo(self.plugin(), output["name"], geometry["logical_size"])
+        if answered:
+            geometry["logo"] = logo
+        return geometry

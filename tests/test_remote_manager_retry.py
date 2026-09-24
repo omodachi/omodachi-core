@@ -124,6 +124,48 @@ class ManagerRetryTests(unittest.TestCase):
             self.assertEqual(hub.state["remote"]["state"], "offline")
         run(lambda: exercise(), clock=clock)
 
+    def test_a_manager_built_after_the_transport_is_wired_for_events_and_recovered(self):
+        # REMOTE-SAFE-1 §5 finding, seen on the clean VM after a reboot: the
+        # lazily built manager's sessions never reached state.remote, which
+        # stayed `offline` through a live Extend session.
+        hub = Hub()
+        live = {"session_id": "rs_1", "state": "ready", "mode": "extend", "backend": "vnc", "revision": 2}
+
+        class Live(Manager):
+            events = None
+            recovered = 0
+
+            class hyprland:
+                @staticmethod
+                def event_socket():
+                    return "/nonexistent/omodachi-test.sock"
+
+            def maintain(self):
+                return False
+
+            def watch_shell(self):
+                return None
+
+            def recover(self):
+                self.recovered += 1
+
+            def state_projection(self):
+                return dict(live)
+
+        built = Live()
+        service = RemoteService(hub, manager=None, manager_factory=lambda: built)
+
+        async def exercise():
+            service.refresh_capabilities = lambda: asyncio.sleep(0)
+            await service.attach_transport()
+            self.assertIs(await service.ensure_manager(), built)
+            self.assertEqual(built.events, service._emit)
+            self.assertEqual(built.recovered, 1)
+            self.assertEqual(hub.state["remote"], live)
+            self.assertIsNotNone(service._display_watch, "the compositor event stream is followed too")
+            await service.detach_transport()
+        run(lambda: exercise())
+
     def test_a_daemon_with_no_factory_at_all_still_answers_unavailable(self):
         # Demo mode, and every test that constructs the service by hand.
         hub = Hub()
@@ -190,6 +232,33 @@ class BootstrapWiringTests(unittest.TestCase):
         self.assertIsNotNone(made.host_quality)
         self.assertIsNotNone(made.host_backend)
         self.assertIsNotNone(made.backends["sunshine"].certificate_resolver)
+
+
+class BootstrapBarGeometryTests(unittest.TestCase):
+    def test_the_bar_is_measured_for_a_manager_built_after_startup(self):
+        # REMOTE-SAFE-1 §5 finding: `refresh_bar` measured the bar only for the
+        # manager the daemon had at startup - None after every reboot - so a
+        # session on a lazily built manager never got a logo rectangle.
+        from pathlib import Path
+        from omodachi_core.bootstrap import create_service
+        from omodachi_core.hub import Hub as RealHub
+        service = create_service(RealHub(), demo=False, enable_live_menu=False, enable_catalog_providers=False,
+                                 default_menu=Path("src/omodachi_core/data/demo-menu.jsonc"),
+                                 omodachi_menu=Path("src/omodachi_core/data/omodachi-menu.jsonc"),
+                                 shell_config=Path("src/omodachi_core/data/demo-shell.json"))
+        self.assertIsNone(service.remote.manager)
+        seen = []
+        session = object()
+
+        class Later:
+            def current(self):
+                return session
+        service.bar_geometry.snapshot = lambda current, position, sections: seen.append(current)
+        service.refresh_bar()
+        self.assertEqual(seen, [], "no manager, no measurement")
+        service.remote.manager = Later()
+        service.refresh_bar()
+        self.assertEqual(seen, [session])
 
 
 class _StubManager:

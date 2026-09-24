@@ -54,22 +54,49 @@ then press Install on its panel. The plugin clones this repository at the tag
 it pins (`v0.1.0` for plugin 0.1.0) and runs this installer for you, in a
 visible terminal.
 
-By hand, from a clone on the computer itself:
+By hand, on the computer itself, the same thing the plugin does:
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[test]'
-.venv/bin/python scripts/install_host.py --local
+git clone https://github.com/omodachi/omodachi-core.git ~/.local/share/omodachi/src
+python3 ~/.local/share/omodachi/src/scripts/install_host.py --local
 ```
 
-The installer syncs `src/`, `pyproject.toml` and `scripts/install_wayvnc.py`
-to `~/.local/share/omodachi/src`, installs them into
-`~/.local/share/omodachi/venv`, generates a host certificate under
+(`install_host.py --host user@omarchy` from a development machine syncs `src/`,
+`pyproject.toml`, `requirements/host.lock` and the two scripts there first.)
+The installer runs on the system `python3` with the standard library only. It
+builds `~/.local/share/omodachi/venv` from those sources, generates a host certificate under
 `~/.config/omodachi/tls/` if there is none, writes `omodachid.service` and
 `omodachi-herdr.service` into `~/.config/systemd/user/`, installs
 `~/.local/bin/omodachi-panel` and the desktop entry, opens the LAN firewall
 rules and enables the units. It is idempotent, writes no credentials or device
 state, and never replaces an existing certificate.
+
+### How the install is verified
+
+The plugin fetches this repository at one pinned full commit and checks the
+checkout byte for byte before running anything in it. This installer then
+installs only what `requirements/host.lock` names: exact versions, each with
+the sha256 of every wheel a host may use (CPython 3.11-3.14, x86_64), covering
+the build backend (setuptools) and every runtime and transitive dependency.
+The venv is recreated on every install (the old one is put back if anything
+fails) and filled with
+`pip install --isolated --require-hashes --no-deps --only-binary=:all: -r requirements/host.lock`,
+so pip refuses any file whose hash is not in the lock, resolves nothing and
+builds no sdist. omodachi-core itself is then built from the checkout with
+`--no-index --no-deps --no-build-isolation --check-build-dependencies`: pip
+cannot reach an index, and the build backend is the locked setuptools, the
+exact version `pyproject.toml` requires. pip itself is the interpreter's
+bundled one from `python3 -m venv` and is never upgraded. The Sunshine
+archive is checked against the sha256 pinned in
+`src/omodachi_core/data/versions.json`; the optional overrides need an
+explicit one too (`--sunshine-package` only with `--sunshine-sha256`, a git
+`--sunshine-build` only at an exact `--sunshine-build-commit`), and are
+refused otherwise. Every other package (WayVNC, the
+fork's runtime libraries) comes from pacman, whose repositories are signed.
+`scripts/update_host_lock.py` regenerates the lock from
+`requirements/host.in`; `tests/test_host_lock.py` fails if any pip call in the
+installer is not hash-checked or offline, or if the lock and `pyproject.toml`
+disagree.
 
 Under `~/.config/omarchy` it writes exactly three files of its own: the theme
 template `themed/omodachi-theme.json.tpl` and the `theme-set` and `font-set`
@@ -102,7 +129,10 @@ https://github.com/omodachi/omodachi-sunshine/releases/download/sunshine-328d231
 ```
 
 `--sunshine-package <url|path>` overrides it and `--sunshine-package latest`
-asks for the newest release by name.
+asks for the newest release by name; either one needs `--sunshine-sha256 <hex>`
+(a `.sha256` published beside the archive is not accepted). `--sunshine-build
+<git-url> --sunshine-build-commit <sha>` builds the fork at exactly that commit;
+`--sunshine-build <path>` builds your own local tree as it stands.
 
 The fork is GPL-3.0-only, inherited from upstream, and stays a separate
 repository for that reason: it is somebody else's program with our patches on
@@ -133,6 +163,8 @@ draws it: **omodachi.app**.
 ## Tests
 
 ```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[test]'   # a development venv, not the host's
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests
 .venv/bin/python scripts/verify_contracts.py
 ```

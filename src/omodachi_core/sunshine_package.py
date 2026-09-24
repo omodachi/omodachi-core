@@ -53,14 +53,20 @@ SUNSHINE_REPOSITORY = f"https://github.com/{GITHUB_OWNER}/omodachi-sunshine"
 # sha256 and the fork commit - in `data/versions.json`. `--sunshine-package`
 # overrides the pin, OMODACHI_SUNSHINE_PACKAGE overrides it from the
 # environment (how a staging host points at a private build), and the word
-# `latest` is the explicit choice of the newest release, checked against the
-# publisher's `.sha256` rather than a pin.
+# `latest` is the explicit choice of the newest release.
+#
+# RELEASE-6: every one of those overrides needs the sha256 it must hash to,
+# given by the person asking for it (`--sunshine-sha256` or
+# OMODACHI_SUNSHINE_SHA256). A `.sha256` published beside the archive is never
+# trusted - it comes from the same place as the archive, so it authenticates
+# nothing - and nothing is ever installed unchecked.
 LATEST_PACKAGE = f"{SUNSHINE_REPOSITORY}/releases/latest/download/omodachi-sunshine-x86_64.tar.zst"
 LATEST = "latest"
 PACKAGE_ENV = "OMODACHI_SUNSHINE_PACKAGE"
 SHA256_ENV = "OMODACHI_SUNSHINE_SHA256"
 VERSIONS = Path(__file__).resolve().parent / "data" / "versions.json"
 _COMMIT = re.compile(r"[0-9a-f]{7,40}\Z")
+_SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def pinned(path: Path = VERSIONS) -> dict:
@@ -91,11 +97,28 @@ def choose(spec: str | None = None, sha256: str | None = None, *, environ=None,
     """
     environ = os.environ if environ is None else environ
     spec = spec or environ.get(PACKAGE_ENV) or None
-    sha256 = sha256 or environ.get(SHA256_ENV) or None
+    sha256 = (sha256 or environ.get(SHA256_ENV) or "").strip().lower() or None
+    if sha256 is not None and not _SHA256.fullmatch(sha256):
+        raise SunshinePackageError("sunshine_package_sha256_invalid",
+                                   f"{sha256!r} is not a sha256 (64 hex characters)")
     if spec is None:
         pin = pin or pinned()
-        return {"source": "pin", "spec": pin["url"], "sha256": sha256 or pin["sha256"],
+        if sha256 is not None and sha256 != pin["sha256"]:
+            # The pin is its own checksum; a second one cannot loosen it.
+            raise SunshinePackageError(
+                "sunshine_package_sha256_conflict",
+                f"the pinned archive must hash to {pin['sha256']}, not {sha256}; "
+                f"drop --sunshine-sha256/${SHA256_ENV} or name the archive it belongs to "
+                f"with --sunshine-package")
+        return {"source": "pin", "spec": pin["url"], "sha256": pin["sha256"],
                 "version": pin["version"], "satisfied_by": pin["satisfied_by"]}
+    if sha256 is None:
+        raise SunshinePackageError(
+            "sunshine_package_sha256_required",
+            f"{spec!r} is not the archive this core pins, so it needs the sha256 it must "
+            f"hash to: add --sunshine-sha256 <64 hex> (or set ${SHA256_ENV}). A .sha256 "
+            f"published beside an archive is not accepted, and nothing is installed "
+            f"unchecked. Without --sunshine-package the pinned archive is used")
     if spec == LATEST:
         return {"source": "latest", "spec": LATEST_PACKAGE, "sha256": sha256, "version": None,
                 "satisfied_by": []}
@@ -218,31 +241,6 @@ def digest(path: Path) -> str:
         for chunk in iter(lambda: source.read(1 << 20), b""):
             value.update(chunk)
     return value.hexdigest()
-
-
-def sidecar_sha256(spec: str, archive: Path, *, opener=urllib.request.urlopen) -> str | None:
-    """The publisher's `.sha256` beside the archive, when there is one.
-
-    A missing sidecar is not an error - a local build has none - but a sidecar
-    that cannot be parsed is, because a checksum nobody can read is worse than
-    no checksum at all.
-    """
-    if "://" in spec:
-        try:
-            with opener(spec + ".sha256", timeout=30) as response:
-                text = response.read(4096).decode("utf-8", "replace")
-        except Exception:
-            return None
-    else:
-        beside = Path(str(archive) + ".sha256")
-        if not beside.is_file():
-            return None
-        text = beside.read_text()
-    match = re.search(r"\b([0-9a-f]{64})\b", text)
-    if not match:
-        raise SunshinePackageError("sunshine_package_checksum_unreadable",
-                                   "the .sha256 beside the archive holds no sha256")
-    return match.group(1)
 
 
 # --- unpacking --------------------------------------------------------------
@@ -538,12 +536,19 @@ def ensure_unit(home: Path, directory: Path, *, arguments=None, runner=None) -> 
 
 def install(spec: str, home: Path, *, sha256=None, cache=None, runner=None,
             opener=urllib.request.urlopen, adapter=None) -> dict:
-    """The whole path: fetch, verify, unpack, dependencies, unit, enable."""
+    """The whole path: fetch, verify, unpack, dependencies, unit, enable.
+
+    `sha256` is required: an archive is never unpacked unless it hashes to a
+    value the caller - the version table or the user - supplied.
+    """
+    expected = (sha256 or "").strip().lower()
+    if not _SHA256.fullmatch(expected):
+        raise SunshinePackageError("sunshine_package_sha256_required",
+                                   f"no sha256 to check {spec} against; nothing was downloaded")
     cache = cache or (home / ".cache/omodachi/sunshine")
     archive = fetch(spec, cache, opener=opener)
     actual = digest(archive)
-    expected = sha256 or sidecar_sha256(spec, archive, opener=opener)
-    if expected and expected != actual:
+    if expected != actual:
         raise SunshinePackageError(
             "sunshine_package_checksum_mismatch",
             f"{spec} hashes to {actual}, not the {expected} it was pinned to")
@@ -563,7 +568,7 @@ def install(spec: str, home: Path, *, sha256=None, cache=None, runner=None,
                 source[key] = value
     except OSError:
         pass
-    return {"archive": str(archive), "sha256": actual, "checksum_pinned": bool(expected),
+    return {"archive": str(archive), "sha256": actual, "checksum_pinned": True,
             "sha": unpacked["sha"], "directory": str(directory), "packages": packages,
             "unit": unit, "source": source}
 

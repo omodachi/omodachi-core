@@ -24,7 +24,7 @@ the device that created a session is the only one that can read or change it.
 
 | Method and path | Behavior |
 | --- | --- |
-| `GET /v1/remote/capabilities` | backends and why each is or is not available, `default_backend`, modes, placements, `lock_local_input_supported`, encoder limits |
+| `GET /v1/remote/capabilities` | backends and why each is or is not available, `default_backend`, modes, placements, `lock_local_input_supported`, `bar_occlusion`, encoder limits |
 | `POST /v1/remote/sessions` | create; `201` with the session, or `409 remote_session_exists` naming who holds it |
 | `GET /v1/remote/sessions/{id}` | the whole session |
 | `POST /v1/remote/sessions/{id}/resize` | new geometry for the same output; returns the session with a new `connection` and `revision` |
@@ -38,7 +38,7 @@ the device that created a session is the only one that can read or change it.
 
 `POST /v1/remote/sessions` takes `{backend, mode, viewport_points, orientation,
 logical_long_edge, quality, decoder, placement?, lock_local_input?,
-ttl_seconds?}`. The geometry fields are the planner's request; see
+ttl_seconds?, bar_occlusion_points?}`. The geometry fields are the planner's request; see
 [desktop-profile.md](desktop-profile.md). `placement` (`right`, `left`, `above`,
 `below`; default `right`) positions the owned output relative to the physical
 layout. `lock_local_input` defaults to **false**.
@@ -52,6 +52,32 @@ its own.
 
 `GET /v1/state` carries `remote: {session_id, state, mode, backend, revision}`
 and the `remote_bar` projection Panel anchors on.
+
+### The device's corners (REMOTE-SAFE-1)
+
+In Extend mode the owned output is the device's exact shape and the picture is
+edge to edge, so the ends of the host's bar sit under the display's rounded
+corners. When `GET /v1/remote/capabilities` says `bar_occlusion: true`, create
+and resize also take
+
+```json
+"bar_occlusion_points": {"top": 46.4, "bottom": 46.4, "left": 46.4, "right": 46.4}
+```
+
+— how far, in the device's points, its corners reach along each edge into a bar
+of the host bar's thickness (`top`/`bottom` are the two ends of a vertical bar,
+`left`/`right` those of a horizontal one). Optional; all four keys, each
+`0…256`. A resize without it keeps the session's value. It never changes the
+plan. `remote/corners.py` converts it into the owned output's logical px
+(aspect-fit, letterbox subtracted, rounded up, at most a quarter of the edge)
+and `state.remote_bar.bar_insets` publishes that for the session, in either
+mode — a takeover's output is the same device-shaped output, with the whole
+desktop and the bar (on the edge `official_bar_position` picked) on it
+(REMOTE-SAFE-1b). It is `null` for a client that sent nothing and with no
+session. The Omodachi plugin's bar widget on that one output moves the bar's
+end sections inward by it (`omodachi-plugin` `BarWidget.qml`), and reports
+back through `omarchy-shell omodachi barGeometry` where that bar's Omarchy logo
+now is (`bar_geometry.py`), so `state.bar.geometry.logo` follows it.
 
 ### Connection shapes
 

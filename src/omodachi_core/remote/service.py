@@ -284,6 +284,26 @@ class RemoteService:
             return None
         self.last_manager_error = None
         self.manager = manager
+        # REMOTE-SAFE-1 §5 finding. A manager built here - the daemon started
+        # before the desktop, which is every boot - was never given the event
+        # callback `attach_transport` gives a startup manager, nor its one
+        # recovery pass. Its sessions then never reached `state.remote`
+        # (it stayed `offline` through a live session) and nothing that reads
+        # that field - the plugin's icon, its takeover lock, the corner insets -
+        # knew a session was running.
+        if self._loop is not None:
+            manager.events = self._emit
+            # And the compositor event stream (display changes, the bar layer
+            # opening or closing), which is also only started for a manager
+            # that existed when the transport attached.
+            if self._watchdog is not None and self._display_watch is None:
+                self._display_watch = asyncio.create_task(self._watch_display())
+            if not self._recovered:
+                self._recovered = True
+                try:
+                    await self._job(manager.recover)
+                except RemoteError:
+                    pass
         self._sync_state()
         return manager
 
@@ -293,6 +313,7 @@ class RemoteService:
             self._capabilities = {"backends": {"sunshine": {"available": False, "reason": self.unavailable_reason},
                                                "vnc": {"available": False, "reason": self.unavailable_reason}},
                                   "modes": [], "placement_options": [], "lock_local_input_supported": False,
+                                  "bar_occlusion": False,
                                   "encoder_limits": None}
         else:
             self._capabilities = await self._job(self.manager.capabilities)

@@ -634,6 +634,39 @@
         },
         "adaptive": {
           "type": "boolean"
+        },
+        "bar_occlusion_points": {
+          "description": "REMOTE-SAFE-1. How far the device's display corners reach along each edge into a bar of the host bar's thickness, in the device's points. Optional; only sent to a host whose remote capabilities say bar_occlusion.",
+          "type": "object",
+          "required": [
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ],
+          "properties": {
+            "top": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "bottom": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "left": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "right": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 256
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [
@@ -828,6 +861,39 @@
         },
         "adaptive": {
           "type": "boolean"
+        },
+        "bar_occlusion_points": {
+          "description": "REMOTE-SAFE-1. How far the device's display corners reach along each edge into a bar of the host bar's thickness, in the device's points. Optional; only sent to a host whose remote capabilities say bar_occlusion.",
+          "type": "object",
+          "required": [
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ],
+          "properties": {
+            "top": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "bottom": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "left": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "right": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 256
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": [

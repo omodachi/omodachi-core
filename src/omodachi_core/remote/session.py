@@ -23,6 +23,7 @@ from ..protocol import IDLE_REMOTE_BAR as IDLE_BAR
 from .errors import RemoteError
 from .hyprland import (DPMS_WAKE_OPTIONS, Hyprland, OUTPUT_BOUND_DEVICES, OutputState, OWNED_NAME,
                         focus_workspace_lua, guard_lua, new_output_name, place)
+from .corners import parse_occlusion, to_output_pixels
 from .journal import Journal
 from .profile import (DesktopProfile, DesktopProfileError, EncoderLimits, PixelSize, PointRect,
                       PointSize, ProfileRequest, QualityBudget, ViewportProfilePlanner,
@@ -82,6 +83,10 @@ class RemoteSession:
     reason: str | None = None
     quality_preset: str = "host"
     adaptive: bool = False
+    # REMOTE-SAFE-1: how far the device's corners reach into each end of the
+    # host bar, in the device's points (`corners.parse_occlusion`). Not part of
+    # `request`: it never changes the plan, only what the plugin does with it.
+    bar_occlusion: dict | None = None
 
     def to_dict(self):
         output = None
@@ -302,6 +307,10 @@ class RemoteManager:
             backends[name] = backend.status() if backend is not None else {"available": False, "reason": "backend_not_installed"}
         return {"backends": backends, "modes": list(MODES), "placement_options": list(PLACEMENTS),
                 "lock_local_input_supported": True, "default_backend": self.default_backend(backends),
+                # REMOTE-SAFE-1: this host takes `bar_occlusion_points` on
+                # create/resize. A client sends it only when this says so, so a
+                # host from before it is never sent a field it would refuse.
+                "bar_occlusion": True,
                 "encoder_limits": {**asdict(self.encoder), "codecs": list(self.encoder.codecs)}}
 
     def default_backend(self, backends=None):
@@ -362,7 +371,7 @@ class RemoteManager:
             raise RemoteError("remote_session_exists", 409, **self._owner_detail(live))
         allowed = {"backend", "mode", "viewport_points", "orientation", "logical_long_edge",
                    "quality", "decoder", "placement", "lock_local_input", "ttl_seconds",
-                   "quality_preset", "adaptive"}
+                   "quality_preset", "adaptive", "bar_occlusion_points"}
         if not isinstance(payload, dict) or set(payload) - allowed:
             raise RemoteError("invalid_request", 400)
         preset = self._preset(payload.get("quality_preset"))
@@ -379,6 +388,7 @@ class RemoteManager:
         request = self._request({key: payload[key] for key in
                                  ("viewport_points", "orientation", "logical_long_edge", "quality", "decoder")
                                  if key in payload})
+        occlusion = parse_occlusion(payload.get("bar_occlusion_points"))
         backend = self._backend(backend_name)
         preflight = getattr(backend, "preflight", None)
         if preflight is not None:
@@ -392,7 +402,7 @@ class RemoteManager:
                                      journal_path=str(journal.path), created_at=now, ttl_seconds=float(ttl),
                                      placement=placement, lock_local_input=lock_input,
                                      request=request.to_dict(), last_heartbeat=self.monotonic(),
-                                     quality_preset=preset, adaptive=adaptive)
+                                     quality_preset=preset, adaptive=adaptive, bar_occlusion=occlusion)
         self._journal = journal
         self._reconfigure_failures = 0
         physical = self._physical()
@@ -401,7 +411,7 @@ class RemoteManager:
                         "state": "creating", "revision": 1, "created_at": now, "ttl_seconds": float(ttl),
                         "output_name": name, "placement": placement, "lock_local_input": lock_input,
                         "request": request.to_dict(), "profile": None, "position": None,
-                        "quality_preset": preset, "adaptive": adaptive,
+                        "quality_preset": preset, "adaptive": adaptive, "bar_occlusion": occlusion,
                         "baseline": [row.to_dict() for row in physical], "takeover": None, "prepared": False,
                         "device_outputs": [],
                         "idle_was_enabled": self.idle.enabled() if self.idle is not None else None}
@@ -680,18 +690,26 @@ class RemoteManager:
 
     def resize(self, session_id, payload):
         allowed = {"expected_revision", "viewport_points", "orientation", "logical_long_edge", "quality", "decoder",
-                   "quality_preset", "adaptive"}
+                   "quality_preset", "adaptive", "bar_occlusion_points"}
         if not isinstance(payload, dict) or set(payload) - allowed or "expected_revision" not in payload:
             raise RemoteError("invalid_request", 400)
         session = self._check(session_id, payload["expected_revision"])
+        # A resize that does not mention the corners keeps them; a rotation
+        # that does replaces them (the ends of the bar are different edges).
+        occlusion = (parse_occlusion(payload["bar_occlusion_points"]) if "bar_occlusion_points" in payload
+                     else session.bar_occlusion)
         # A resize that does not name a preset keeps the session's: a rotation
         # is not a change of mind about the picture's quality.
         preset = self._preset(payload.get("quality_preset"), fallback=session.quality_preset)
         adaptive = self._adaptive(payload.get("adaptive"), fallback=session.adaptive)
         merged = dict(session.request)
         merged.update({key: value for key, value in payload.items()
-                       if key not in {"expected_revision", "quality_preset", "adaptive"}})
+                       if key not in {"expected_revision", "quality_preset", "adaptive", "bar_occlusion_points"}})
         request = self._request(merged)
+        # Taken before the host is touched, like the request itself: a resize
+        # that fails releases the whole session, corners and all.
+        session.bar_occlusion = occlusion
+        self._record["bar_occlusion"] = occlusion
         return self._reapply(session, request, session.backend, "resized", preset=preset, adaptive=adaptive)
 
     def switch_backend(self, session_id, payload):
@@ -1269,7 +1287,16 @@ class RemoteManager:
                  "windows": row["windows"], "active": bool(active) and row["id"] == active[0],
                  "remote": row["monitor_id"] == owned.monitor_id}
                 for row in self.hyprland.workspaces() if row["id"] > 0]
+        logical = {"width": owned.width / owned.scale, "height": owned.height / owned.scale}
+        # REMOTE-SAFE-1 / 1b. Both modes: an Extend output and a takeover
+        # output are the same device-shaped OMODACHI output, and the bar on it
+        # reaches the same corners (in a takeover the whole desktop is on it,
+        # with the bar on the edge `official_bar_position` picked). The
+        # insets are for that output only; the plugin applies them to the bar
+        # on the screen named `output_name` and nowhere else. A device that
+        # reported no corners says nothing.
+        insets = to_output_pixels(session.bar_occlusion, viewport, logical)
         return {"active": True, "session_id": session.id, "output_name": session.output_name,
                 "viewport": viewport, "orientation": _orientation_of(viewport),
-                "logical_size": {"width": owned.width / owned.scale, "height": owned.height / owned.scale},
-                "revision": str(session.revision), "workspaces": rows}
+                "logical_size": logical,
+                "revision": str(session.revision), "workspaces": rows, "bar_insets": insets}

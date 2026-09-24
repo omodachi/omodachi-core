@@ -783,5 +783,175 @@ class PinnedSunshineTests(unittest.TestCase):
         self.assertIn("pinned 328d231", out)
         self.assertNotIn("/releases/latest/", out)
         current = dict(older, version="328d231")
-        result, out, err, install, _ = self.run_install(current, spec="latest")
+        result, out, err, install, _ = self.run_install(current, spec="latest", sha256="e" * 64)
         self.assertIn("/releases/latest/", install.call_args.args[0])
+        self.assertEqual(install.call_args.kwargs["sha256"], "e" * 64)
+
+
+class SunshineOverrideTests(unittest.TestCase):
+    """RELEASE-6: an optional Sunshine override the installer cannot verify is refused.
+
+    An archive other than the pin needs an explicit sha256 (no `.sha256` sidecar,
+    no unchecked fallback, `latest` included); a git URL to build needs an exact
+    commit, fetched detached and checked right before its script runs. A local
+    build path is the user's own tree.
+    """
+
+    def setUp(self):
+        import os
+        import subprocess
+        self.subprocess = subprocess
+        self.scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(self.scratch.cleanup)
+        self.home = Path(self.scratch.name) / "home"
+        source = self.home / ".local/share/omodachi/src"
+        (source / "requirements").mkdir(parents=True)
+        (source / "pyproject.toml").write_text("")
+        (source / install_host.HOST_LOCK).write_text("")
+        (source / "src").symlink_to(ROOT / "src")
+        self.env = dict(os.environ, GIT_CONFIG_GLOBAL="/dev/null", GIT_CONFIG_NOSYSTEM="1",
+                        GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t",
+                        GIT_COMMITTER_EMAIL="t@t")
+
+    def install_local(self, **options):
+        import contextlib
+        import io
+        from unittest import mock
+        err = io.StringIO()
+        with mock.patch.object(Path, "home", return_value=self.home), \
+                mock.patch.object(install_host, "run", side_effect=AssertionError("ran something")), \
+                mock.patch.dict("os.environ", {"OMODACHI_SUNSHINE_PACKAGE": "", "OMODACHI_SUNSHINE_SHA256": ""}), \
+                contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            code = install_host.install_local(firewall=False, vnc=False, **options)
+        return code, err.getvalue()
+
+    def assert_refused_before_anything(self, needle, **options):
+        code, err = self.install_local(**options)
+        self.assertEqual(code, 2, err)
+        self.assertIn("refusing to install", err)
+        self.assertIn(needle, err)
+        # nothing was created: the refusal comes before the first directory
+        self.assertFalse((self.home / ".config/omodachi").exists())
+
+    def test_an_archive_url_or_path_without_a_sha256_is_refused(self):
+        for spec in ("https://example.invalid/omodachi-sunshine-x-x86_64.tar.zst",
+                     "/tmp/omodachi-sunshine-x-x86_64.tar.zst", "latest"):
+            with self.subTest(spec=spec):
+                self.assert_refused_before_anything("--sunshine-sha256", sunshine_package=spec)
+
+    def test_the_environment_override_without_a_sha256_is_refused(self):
+        import contextlib
+        import io
+        from unittest import mock
+        stderr = io.StringIO()
+        with mock.patch.object(Path, "home", return_value=self.home), \
+                mock.patch.object(install_host, "run", side_effect=AssertionError("ran something")), \
+                mock.patch.dict("os.environ", {"OMODACHI_SUNSHINE_PACKAGE": "http://jump/x.tar.zst",
+                                               "OMODACHI_SUNSHINE_SHA256": ""}), \
+                contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(io.StringIO()):
+            code = install_host.install_local(firewall=False, vnc=False)
+        self.assertEqual(code, 2)
+        self.assertIn("OMODACHI_SUNSHINE_SHA256", stderr.getvalue())
+
+    def test_a_malformed_or_conflicting_sha256_is_refused(self):
+        self.assert_refused_before_anything("not a sha256", sunshine_package="/tmp/x.tar.zst",
+                                            sunshine_sha256="abc")
+        self.assert_refused_before_anything("pinned archive must hash to", sunshine_sha256="d" * 64)
+
+    def test_a_git_url_build_without_an_exact_commit_is_refused(self):
+        self.assert_refused_before_anything("--sunshine-build-commit",
+                                            sunshine_build="https://example.invalid/fork.git")
+        self.assert_refused_before_anything("--sunshine-build-commit",
+                                            sunshine_build="git@example.invalid:fork.git")
+        self.assert_refused_before_anything("not a full 40-character commit",
+                                            sunshine_build="https://example.invalid/fork.git",
+                                            sunshine_build_commit="328d231")
+        self.assert_refused_before_anything("only goes with", sunshine_build_commit="a" * 40)
+        self.assert_refused_before_anything("only goes with a git URL",
+                                            sunshine_build="/home/u/omodachi-sunshine",
+                                            sunshine_build_commit="a" * 40)
+
+    def test_a_local_build_path_and_the_plain_pin_are_not_refused(self):
+        source = self.home / ".local/share/omodachi/src"
+        self.assertEqual(install_host.sunshine_override_refusal(source, build="/home/u/fork"), "")
+        self.assertEqual(install_host.sunshine_override_refusal(source), "")
+        self.assertEqual(install_host.sunshine_override_refusal(
+            source, spec="/tmp/x.tar.zst", sha256="f" * 64), "")
+
+    # --- the git URL build path, against a real repository ------------------
+
+    def git(self, *args, cwd):
+        return self.subprocess.run(["git", *args], cwd=cwd, env=self.env, check=True,
+                                   capture_output=True, text=True).stdout.strip()
+
+    def fork(self):
+        upstream = Path(self.scratch.name) / "fork"
+        (upstream / "scripts").mkdir(parents=True)
+        (upstream / "scripts/package_release.sh").write_text(
+            'mkdir -p "$OMODACHI_PACKAGE_OUT"; echo built > "$OMODACHI_PACKAGE_OUT/ran"\n'
+            'git -C "$(dirname "$0")/.." rev-parse HEAD > "$OMODACHI_PACKAGE_OUT/omodachi-sunshine-x-x86_64.tar.zst"\n')
+        self.git("init", "-q", cwd=upstream)
+        self.git("add", ".", cwd=upstream)
+        self.git("commit", "-qm", "one", cwd=upstream)
+        first = self.git("rev-parse", "HEAD", cwd=upstream)
+        (upstream / "scripts/package_release.sh").write_text("echo branch head > /dev/null\nexit 3\n")
+        self.git("commit", "-qam", "two", cwd=upstream)
+        return upstream, first
+
+    def build(self, url, commit):
+        import contextlib
+        import io
+        from unittest import mock
+        out = Path(self.scratch.name) / "dist"
+        err = io.StringIO()
+        with mock.patch.object(Path, "home", return_value=self.home), \
+                mock.patch.dict("os.environ", dict(self.env, OMODACHI_PACKAGE_OUT=str(out))), \
+                contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            result = install_host.build_sunshine(url, commit=commit)
+        return result, out, err.getvalue()
+
+    def test_a_git_url_is_built_at_exactly_the_pinned_commit_not_its_head(self):
+        upstream, first = self.fork()
+        result, out, err = self.build(upstream.as_uri(), first)
+        self.assertTrue(result["built"], err)
+        self.assertEqual(Path(result["archive"]).read_text().strip(), first)
+        cache = self.home / install_host.SUNSHINE_BUILD_CACHE
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=cache), first)
+
+    def test_a_commit_the_url_does_not_have_is_refused_and_nothing_runs(self):
+        upstream, _ = self.fork()
+        result, out, err = self.build(upstream.as_uri(), "b" * 40)
+        self.assertEqual(result, {"built": False, "reason": "sunshine_build_unverified"})
+        self.assertFalse((out / "ran").exists())
+
+    def test_the_last_check_catches_a_tree_that_is_not_the_commit(self):
+        upstream, first = self.fork()
+        cache = self.home / install_host.SUNSHINE_BUILD_CACHE
+        import contextlib
+        import io
+        with mock_home(self.home), contextlib.redirect_stdout(io.StringIO()):
+            ok, _ = install_host.fetch_sunshine_commit(upstream.as_uri(), first, cache)
+        self.verify = lambda commit: self.quiet(install_host.verify_sunshine_checkout, cache, commit)
+        self.assertTrue(ok)
+        (cache / "scripts/extra.sh").write_text("echo not in the commit\n")
+        ok, detail = self.verify(first)
+        self.assertFalse(ok)
+        self.assertIn("not clean", detail)
+        (cache / "scripts/extra.sh").unlink()
+        (cache / "scripts/package_release.sh").write_text("echo changed\n")
+        self.assertFalse(self.verify(first)[0])
+        self.git("checkout", "-q", "--force", "HEAD", cwd=cache)
+        self.assertTrue(self.verify(first)[0])
+        self.assertIn("not the requested", self.verify("c" * 40)[1])
+
+    @staticmethod
+    def quiet(function, *args):
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+            return function(*args)
+
+
+def mock_home(home):
+    from unittest import mock
+    return mock.patch.object(Path, "home", return_value=home)

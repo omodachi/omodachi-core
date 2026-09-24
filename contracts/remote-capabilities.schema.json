@@ -198,6 +198,10 @@
         "sunshine",
         "vnc"
       ]
+    },
+    "bar_occlusion": {
+      "description": "REMOTE-SAFE-1. True when this host accepts `bar_occlusion_points` on remote.create / remote.resize. A client sends the field only when this is true.",
+      "type": "boolean"
     }
   },
   "required": [
@@ -206,7 +210,8 @@
     "placement_options",
     "lock_local_input_supported",
     "encoder_limits",
-    "default_backend"
+    "default_backend",
+    "bar_occlusion"
   ],
   "additionalProperties": false
 }

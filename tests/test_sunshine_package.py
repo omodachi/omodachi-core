@@ -280,11 +280,10 @@ class InstallTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             home = Path(scratch)
             archive = build_archive(home / "p.tar.gz")
-            (home / "p.tar.gz.sha256").write_text(package.digest(archive) + "  p.tar.gz\n")
             runner = Recorder({"systemctl --user cat": (1, "", ""),
                                "systemctl --user is-active": (0, "active\n", "")})
-            result = package.install(str(archive), home, runner=runner,
-                                     adapter="/dev/dri/renderD129")
+            result = package.install(str(archive), home, sha256=package.digest(archive),
+                                     runner=runner, adapter="/dev/dri/renderD129")
             self.assertTrue(result["checksum_pinned"])
             self.assertEqual(result["sha"], "abc1234")
             self.assertEqual(result["source"]["commit"], "a" * 40)
@@ -295,22 +294,38 @@ class InstallTests(unittest.TestCase):
             self.assertTrue((installed / "LICENSE").is_file())
             self.assertEqual(installed.parent.name, "sunshine")
 
-    def test_a_sidecar_that_is_not_a_checksum_is_an_error_not_a_shrug(self):
+    def test_an_archive_with_no_sha256_is_refused_before_it_is_fetched(self):
+        # RELEASE-6: there is no "unpinned" install any more.
+        def opener(url, timeout=None):
+            raise AssertionError(f"fetched {url} with nothing to check it against")
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            for sha256 in (None, "", "not-a-sha", "a" * 63):
+                with self.assertRaises(package.SunshinePackageError) as caught:
+                    package.install("https://example.invalid/x.tar.zst", home, sha256=sha256,
+                                    opener=opener, runner=Recorder())
+                self.assertEqual(caught.exception.code, "sunshine_package_sha256_required")
+            self.assertFalse((home / ".local/share/omodachi/sunshine").exists())
+
+    def test_a_sidecar_beside_the_archive_is_never_trusted(self):
         with tempfile.TemporaryDirectory() as scratch:
             home = Path(scratch)
             archive = build_archive(home / "p.tar.gz")
-            (home / "p.tar.gz.sha256").write_text("see the website\n")
+            # The publisher's own .sha256 matches - and still counts for nothing.
+            (home / "p.tar.gz.sha256").write_text(package.digest(archive) + "  p.tar.gz\n")
             with self.assertRaises(package.SunshinePackageError) as caught:
                 package.install(str(archive), home, runner=Recorder())
-            self.assertEqual(caught.exception.code, "sunshine_package_checksum_unreadable")
+            self.assertEqual(caught.exception.code, "sunshine_package_sha256_required")
+            self.assertFalse(hasattr(package, "sidecar_sha256"))
 
-    def test_an_archive_with_no_sidecar_installs_and_says_it_was_not_pinned(self):
+    def test_an_archive_that_does_not_hash_to_the_given_sha256_is_not_unpacked(self):
         with tempfile.TemporaryDirectory() as scratch:
             home = Path(scratch)
             archive = build_archive(home / "p.tar.gz")
-            runner = Recorder({"systemctl --user cat": (1, "", "")})
-            result = package.install(str(archive), home, runner=runner)
-            self.assertFalse(result["checksum_pinned"])
+            with self.assertRaises(package.SunshinePackageError) as caught:
+                package.install(str(archive), home, sha256="0" * 64, runner=Recorder())
+            self.assertEqual(caught.exception.code, "sunshine_package_checksum_mismatch")
+            self.assertFalse((home / ".local/share/omodachi/sunshine").exists())
 
     def test_a_path_that_does_not_exist_names_itself(self):
         with tempfile.TemporaryDirectory() as scratch:
@@ -341,18 +356,44 @@ class PinTests(unittest.TestCase):
         self.assertEqual((choice["source"], choice["spec"], choice["sha256"], choice["version"]),
                          ("pin", pin["url"], pin["sha256"], pin["version"]))
 
-    def test_latest_is_only_ever_asked_for_by_name(self):
-        choice = package.choose("latest", environ={})
+    def test_latest_is_only_ever_asked_for_by_name_and_with_a_sha256(self):
+        choice = package.choose("latest", "b" * 64, environ={})
         self.assertEqual((choice["source"], choice["spec"], choice["sha256"]),
-                         ("latest", package.LATEST_PACKAGE, None))
-        self.assertEqual(package.choose(environ={package.PACKAGE_ENV: "latest"})["source"], "latest")
+                         ("latest", package.LATEST_PACKAGE, "b" * 64))
+        self.assertEqual(package.choose(environ={package.PACKAGE_ENV: "latest",
+                                                 package.SHA256_ENV: "b" * 64})["source"], "latest")
 
-    def test_a_flag_or_the_environment_overrides_the_pin(self):
-        self.assertEqual(package.choose("/tmp/x.tar.zst", "f" * 64, environ={}),
+    def test_a_flag_or_the_environment_overrides_the_pin_only_with_a_sha256(self):
+        self.assertEqual(package.choose("/tmp/x.tar.zst", "F" * 64, environ={}),
                          {"source": "explicit", "spec": "/tmp/x.tar.zst", "sha256": "f" * 64,
                           "version": None, "satisfied_by": []})
-        staged = package.choose(environ={package.PACKAGE_ENV: "http://jump/x.tar.zst"})
-        self.assertEqual((staged["source"], staged["sha256"]), ("explicit", None))
+        staged = package.choose(environ={package.PACKAGE_ENV: "http://jump/x.tar.zst",
+                                         package.SHA256_ENV: "c" * 64})
+        self.assertEqual((staged["source"], staged["sha256"]), ("explicit", "c" * 64))
+
+    def test_an_override_without_a_sha256_is_refused(self):
+        # RELEASE-6: flag, environment and `latest` alike; no sidecar, no fallback.
+        for spec, environ in (("https://example.invalid/x.tar.zst", {}), ("/tmp/x.tar.zst", {}),
+                              ("latest", {}), (None, {package.PACKAGE_ENV: "http://jump/x.tar.zst"}),
+                              (None, {package.PACKAGE_ENV: "latest"})):
+            with self.subTest(spec=spec, environ=environ), \
+                    self.assertRaises(package.SunshinePackageError) as caught:
+                package.choose(spec, environ=environ)
+            self.assertEqual(caught.exception.code, "sunshine_package_sha256_required")
+            self.assertIn("--sunshine-sha256", caught.exception.detail)
+
+    def test_a_malformed_sha256_is_refused(self):
+        for bad in ("abc", "g" * 64, "a" * 65):
+            with self.subTest(bad=bad), self.assertRaises(package.SunshinePackageError) as caught:
+                package.choose("/tmp/x.tar.zst", bad, environ={})
+            self.assertEqual(caught.exception.code, "sunshine_package_sha256_invalid")
+
+    def test_a_second_checksum_cannot_loosen_the_pin(self):
+        pin = package.pinned()
+        self.assertEqual(package.choose(None, pin["sha256"], environ={})["sha256"], pin["sha256"])
+        with self.assertRaises(package.SunshinePackageError) as caught:
+            package.choose(None, "d" * 64, environ={})
+        self.assertEqual(caught.exception.code, "sunshine_package_sha256_conflict")
 
     def test_a_pin_that_points_at_latest_or_has_no_checksum_is_refused(self):
         with tempfile.TemporaryDirectory() as scratch:
@@ -422,7 +463,7 @@ class PinTests(unittest.TestCase):
         for version in ("a2fd635", "17c6043", "e58627a", "328d231-dirty", "", "328d2"):
             self.assertFalse(package.satisfies(version, pin), version)
         # Only the pin may be skipped for: an explicit archive is always installed.
-        self.assertFalse(package.satisfies("328d231", package.choose("latest", environ={})))
+        self.assertFalse(package.satisfies("328d231", package.choose("latest", "e" * 64, environ={})))
 
     def test_a_unit_that_runs_something_else_is_not_a_managed_fork(self):
         with tempfile.TemporaryDirectory() as scratch:

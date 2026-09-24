@@ -19,7 +19,8 @@ import unittest
 
 from omodachi_core.bar import parse_bar_layout
 from omodachi_core.bar_geometry import (BarGeometry, BarStyle, bar_layer, compose, logo_slot,
-                                        measured_position, session_output, user_shell_tokens,
+                                        measured_position, PLUGIN_COMMAND, plugin_logo, plugin_rows,
+                                        session_output, user_shell_tokens,
                                         _round_half_up)
 
 
@@ -297,9 +298,13 @@ class ReaderTests(unittest.TestCase):
         profile = Profile()
         position = (2304, 0)
 
-    def reader(self, calls, *, clock=None):
+    def reader(self, calls, *, clock=None, plugin=None):
         def runner(argv, env):
             calls.append(argv)
+            if argv == PLUGIN_COMMAND:
+                # REMOTE-SAFE-1: the plugin's report, or qs's complaint when the
+                # target does not exist (omarchy-shell still exits 0).
+                return json.dumps(plugin) if plugin is not None else "Target not found"
             return json.dumps(layers(rect=(2304, 0, 1280, 30)))
         return BarGeometry(runner=runner, environment=lambda: {},
                            clock=clock or (lambda: 0.0))
@@ -315,8 +320,8 @@ class ReaderTests(unittest.TestCase):
         reader = self.reader(calls)
         for _ in range(5):
             reader.snapshot(self.Session(), "top", SECTIONS)
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0], ("/usr/bin/hyprctl", "-j", "layers"))
+        # One compositor read and one plugin read, both inside the throttle.
+        self.assertEqual(calls, [("/usr/bin/hyprctl", "-j", "layers"), PLUGIN_COMMAND])
 
     def test_the_layer_events_force_the_next_read(self):
         calls = []
@@ -324,7 +329,8 @@ class ReaderTests(unittest.TestCase):
         reader.snapshot(self.Session(), "top", SECTIONS)
         reader.mark_dirty()
         reader.snapshot(self.Session(), "top", SECTIONS)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls.count(("/usr/bin/hyprctl", "-j", "layers")), 2)
+        self.assertEqual(calls.count(PLUGIN_COMMAND), 2)
 
     def test_no_session_means_no_geometry_and_no_probe(self):
         calls = []
@@ -347,6 +353,57 @@ class ReaderTests(unittest.TestCase):
         value = reader.snapshot(self.Session(), "top", SECTIONS)
         self.assertEqual(value["output"], "OMODACHI-1")
         self.assertEqual(value["bar"], {"x": 0.0, "y": 0.0, "width": 1280.0, "height": 30.0})
+
+
+class PluginLogoTests(unittest.TestCase):
+    """REMOTE-SAFE-1 §4. The plugin's own report of where the logo is.
+
+    Leo's layout has `omarchy.menu` in the `center` group, where its position
+    depends on every other widget's width - nothing core can model - and the
+    plugin now moves the bar's end sections inward on a phone. The widget that
+    lives in that very bar measures both.
+    """
+    Session = ReaderTests.Session
+
+    def reader(self, rows, calls=None):
+        calls = [] if calls is None else calls
+        return ReaderTests.reader(ReaderTests(), calls, plugin=rows)
+
+    def test_a_logo_in_the_center_group_is_found(self):
+        # The layout has no logo at the leading end: the model says none.
+        centre = {"left": [{"id": "omarchy.workspaces"}]}
+        rows = [{"output": "eDP-1", "logo": {"x": 900, "y": 0, "width": 32, "height": 30}},
+                {"output": "OMODACHI-1", "logo": {"x": 610, "y": 0, "width": 32, "height": 30}}]
+        self.assertIsNone(ReaderTests().reader([]).snapshot(self.Session(), "top", centre)["logo"])
+        value = self.reader(rows).snapshot(self.Session(), "top", centre)
+        self.assertEqual(value["logo"], {"x": 610.0, "y": 0.0, "width": 32.0, "height": 30.0})
+
+    def test_the_moved_leading_end_is_where_the_mark_goes(self):
+        # The plugin pushed the leading section 68 px in to clear the corner;
+        # the modelled slot would still say 8.
+        rows = [{"output": "OMODACHI-1", "logo": {"x": 68, "y": 0, "width": 27, "height": 30}}]
+        modelled = ReaderTests().reader([]).snapshot(self.Session(), "top", SECTIONS)["logo"]
+        self.assertEqual(modelled["x"], 8.0)
+        self.assertEqual(self.reader(rows).snapshot(self.Session(), "top", SECTIONS)["logo"]["x"], 68.0)
+
+    def test_the_plugin_saying_no_logo_on_this_bar_is_believed(self):
+        rows = [{"output": "OMODACHI-1", "logo": None}]
+        self.assertIsNone(self.reader(rows).snapshot(self.Session(), "top", SECTIONS)["logo"])
+
+    def test_no_row_for_this_output_falls_back_to_the_model(self):
+        rows = [{"output": "eDP-1", "logo": {"x": 900, "y": 0, "width": 32, "height": 30}}]
+        self.assertEqual(self.reader(rows).snapshot(self.Session(), "top", SECTIONS)["logo"]["x"], 8.0)
+
+    def test_garbage_is_no_answer(self):
+        for text in ("Target not found", "{}", "[1, 2]", "null", ""):
+            self.assertIsNone(plugin_rows(text) or None)
+        self.assertEqual(plugin_logo(None, "OMODACHI-1", {"width": 10, "height": 10}), (False, None))
+
+    def test_a_rectangle_outside_the_output_is_no_logo(self):
+        size = {"width": 1280, "height": 894}
+        for logo in ({"x": 1300, "y": 0, "width": 32, "height": 30}, {"x": 0, "y": -40, "width": 32, "height": 30},
+                     {"x": 0, "y": 0, "width": 0, "height": 30}, {"x": "a", "y": 0, "width": 1, "height": 1}):
+            self.assertEqual(plugin_logo([{"output": "OMODACHI-1", "logo": logo}], "OMODACHI-1", size), (True, None))
 
 
 if __name__ == "__main__":

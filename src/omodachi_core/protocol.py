@@ -7,7 +7,8 @@ CONTRACT_REVISION = "omodachi.v1"
 # hub's initial state keeps the first desktop maintenance pass from emitting a
 # remote_bar.changed event that reports no actual change.
 IDLE_REMOTE_BAR = {"active": False, "session_id": None, "output_name": None, "viewport": None,
-                   "orientation": None, "logical_size": None, "workspaces": [], "revision": None}
+                   "orientation": None, "logical_size": None, "workspaces": [], "revision": None,
+                   "bar_insets": None}
 
 # The panel destinations a host-side shortcut can recall. `overview` is the
 # root panel; `keybindings` is the shortcuts overlay SUPER+K opens locally, so a

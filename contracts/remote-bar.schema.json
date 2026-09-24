@@ -117,6 +117,42 @@
         },
         "additionalProperties": false
       }
+    },
+    "bar_insets": {
+      "description": "REMOTE-SAFE-1 (both modes since 1b): how many logical px of the owned output the device's rounded corners cover at each end of the host bar (top/bottom = ends of a vertical bar, left/right = ends of a horizontal one). null when the device reported no corners or there is no session.",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "top",
+            "bottom",
+            "left",
+            "right"
+          ],
+          "properties": {
+            "top": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "bottom": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "left": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "right": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
@@ -127,7 +163,8 @@
     "logical_size",
     "orientation",
     "revision",
-    "workspaces"
+    "workspaces",
+    "bar_insets"
   ],
   "additionalProperties": false
 }

@@ -23,6 +23,17 @@ DEFAULT_DECODER = {"max_width": 4096, "max_height": 4096, "max_pixels": 16777216
                    "max_fps": 60, "max_bitrate_kbps": 40000, "codecs": ["h264"]}
 
 
+def bar_occlusion(value: str) -> dict:
+    """REMOTE-SAFE-1: `TOP,BOTTOM,LEFT,RIGHT` in the device's points."""
+    try:
+        numbers = [float(part) for part in value.split(",")]
+    except ValueError:
+        raise argparse.ArgumentTypeError("expected TOP,BOTTOM,LEFT,RIGHT") from None
+    if len(numbers) != 4:
+        raise argparse.ArgumentTypeError("expected TOP,BOTTOM,LEFT,RIGHT")
+    return dict(zip(("top", "bottom", "left", "right"), numbers))
+
+
 def viewport(value: str) -> dict:
     try:
         width, height = (int(part) for part in value.lower().split("x", 1))
@@ -311,6 +322,8 @@ async def remote_request(args, token):
     payload["logical_long_edge"] = args.logical_long_edge or 1280.0
     if getattr(args, "quality_preset", None):
         payload["quality_preset"] = args.quality_preset
+    if getattr(args, "bar_occlusion", None) is not None:
+        payload["bar_occlusion_points"] = args.bar_occlusion
     if getattr(args, "fps", None) or getattr(args, "bitrate_kbps", None):
         payload["quality"] = {**DEFAULT_QUALITY, **({"fps": args.fps} if args.fps else {}),
                               **({"bitrate_kbps": args.bitrate_kbps} if args.bitrate_kbps else {})}
@@ -487,6 +500,9 @@ def host_main(argv=None) -> int:
         command.add_argument("--quality-preset", choices=("host", "performance", "balanced", "quality", "custom"))
         command.add_argument("--fps", type=int)
         command.add_argument("--bitrate-kbps", type=int)
+        # REMOTE-SAFE-1: what the App sends as bar_occlusion_points, for an
+        # operator reproducing a device's corners without the device.
+        command.add_argument("--bar-occlusion", type=bar_occlusion, metavar="TOP,BOTTOM,LEFT,RIGHT")
         if operation == "start":
             command.add_argument("--mode", choices=("extend", "takeover"), default="extend")
             command.add_argument("--backend", choices=("sunshine", "vnc"), default="sunshine")

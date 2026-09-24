@@ -358,7 +358,8 @@ def install_sunshine(source: Path, *, spec=None, sha256=None, adapter=None) -> d
     spec, sha256 = choice["spec"], choice["sha256"]
     print(f"+ installing the managed Sunshine fork from {spec}"
           + (f" (pinned {choice['version']}, sha256 {sha256[:12]}…)" if choice["source"] == "pin" else
-             " (the newest release, asked for by name)" if choice["source"] == "latest" else ""),
+             f" (the newest release, asked for by name, sha256 {sha256[:12]}…)" if choice["source"] == "latest" else
+             f" (sha256 {sha256[:12]}…, given with --sunshine-sha256)"),
           flush=True)
     try:
         result = package.install(spec, Path.home(), sha256=sha256, adapter=adapter)
@@ -369,8 +370,8 @@ def install_sunshine(source: Path, *, spec=None, sha256=None, adapter=None) -> d
               file=sys.stderr)
         return {"installed": False, "reason": error.code, "detail": error.detail}
     unit = result["unit"]
-    print(f"installed {result['sha']} into {result['directory']}"
-          + ("" if result["checksum_pinned"] else " (no pinned sha256 for this archive)"), flush=True)
+    print(f"installed {result['sha']} into {result['directory']} (sha256 {result['sha256'][:12]}… checked)",
+          flush=True)
     if result["packages"]["installed"]:
         print("installed host packages: " + ", ".join(result["packages"]["installed"]), flush=True)
     elif result["packages"]["reason"] == "package_install_failed":
@@ -393,22 +394,101 @@ def install_sunshine(source: Path, *, spec=None, sha256=None, adapter=None) -> d
     return result
 
 
-def build_sunshine(checkout: str, *, jobs=4) -> dict:
+SUNSHINE_BUILD_CACHE = ".cache/omodachi/sunshine-src"
+# The same guard the plugin bootstrap uses (RELEASE-5): a checkout's own hooks,
+# fsmonitor and replace refs get no say in what this installer asks git.
+GIT_SAFE = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "--no-replace-objects")
+_FULL_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+
+
+def is_git_url(checkout: str) -> bool:
+    return "://" in checkout or bool(re.match(r"^[\w.-]+@[\w.-]+:", checkout))
+
+
+def sunshine_build_refusal(checkout, commit) -> str:
+    """Why a --sunshine-build request is refused before anything runs, or ""."""
+    if checkout is None:
+        return "--sunshine-build-commit only goes with --sunshine-build <git-url>" if commit else ""
+    if is_git_url(checkout):
+        if not commit:
+            return (f"--sunshine-build {checkout} is a git URL, so it needs the exact commit to "
+                    f"build: add --sunshine-build-commit <40-hex sha>. A branch or HEAD is "
+                    f"never built")
+        if not _FULL_COMMIT.fullmatch(commit):
+            return f"--sunshine-build-commit {commit!r} is not a full 40-character commit sha"
+        return ""
+    if commit:
+        return ("--sunshine-build-commit only goes with a git URL; a local --sunshine-build "
+                "path is built as it stands, as your own tree")
+    return ""
+
+
+def _git(root: Path, *arguments, check=False):
+    return run(["git", *GIT_SAFE, "-C", str(root), *arguments], check=check,
+               capture_output=True, text=True)
+
+
+def fetch_sunshine_commit(url: str, commit: str, root: Path) -> tuple[bool, str]:
+    """Put exactly `commit` of `url`, detached and clean, at `root`.
+
+    `root` is this installer's own cache, so whatever is there is thrown away
+    rather than trusted. Returns (ok, detail); ok only when HEAD is the commit,
+    its tree is the commit's tree and there is nothing else in the work tree.
+    """
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True)
+    if run(["git", "init", "--quiet", str(root)], check=False).returncode != 0:
+        return False, "git init failed"
+    fetched = _git(root, "fetch", "--depth", "1", url, commit)
+    if fetched.returncode != 0:
+        return False, (fetched.stderr or "").strip()[:300] or f"could not fetch {commit} from {url}"
+    got = (_git(root, "rev-parse", "FETCH_HEAD^{commit}").stdout or "").strip()
+    if got != commit:
+        return False, f"{url} answered {got or 'nothing'} for {commit}"
+    if _git(root, "checkout", "--quiet", "--force", "--detach", commit).returncode != 0:
+        return False, f"could not check out {commit}"
+    _git(root, "submodule", "update", "--init", "--recursive", "--depth", "1")
+    return verify_sunshine_checkout(root, commit)
+
+
+def verify_sunshine_checkout(root: Path, commit: str) -> tuple[bool, str]:
+    head = (_git(root, "rev-parse", "--verify", "HEAD^{commit}").stdout or "").strip()
+    if head != commit:
+        return False, f"HEAD is {head or 'unknown'}, not the requested {commit}"
+    trees = [(_git(root, "rev-parse", "--verify", f"{name}^{{tree}}").stdout or "").strip()
+             for name in ("HEAD", commit)]
+    if not trees[0] or trees[0] != trees[1]:
+        return False, "the checked-out tree is not the commit's tree"
+    dirty = (_git(root, "status", "--porcelain", "--untracked-files=all").stdout or "").strip()
+    if dirty:
+        return False, "the checkout is not clean: " + "; ".join(dirty.splitlines()[:5])
+    return True, ""
+
+
+def build_sunshine(checkout: str, *, commit=None, jobs=4) -> dict:
     """Fallback: build the fork here with its own release script.
 
-    `checkout` is a local checkout or a git URL. This needs the fork's build
-    dependencies (FORK.md); it is the documented answer for an architecture or
-    a host with no published archive, not the ordinary path.
+    `checkout` is a local tree or a git URL. A git URL is built only at the
+    exact `commit` asked for - fetched detached into this installer's cache and
+    checked (HEAD, tree, clean) immediately before its script runs - never a
+    branch head. A local path is the user's own tree and is built as it stands;
+    the fork's script itself refuses a dirty tree for a release. This needs the
+    fork's build dependencies (FORK.md); it is the documented answer for an
+    architecture or a host with no published archive, not the ordinary path.
     """
-    root = Path.home() / ".cache/omodachi/sunshine-src"
-    if "://" in checkout:
-        if root.is_dir():
-            run(["git", "-C", str(root), "fetch", "--depth", "1", "origin", "HEAD"], check=False)
-            run(["git", "-C", str(root), "checkout", "--force", "FETCH_HEAD"], check=False)
-        else:
-            root.parent.mkdir(parents=True, exist_ok=True)
-            run(["git", "clone", "--depth", "1", checkout, str(root)])
-        source = root
+    refusal = sunshine_build_refusal(checkout, commit)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return {"built": False, "reason": "sunshine_build_refused"}
+    if is_git_url(checkout):
+        source = Path.home() / SUNSHINE_BUILD_CACHE
+        ok, detail = fetch_sunshine_commit(checkout, commit, source)
+        if ok:
+            # Last check before the checkout's own script runs.
+            ok, detail = verify_sunshine_checkout(source, commit)
+        if not ok:
+            print(f"not building {checkout} at {commit}: {detail}", file=sys.stderr)
+            return {"built": False, "reason": "sunshine_build_unverified"}
     else:
         source = Path(checkout).expanduser().resolve()
     script = source / "scripts/package_release.sh"
@@ -783,6 +863,7 @@ def remove_local(*, purge=False, sunshine=True) -> int:
     # sources stay until the PAM entry is gone.
     pam_installed = Path("/etc/omodachi/pam.conf").exists()
     removed["pam_entry_present"] = pam_installed
+    shutil.rmtree(share / "venv.previous", ignore_errors=True)
     for child, key in ((share / "venv", "venv"), (share / "src", "sources")):
         if key == "sources" and pam_installed:
             continue
@@ -909,15 +990,112 @@ def remove_pam(source: Path) -> int:
     return code
 
 
+# RELEASE-6. The host venv holds exactly requirements/host.lock plus
+# omodachi-core itself, and nothing in it comes from a package index unless
+# its sha256 is in that committed lock.
+#
+# * The venv is rebuilt from nothing on every install. An existing venv holds
+#   whatever an older installer (or a hand) put there - other versions, extra
+#   packages, and bytes that were never checked against any hash, which an
+#   `--upgrade` over it would not replace when the version happens to match.
+#   Recreating is the only way the result is exactly the lock whatever was
+#   there before, and it costs a few seconds of wheel downloads. The old venv
+#   is moved aside first and put back if anything fails, so a failed update
+#   (no network, a hash mismatch) leaves the previous install running.
+# * `python3 -m venv` gets pip from the interpreter's own bundled wheel
+#   (ensurepip - part of the distribution's python package), offline. pip is
+#   never upgraded, and its version check is off.
+# * The lock goes in with --require-hashes --no-deps --only-binary=:all:: every
+#   file pip downloads must hash to a line in the lock, the resolver adds
+#   nothing, and there is no sdist to build - so no build backend is ever
+#   fetched for one. --isolated keeps PIP_* variables and user pip.conf out,
+#   so nothing in the environment can add a requirement, an index flag, or a
+#   --user/--target that sends the install elsewhere.
+# * omodachi-core itself is a local directory, so it has no hash to check;
+#   it goes in with --no-index (pip cannot reach an index at all),
+#   --no-deps, and --no-build-isolation, so the build backend is the locked
+#   setuptools already in the venv, and --check-build-dependencies makes pip
+#   refuse if that is not the exact version [build-system] requires.
+HOST_LOCK = "requirements/host.lock"
+PIP = ("-m", "pip", "--isolated", "--disable-pip-version-check", "--no-input")
+
+
+def pip_commands(source: Path, venv: Path) -> list[list[str]]:
+    """Every pip invocation the installer makes, in order."""
+    python = str(venv / "bin/python")
+    return [
+        [python, *PIP, "install", "--quiet", "--require-hashes", "--no-deps",
+         "--only-binary=:all:", "-r", str(source / HOST_LOCK)],
+        [python, *PIP, "install", "--quiet", "--no-index", "--no-deps",
+         "--no-build-isolation", "--check-build-dependencies", str(source)],
+    ]
+
+
+def install_venv(source: Path, venv: Path) -> None:
+    lock = source / HOST_LOCK
+    if not lock.is_file():
+        raise SystemExit(f"{lock} is missing; these sources cannot be installed "
+                         f"without their dependency lock")
+    previous = venv.with_name(venv.name + ".previous")
+    shutil.rmtree(previous, ignore_errors=True)
+    if venv.exists():
+        os.rename(venv, previous)
+    try:
+        run(["python3", "-m", "venv", str(venv)])
+        for argv in pip_commands(source, venv):
+            run(argv)
+    except BaseException:
+        shutil.rmtree(venv, ignore_errors=True)
+        if previous.exists():
+            os.rename(previous, venv)
+            print(f"the install failed; {venv} is back to what it was before", file=sys.stderr)
+        raise
+    shutil.rmtree(previous, ignore_errors=True)
+
+
+def sunshine_override_refusal(source: Path, *, spec=None, sha256=None, build=None,
+                              build_commit=None) -> str:
+    """RELEASE-6: an override the installer cannot verify stops the install before it starts.
+
+    An archive other than the pinned one needs the sha256 it must hash to; a
+    git URL to build needs the exact commit. Refusing up front, rather than
+    warning and carrying on, means a user who asked for something specific is
+    never handed something else - or something unchecked - with a success line.
+    """
+    refusal = sunshine_build_refusal(build, build_commit)
+    if refusal:
+        return refusal
+    if build is not None and spec is None:
+        return ""  # the fallback, if the build fails, is the pin
+    package = _sunshine_package(source)
+    try:
+        package.choose(spec, sha256)
+    except package.SunshinePackageError as error:
+        if error.code in ("sunshine_package_sha256_required", "sunshine_package_sha256_invalid",
+                          "sunshine_package_sha256_conflict"):
+            return error.detail
+    return ""
+
+
 def install_local(*, firewall=True, sunshine=True, sunshine_package=None,
                   sunshine_sha256=None, sunshine_adapter=None, sunshine_build=None,
-                  vnc=True) -> int:
+                  sunshine_build_commit=None, vnc=True) -> int:
     home = Path.home()
     share = home / ".local/share/omodachi"
     source, venv = share / "src", share / "venv"
     if not (source / "pyproject.toml").is_file():
         print(f"missing synced sources at {source}; run with --host first", file=sys.stderr)
         return 2
+    if not (source / HOST_LOCK).is_file():
+        print(f"{source / HOST_LOCK} is missing; these sources cannot be installed without "
+              f"their dependency lock", file=sys.stderr)
+        return 2
+    if sunshine:
+        refusal = sunshine_override_refusal(source, spec=sunshine_package, sha256=sunshine_sha256,
+                                            build=sunshine_build, build_commit=sunshine_build_commit)
+        if refusal:
+            print("refusing to install: " + refusal, file=sys.stderr)
+            return 2
     for directory in (home / ".config/omodachi", home / ".cache/omodachi",
                       share / "agent-workspace", home / ".local/state/omodachi/remote"):
         directory.mkdir(parents=True, exist_ok=True)
@@ -956,9 +1134,13 @@ def install_local(*, firewall=True, sunshine=True, sunshine_package=None,
 
     if sunshine:
         if sunshine_build is not None:
-            built = build_sunshine(sunshine_build)
+            built = build_sunshine(sunshine_build, commit=sunshine_build_commit)
             if built["built"]:
+                # The archive this run just built from the verified tree: its
+                # own digest is the checksum, taken before anything else can
+                # touch the file.
                 sunshine_package = built["archive"]
+                sunshine_sha256 = _sunshine_package(source).digest(Path(sunshine_package))
             else:
                 print(f"building the fork failed ({built['reason']}); "
                       f"falling back to the packaged archive", file=sys.stderr)
@@ -998,8 +1180,6 @@ def install_local(*, firewall=True, sunshine=True, sunshine_package=None,
     print(("generated" if tls["created"] else "kept") + " certificate "
           + tls["certificate"] + " fingerprint " + str(tls["tls_fingerprint_sha256"]), flush=True)
 
-    if not (venv / "bin/python").exists():
-        run(["python3", "-m", "venv", str(venv)])
     # setuptools' `build/lib` is a copy tree it refreshes only when the source
     # is *newer* than the copy - and `rsync -a` preserves this checkout's
     # mtimes. So an edit written before the host's last build is silently
@@ -1010,9 +1190,14 @@ def install_local(*, firewall=True, sunshine=True, sunshine_package=None,
     # it is rebuilt, never trusted.
     for stale in [source / "build", *source.glob("src/*.egg-info")]:
         shutil.rmtree(stale, ignore_errors=True)
-    run([str(venv / "bin/pip"), "install", "--quiet", "--upgrade", "--force-reinstall",
-         "--no-deps", str(source)])
-    run([str(venv / "bin/pip"), "install", "--quiet", str(source)])
+    try:
+        install_venv(source, venv)
+    except subprocess.CalledProcessError as error:
+        # pip has already said why (a hash that does not match the lock, no
+        # network); the traceback under it would only bury that line.
+        print(f"installing the locked dependencies failed (exit {error.returncode}); "
+              f"pip's own message above says why", file=sys.stderr)
+        return 1
 
     for name in ("omodachid", "omodachi-host"):
         write(home / ".local/bin" / name, WRAPPER % name, 0o755)
@@ -1041,7 +1226,8 @@ def install_local(*, firewall=True, sunshine=True, sunshine_package=None,
 def install_remote(target: str, *, firewall=True, remove=False, remove_all=False,
                    pam=False, pam_services=PAM_SERVICES, pam_timeout=45, remove_pam=False,
                    purge=False, sunshine=True, sunshine_package=None, sunshine_sha256=None,
-                   sunshine_adapter=None, sunshine_build=None, vnc=True) -> int:
+                   sunshine_adapter=None, sunshine_build=None, sunshine_build_commit=None,
+                   vnc=True) -> int:
     if shutil.which("rsync") is None:
         print("rsync is required on this machine", file=sys.stderr)
         return 2
@@ -1049,6 +1235,8 @@ def install_remote(target: str, *, firewall=True, remove=False, remove_all=False
     run(["rsync", "-a", "--delete", "--exclude", "__pycache__", "--exclude", "*.egg-info",
          str(ROOT / "src") + "/", f"{target}:{REMOTE_SOURCE}/src/"])
     run(["rsync", "-a", str(ROOT / "pyproject.toml"), f"{target}:{REMOTE_SOURCE}/"])
+    run(["ssh", target, f"mkdir -p {REMOTE_SOURCE}/requirements"])
+    run(["rsync", "-a", str(ROOT / HOST_LOCK), f"{target}:{REMOTE_SOURCE}/requirements/"])
     run(["rsync", "-a", str(ROOT / "scripts/install_wayvnc.py"), str(Path(__file__).resolve()),
          f"{target}:{REMOTE_SOURCE}/scripts/"])
     remote = f"python3 {REMOTE_SOURCE}/scripts/install_host.py --local"
@@ -1073,6 +1261,8 @@ def install_remote(target: str, *, firewall=True, remove=False, remove_all=False
             remote += f" --sunshine-adapter {shlex.quote(sunshine_adapter)}"
         if sunshine_build is not None:
             remote += f" --sunshine-build {shlex.quote(sunshine_build)}" if sunshine_build else " --sunshine-build"
+        if sunshine_build_commit:
+            remote += f" --sunshine-build-commit {shlex.quote(sunshine_build_commit)}"
         if pam:
             remote += f" --pam --pam-services {pam_services} --pam-timeout {int(pam_timeout)}"
     run(["ssh", target, remote])
@@ -1105,17 +1295,25 @@ def main(argv=None) -> int:
                              "picture mode streams through (default: %(default)s)")
     parser.add_argument("--sunshine-package", metavar="URL|PATH|latest",
                         help="the release archive to install, overriding the build pinned in "
-                             "core's data/versions.json and $OMODACHI_SUNSHINE_PACKAGE; "
-                             "`latest` is the newest release, checked against its .sha256")
+                             "core's data/versions.json (so does $OMODACHI_SUNSHINE_PACKAGE); "
+                             "`latest` is the newest release. Requires --sunshine-sha256: an "
+                             "override is never installed unchecked")
     parser.add_argument("--sunshine-sha256", metavar="HEX",
-                        help="the sha256 the archive must have; without it the publisher's "
-                             "`.sha256` beside the archive is used when there is one")
+                        help="the sha256 the --sunshine-package archive must have (or "
+                             "$OMODACHI_SUNSHINE_SHA256); a .sha256 published beside the "
+                             "archive is not accepted")
     parser.add_argument("--sunshine-adapter", metavar="/dev/dri/renderDN",
                         help="force this VAAPI render node instead of probing for one")
     parser.add_argument("--sunshine-build", metavar="PATH|GIT-URL", nargs="?", const="",
                         help="build the fork here with its own scripts/package_release.sh "
                              "instead of downloading an archive; needs the build dependencies "
-                             "in the fork's FORK.md")
+                             "in the fork's FORK.md. A git URL also needs "
+                             "--sunshine-build-commit. A local PATH is your own tree and is "
+                             "built as it stands, unverified by this installer")
+    parser.add_argument("--sunshine-build-commit", metavar="SHA",
+                        help="with --sunshine-build <git-url>: the full 40-character commit to "
+                             "build; it is fetched detached and checked (HEAD, tree, clean) "
+                             "right before its build script runs")
     parser.add_argument("--pam", action="store_true",
                         help="AUTH-1: also install the PAM entry that lets a paired device "
                              "answer a host password prompt; off by default, needs sudo -n, "
@@ -1146,7 +1344,8 @@ def main(argv=None) -> int:
                              sunshine_package=args.sunshine_package,
                              sunshine_sha256=args.sunshine_sha256,
                              sunshine_adapter=args.sunshine_adapter,
-                             sunshine_build=build)
+                             sunshine_build=build,
+                             sunshine_build_commit=args.sunshine_build_commit)
         if code == 0 and args.pam:
             code = install_pam(source if (source / "src").is_dir() else ROOT,
                                services=args.pam_services, timeout=args.pam_timeout)
@@ -1158,7 +1357,8 @@ def main(argv=None) -> int:
                           sunshine_package=args.sunshine_package,
                           sunshine_sha256=args.sunshine_sha256,
                           sunshine_adapter=args.sunshine_adapter,
-                          sunshine_build=args.sunshine_build, vnc=args.vnc)
+                          sunshine_build=args.sunshine_build,
+                          sunshine_build_commit=args.sunshine_build_commit, vnc=args.vnc)
 
 
 if __name__ == "__main__":

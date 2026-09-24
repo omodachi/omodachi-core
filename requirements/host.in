@@ -1,0 +1,31 @@
+# Every distribution the host venv (~/.local/share/omodachi/venv) contains,
+# besides omodachi-core itself and the pip that `python3 -m venv` puts there.
+# Exact versions only. This is the input of scripts/update_host_lock.py, which
+# writes requirements/host.lock with the sha256 of every wheel the host can use.
+#
+# Resolved with (no install anywhere):
+#   uv pip compile <(printf 'aiohttp>=3.12,<4\nzeroconf>=0.151,<0.152\nsetuptools>=68\n') \
+#     --python-version 3.1X --python-platform x86_64-manylinux_2_28 --only-binary :all:
+# for 3.11..3.14; typing-extensions is the only difference (aiosignal needs it
+# below 3.13).
+
+# build backend - pyproject.toml's [build-system] requires names this exact version
+setuptools==84.0.0
+
+# runtime: pyproject.toml's dependencies
+aiohttp==3.14.3
+zeroconf==0.151.3
+
+# aiohttp's
+aiohappyeyeballs==2.7.1
+aiosignal==1.4.0
+attrs==26.1.0
+frozenlist==1.8.0
+multidict==6.9.1
+propcache==0.5.4
+yarl==1.25.1
+idna==3.20
+typing-extensions==4.16.0 ; python_version < "3.13"
+
+# zeroconf's
+ifaddr==0.2.0

@@ -152,9 +152,14 @@ def create_service(hub: Hub, *, demo=False, default_menu: Path | None = None,
         except (OSError, ValueError):
             value, status = None, "unavailable"
         layout = parse_bar_layout(value, source_status=status, statuses=statuses)
-        if bar_geometry is not None and remote_manager is not None:
+        # REMOTE-SAFE-1 §5 finding: the manager the service holds *now*. The
+        # one this function was built with is None whenever the daemon started
+        # before the desktop, and a manager built later never had its bar
+        # measured - no logo mark on any session after a reboot.
+        manager = service.remote.manager if service.remote is not None else remote_manager
+        if bar_geometry is not None and manager is not None:
             try:
-                geometry = bar_geometry.snapshot(remote_manager.current(), layout["position"],
+                geometry = bar_geometry.snapshot(manager.current(), layout["position"],
                                                  {"left": layout["left"]})
             except (OSError, ValueError, TypeError, AttributeError):
                 geometry = None

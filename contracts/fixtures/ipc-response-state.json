@@ -2263,7 +2263,8 @@
       "orientation": null,
       "logical_size": null,
       "workspaces": [],
-      "revision": null
+      "revision": null,
+      "bar_insets": null
     },
     "bar": {
       "source": "shell.json",

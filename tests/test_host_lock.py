@@ -128,7 +128,7 @@ class PipInvocationTests(unittest.TestCase):
         commands = self.commands()
         self.assertEqual(len(commands), 2)
         for argv in commands:
-            self.assertEqual(argv[1:3], ["-m", "pip"], argv)
+            self.assertEqual(argv[1:4], ["-I", "-m", "pip"], argv)
             self.assertIn("--no-deps", argv)
             self.assertIn("--isolated", argv)
             self.assertIn("--disable-pip-version-check", argv)
@@ -175,11 +175,27 @@ class PipInvocationTests(unittest.TestCase):
             source, venv = Path(scratch) / "src", Path(scratch) / "venv"
             (source / "requirements").mkdir(parents=True)
             (source / install_host.HOST_LOCK).write_text("")
-            calls = []
-            with mock.patch.object(install_host, "run", side_effect=lambda argv, **_: calls.append(argv)):
+            calls, environments = [], []
+            poison = {"PYTHONPATH": "/evil", "PYTHONSTARTUP": "/evil/s.py", "PYTHONHOME": "/evil",
+                      "PYTHONUSERBASE": "/evil", "PYTHONWARNINGS": "error::evil.W",
+                      "PYTHONPYCACHEPREFIX": "/evil/cache", "PYTHONSAFEPATH": ""}
+
+            def record(argv, **kwargs):
+                calls.append(argv)
+                environments.append(kwargs.get("env"))
+
+            with mock.patch.object(install_host, "run", side_effect=record), \
+                    mock.patch.dict(os.environ, poison), \
+                    mock.patch.object(install_host.sys, "pycache_prefix", None):
                 install_host.install_venv(source, venv)
-            self.assertEqual(calls[0], ["python3", "-m", "venv", str(venv)])
+            # RELEASE-7b: -I, and an environment the installer chose.
+            self.assertEqual(calls[0], ["python3", "-I", "-m", "venv", str(venv)])
             self.assertEqual(calls[1:], install_host.pip_commands(source, venv))
+            for env in environments:
+                self.assertIsNotNone(env)
+                self.assertEqual({key: value for key, value in env.items() if key.startswith("PYTHON")},
+                                 {"PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+                self.assertEqual(env.get("PATH"), os.environ.get("PATH"))
 
 
 class VenvConvergenceTests(unittest.TestCase):
@@ -195,8 +211,8 @@ class VenvConvergenceTests(unittest.TestCase):
 
     def fake(self, fail_on=None):
         def run(argv, **_):
-            if argv[:3] == ["python3", "-m", "venv"]:
-                Path(argv[3], "bin").mkdir(parents=True)
+            if argv[:4] == ["python3", "-I", "-m", "venv"]:
+                Path(argv[4], "bin").mkdir(parents=True)
             if fail_on and fail_on in argv:
                 raise subprocess.CalledProcessError(1, argv)
         return run

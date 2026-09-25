@@ -3,7 +3,7 @@
 The system-Python scanner is a fresh process: GLib owns Desktop Entry parsing,
 XDG precedence, visibility, TryExec, locale and duplicate desktop IDs. Exec is
 never serialized. This file also runs standalone without importing core/GI from
-the daemon venv: /usr/bin/python3 <this file> --scan-apps.
+the daemon venv: /usr/bin/python3 -I -B <this file> --scan-apps.
 
 The non-demo bootstrap installs reviewed actions explicitly; standalone
 install_catalog_providers defaults to read-only. Registration never launches an
@@ -24,6 +24,13 @@ import stat
 import subprocess
 import time
 from typing import Callable
+
+# RELEASE-7b. The scanner is the system interpreter (GI lives in the system's
+# site-packages, not the venv) started with -I: no user site-packages, so no
+# user .pth file runs; the script's own directory (inside the venv) is not on
+# sys.path; PYTHON* is ignored even if the provider environment ever carried
+# one. -B: nothing is written beside this file. Both flags are asserted by tests.
+SCANNER_COMMAND = ("/usr/bin/python3", "-I", "-B")
 
 MAX_ROWS = 512
 MAX_OUTPUT = 2 * 1024 * 1024
@@ -373,7 +380,7 @@ class CatalogProviders:
 
     def _scan_apps(self):
         raw = self.app_reader() if self.app_reader else json.loads(self.runner(
-            ("/usr/bin/python3", str(Path(__file__).resolve()), "--scan-apps"), self.environment()))
+            SCANNER_COMMAND + (str(Path(__file__).resolve()), "--scan-apps"), self.environment()))
         if not isinstance(raw, dict) or raw.get("schema") != 1 or not isinstance(raw.get("apps"), list) or len(raw["apps"]) > MAX_ROWS:
             raise ProviderUnavailable("apps_schema_invalid")
         from .catalog import app_entry_id

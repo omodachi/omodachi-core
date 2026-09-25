@@ -1,10 +1,16 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3 -IB
 """The program `pam_exec.so` runs: ask the daemon, answer PAM, never block.
 
 This file is installed verbatim as a root-owned `/usr/local/bin/omodachi-pam`.
 It imports nothing from `omodachi_core` and nothing outside the standard
 library, because the copy that PAM runs is a single file under `/usr/local/bin`
 with no package around it. Keep it that way.
+
+RELEASE-7b. The first line is `/usr/bin/python3 -IB`, not `env python3`: PAM
+starts this as root for every prompt, so the interpreter is not looked up on a
+PATH, and -I keeps PYTHONPATH, PYTHONHOME and every other PYTHON* variable,
+user site-packages and `/usr/local/bin` itself off sys.path. -B: nothing is
+written into a `__pycache__` beside it.
 
 Three rules govern everything here:
 

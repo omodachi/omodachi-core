@@ -36,7 +36,16 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/share/omodachi/venv/bin/omodachid \\
+# RELEASE-7b. The daemon's interpreter is started with -I, so nothing the user
+# manager's environment carries (environment.d, `systemctl --user
+# set-environment`) reaches it: PYTHONPATH, PYTHONHOME, PYTHONSTARTUP,
+# PYTHONWARNINGS, PYTHONPYCACHEPREFIX and every other PYTHON* are ignored,
+# neither venv/bin nor the working directory goes on sys.path, and no user
+# site-packages or .pth file is read. The same variables are also taken out of
+# the unit's environment, so no process the daemon starts inherits them.
+UnsetEnvironment=PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONUSERBASE PYTHONPLATLIBDIR \\
+  PYTHONPYCACHEPREFIX PYTHONWARNINGS PYTHONBREAKPOINT PYTHONINSPECT PYTHONEXECUTABLE
+ExecStart=%h/.local/share/omodachi/venv/bin/python -I %h/.local/share/omodachi/venv/bin/omodachid \\
   --secret-file %h/.config/omodachi/device.secret \\
   --listen 0.0.0.0 --port 8099 \\
   --tls-cert %h/.config/omodachi/tls/server.pem \\
@@ -72,7 +81,10 @@ WantedBy=default.target
 """
 
 UNITS = {"omodachid.service": DAEMON_UNIT, "omodachi-herdr.service": HERDR_UNIT}
-WRAPPER = '#!/bin/sh\nexec "$HOME/.local/share/omodachi/venv/bin/%s" "$@"\n'
+# The ~/.local/bin commands start the venv's console scripts the way the unit
+# does: under -I, whatever the calling shell or hook has in its PYTHON*.
+WRAPPER = ('#!/bin/sh\nexec "$HOME/.local/share/omodachi/venv/bin/python" -I '
+           '"$HOME/.local/share/omodachi/venv/bin/%s" "$@"\n')
 
 # The firewall rules copy omarchy-install-service-sunshine exactly: private
 # CIDRs and tailscale0 only, one comment per subsystem so the rules can be
@@ -168,6 +180,25 @@ def run(argv, **kwargs):
     print("+ " + " ".join(argv), flush=True)
     kwargs.setdefault("check", True)
     return subprocess.run(argv, **kwargs)
+
+
+# RELEASE-7b. Every Python this installer starts runs under -I where it is
+# started by name (venv creation, pip) and, either way, with an environment
+# the installer chose rather than the caller's: no PYTHON* from outside
+# (PYTHONPATH, PYTHONSTARTUP, PYTHONHOME, PYTHONWARNINGS, somebody else's
+# PYTHONPYCACHEPREFIX...), no user site-packages and so no user .pth file, no
+# bytecode written beside a source. The one value carried over is this
+# interpreter's own bytecode prefix: the plugin bootstrap starts this file as
+# `python3 -I -B -X pycache_prefix=<new empty private directory>`, and whatever
+# it starts should read and write bytecode there too, not beside the sources.
+def python_environment() -> dict[str, str]:
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.startswith("PYTHON")}
+    environment["PYTHONNOUSERSITE"] = "1"
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    if sys.pycache_prefix:
+        environment["PYTHONPYCACHEPREFIX"] = sys.pycache_prefix
+    return environment
 
 
 def write(path: Path, text: str, mode=0o644) -> bool:
@@ -925,6 +956,43 @@ def _visible_terminal() -> bool:
         return False
 
 
+# RELEASE-7b. What root runs for --pam / --remove-pam. It is the whole program
+# given to `/usr/bin/python3 -I -B -c`, so the root interpreter never opens a
+# file under the user's home to find its code: -I puts no script directory,
+# working directory, PYTHON* variable or user site-packages on the path (only
+# the system's own library is importable), -B writes no bytecode anywhere.
+# The two files it needs - pam_install.py and pam_helper.py, the program PAM
+# will run - arrive as bytes on stdin, read once by this installer from the
+# tree it is running from, right before the step. Root writes them into a new directory of its own
+# (mkdtemp under the sticky /tmp: 0700, root's, a name nobody else can predict
+# or replace), runs pam_install.py from there, and deletes it. So the helper
+# that ends up in /usr/local/bin is a copy root made from root's own file, and
+# no path a user can rename, relink or rewrite is ever followed as root.
+PAM_FILES = ("pam_install.py", "pam_helper.py")
+PAM_LOADER = """\
+import json, os, runpy, shutil, sys, tempfile
+files = json.load(sys.stdin)
+directory = tempfile.mkdtemp(prefix="omodachi-pam-", dir="/tmp")
+try:
+    for name in %r:
+        with open(os.path.join(directory, name), "x", encoding="utf-8", newline="") as handle:
+            handle.write(files[name])
+    sys.argv[0] = os.path.join(directory, "pam_install.py")
+    runpy.run_path(sys.argv[0], run_name="__main__")
+finally:
+    shutil.rmtree(directory)
+""" % (PAM_FILES,)
+
+
+def pam_command(arguments: list[str]) -> list[str]:
+    return ["sudo", "-n", "/usr/bin/python3", "-I", "-B", "-c", PAM_LOADER, *arguments]
+
+
+def pam_payload(source: Path) -> str:
+    package = source / "src/omodachi_core"
+    return json.dumps({name: (package / name).read_bytes().decode("utf-8") for name in PAM_FILES})
+
+
 def _pam(source: Path, arguments: list[str]) -> int:
     """Run the packaged PAM installer as root, from the synced sources."""
     if shutil.which("sudo") is None:
@@ -935,13 +1003,14 @@ def _pam(source: Path, arguments: list[str]) -> int:
         if subprocess.run(["sudo", "-v"]).returncode != 0:
             print("sudo -v failed; nothing was changed", file=sys.stderr)
             return 1
-    # By path, not `-m`: `sudo` resets the environment, so a PYTHONPATH set
-    # here never reaches the child and `-m omodachi_core.pam_install` cannot
-    # find the package. The module imports nothing but the standard library
-    # precisely so it can be run as a plain file by the system interpreter.
-    command = ["sudo", "-n", "/usr/bin/python3", str(source / "src/omodachi_core/pam_install.py"), *arguments]
-    result = subprocess.run(command, capture_output=True, text=True)
-    print("+ " + " ".join(command), flush=True)
+    # Not `-m`: `sudo` resets the environment and -I ignores what is left, so
+    # the package is not importable as root. pam_install.py imports nothing but
+    # the standard library precisely so it can run as a plain file under the
+    # system interpreter; PAM_LOADER hands it over.
+    command = pam_command(arguments)
+    result = subprocess.run(command, input=pam_payload(source), capture_output=True, text=True)
+    print("+ " + " ".join([*command[:command.index("-c") + 1], "<PAM_LOADER>", *arguments])
+          + " < " + " ".join(PAM_FILES), flush=True)
     if result.stdout:
         print(result.stdout.strip(), flush=True)
     if result.returncode != 0:
@@ -1017,7 +1086,7 @@ def remove_pam(source: Path) -> int:
 #   setuptools already in the venv, and --check-build-dependencies makes pip
 #   refuse if that is not the exact version [build-system] requires.
 HOST_LOCK = "requirements/host.lock"
-PIP = ("-m", "pip", "--isolated", "--disable-pip-version-check", "--no-input")
+PIP = ("-I", "-m", "pip", "--isolated", "--disable-pip-version-check", "--no-input")
 
 
 def pip_commands(source: Path, venv: Path) -> list[list[str]]:
@@ -1041,9 +1110,9 @@ def install_venv(source: Path, venv: Path) -> None:
     if venv.exists():
         os.rename(venv, previous)
     try:
-        run(["python3", "-m", "venv", str(venv)])
+        run(["python3", "-I", "-m", "venv", str(venv)], env=python_environment())
         for argv in pip_commands(source, venv):
-            run(argv)
+            run(argv, env=python_environment())
     except BaseException:
         shutil.rmtree(venv, ignore_errors=True)
         if previous.exists():
@@ -1207,7 +1276,8 @@ def install_local(*, firewall=True, sunshine=True, sunshine_package=None,
     # WebSocket, started as the transient unit omodachi-agent.service by
     # omodachi_core.agent_chat_owner (AGENT_UNIT), so it needs no unit file.
 
-    run([str(venv / "bin/omodachi-host"), "desktop-entry", "install"])
+    run([str(venv / "bin/python"), "-I", str(venv / "bin/omodachi-host"), "desktop-entry", "install"],
+        env=python_environment())
 
     template = ensure_theme_template(home, source)
     print(("wrote " if template["changed"] else "kept ") + template["path"], flush=True)
@@ -1239,7 +1309,7 @@ def install_remote(target: str, *, firewall=True, remove=False, remove_all=False
     run(["rsync", "-a", str(ROOT / HOST_LOCK), f"{target}:{REMOTE_SOURCE}/requirements/"])
     run(["rsync", "-a", str(ROOT / "scripts/install_wayvnc.py"), str(Path(__file__).resolve()),
          f"{target}:{REMOTE_SOURCE}/scripts/"])
-    remote = f"python3 {REMOTE_SOURCE}/scripts/install_host.py --local"
+    remote = f"python3 -I -B {REMOTE_SOURCE}/scripts/install_host.py --local"
     if remove_pam:
         remote += " --remove-pam"
     elif remove_all:

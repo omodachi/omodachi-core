@@ -955,3 +955,211 @@ class SunshineOverrideTests(unittest.TestCase):
 def mock_home(home):
     from unittest import mock
     return mock.patch.object(Path, "home", return_value=home)
+
+
+class Release7bIsolationTests(unittest.TestCase):
+    """RELEASE-7b: every Python core starts - the root PAM step, the venv and pip,
+    the daemon unit, the ~/.local/bin wrappers, the app scanner and the PAM helper -
+    ignores PYTHON*, user site-packages and the directories around it.
+
+    The functional tests plant code where a default interpreter picks it up (a
+    PYTHONPATH sitecustomize, a user-site .pth, a json.py in the working directory)
+    and show it running under the plain interpreter first (the control), then
+    not running under the exact flags core now uses.
+    """
+
+    PYTHON = getattr(__import__("sys"), "_base_executable", None) or __import__("sys").executable
+
+    def setUp(self):
+        import os
+        import subprocess
+        self.scratch = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, self.scratch, True)
+        self.marker = self.scratch / "markers"
+        plant = f"import os\nopen({str(self.marker)!r}, 'a').write('%s\\n')\n"
+        evil = self.scratch / "evil-path"
+        evil.mkdir()
+        (evil / "sitecustomize.py").write_text(plant % "pythonpath-sitecustomize")
+        self.cwd = self.scratch / "cwd"
+        self.cwd.mkdir()
+        (self.cwd / "json.py").write_text(plant % "cwd-json" + "from importlib import import_module as _i\n")
+        userbase = self.scratch / "userbase"
+        self.env = {key: value for key, value in os.environ.items() if not key.startswith("PYTHON")}
+        self.env.update({"PYTHONPATH": str(evil), "PYTHONUSERBASE": str(userbase),
+                         "PYTHONSTARTUP": str(evil / "sitecustomize.py"),
+                         "PYTHONPYCACHEPREFIX": str(self.scratch / "evil-cache")})
+        site = subprocess.run([self.PYTHON, "-c", "import site; print(site.getusersitepackages())"],
+                              env=self.env, capture_output=True, text=True, check=True).stdout.strip()
+        Path(site).mkdir(parents=True)
+        (Path(site) / "zz-r7b.pth").write_text(
+            f"import os; open({str(self.marker)!r}, 'a').write('user-site-pth\\n')\n")
+
+    def markers(self):
+        return sorted(set(self.marker.read_text().split())) if self.marker.exists() else []
+
+    def run_python(self, argv, **kwargs):
+        import subprocess
+        return subprocess.run(argv, env=kwargs.pop("env", self.env), cwd=kwargs.pop("cwd", self.cwd),
+                              capture_output=True, text=True, timeout=60, **kwargs)
+
+    # -- the root PAM step ---------------------------------------------------
+
+    def pam_root(self):
+        root = self.scratch / "root"
+        (root / "etc/pam.d").mkdir(parents=True)
+        (root / "usr/lib/pam.d").mkdir(parents=True)
+        (root / "etc/pam.d/sudo").write_text("#%PAM-1.0\nauth\t\tinclude\t\tsystem-auth\n")
+        return root
+
+    def test_root_runs_the_pam_step_isolated_from_code_it_is_handed_as_bytes(self):
+        command = install_host.pam_command(["remove"])
+        self.assertEqual(command[:7], ["sudo", "-n", "/usr/bin/python3", "-I", "-B", "-c",
+                                       install_host.PAM_LOADER])
+        self.assertEqual(command[7:], ["remove"])
+        # No path of the checkout is in what root runs.
+        self.assertFalse([part for part in command if "omodachi_core" in part or part.endswith(".py")])
+        self.assertIn('dir="/tmp"', install_host.PAM_LOADER)
+
+    def test_the_pam_step_hands_root_the_two_files_byte_for_byte(self):
+        from unittest import mock
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((list(argv), kwargs))
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+        with mock.patch.object(install_host.subprocess, "run", fake_run), \
+                mock.patch.object(install_host.shutil, "which", return_value="/usr/bin/sudo"), \
+                mock.patch.object(install_host, "_visible_terminal", return_value=False), \
+                __import__("contextlib").redirect_stdout(__import__("io").StringIO()):
+            self.assertEqual(install_host.remove_pam(ROOT), 0)
+        argv, kwargs = calls[0]
+        self.assertEqual(argv, install_host.pam_command(["remove"]))
+        files = json.loads(kwargs["input"])
+        self.assertEqual(sorted(files), ["pam_helper.py", "pam_install.py"])
+        for name, text in files.items():
+            self.assertEqual(text.encode(), (ROOT / "src/omodachi_core" / name).read_bytes())
+
+    def test_the_pam_loader_runs_pam_install_from_its_own_copy_and_plants_nothing(self):
+        # The payload is read from a copy that is gone before the loader runs:
+        # whatever the loader executes or installs came through stdin.
+        copy = self.scratch / "checkout"
+        (copy / "src").mkdir(parents=True)
+        __import__("shutil").copytree(ROOT / "src/omodachi_core", copy / "src/omodachi_core")
+        payload = install_host.pam_payload(copy)
+        __import__("shutil").rmtree(copy)
+        arguments = ["install", "--root", str(self.pam_root()), "--owner", "alex",
+                     "--socket", "/run/omodachi/1000/omodachid.sock", "--services", "sudo"]
+        before = set(Path("/tmp").glob("omodachi-pam-*"))
+
+        # Control: the same loader under a plain interpreter runs all three plants.
+        control = self.run_python([self.PYTHON, "-c", install_host.PAM_LOADER, *arguments], input=payload)
+        self.assertEqual(self.markers(), ["cwd-json", "pythonpath-sitecustomize", "user-site-pth"],
+                         control.stderr)
+        self.marker.unlink()
+
+        flags = install_host.pam_command(arguments)[3:]
+        result = self.run_python([self.PYTHON, *flags], input=payload)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["ok"])
+        self.assertEqual(self.markers(), [])
+        helper = self.scratch / "root/usr/local/bin/omodachi-pam"
+        self.assertEqual(helper.read_bytes(), (ROOT / "src/omodachi_core/pam_helper.py").read_bytes())
+        self.assertEqual(set(Path("/tmp").glob("omodachi-pam-*")), before)
+        self.assertEqual(list(self.cwd.glob("**/__pycache__")), [])
+
+    def test_the_pam_helper_starts_isolated(self):
+        helper = ROOT / "src/omodachi_core/pam_helper.py"
+        self.assertEqual(helper.read_text().splitlines()[0], "#!/usr/bin/python3 -IB")
+        arguments = [str(helper), "--config", str(self.scratch / "absent.conf")]
+        env = {**self.env, "PAM_TYPE": "auth"}
+        self.run_python([self.PYTHON, *arguments], env=env)
+        self.assertIn("pythonpath-sitecustomize", self.markers())
+        self.marker.unlink()
+        result = self.run_python([self.PYTHON, "-IB", *arguments], env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.markers(), [])
+
+    # -- the venv, the daemon unit and the wrappers ---------------------------
+
+    def test_python_children_get_no_caller_python_variables(self):
+        from unittest import mock
+        with mock.patch.dict(__import__("os").environ, self.env, clear=True):
+            with mock.patch.object(install_host.sys, "pycache_prefix", None):
+                plain = install_host.python_environment()
+            with mock.patch.object(install_host.sys, "pycache_prefix", "/tmp/omodachi-core-x/bytecode"):
+                prefixed = install_host.python_environment()
+        python = lambda env: {k: v for k, v in env.items() if k.startswith("PYTHON")}
+        self.assertEqual(python(plain), {"PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+        # The bootstrap's -X pycache_prefix is this interpreter's own, and carried on.
+        self.assertEqual(python(prefixed), {"PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1",
+                                            "PYTHONPYCACHEPREFIX": "/tmp/omodachi-core-x/bytecode"})
+        self.assertEqual(plain["PATH"], self.env["PATH"])
+
+    def test_the_desktop_entry_step_and_the_remote_install_start_python_isolated(self):
+        source = Path(install_host.__file__).read_text()
+        self.assertIn('run([str(venv / "bin/python"), "-I", str(venv / "bin/omodachi-host"), '
+                      '"desktop-entry", "install"],\n        env=python_environment())', source)
+        self.assertIn('remote = f"python3 -I -B {REMOTE_SOURCE}/scripts/install_host.py --local"', source)
+
+    @staticmethod
+    def unit_value(unit, key):
+        joined = unit.replace("\\\n", " ")
+        rows = [row.split("=", 1)[1] for row in joined.splitlines() if row.startswith(key + "=")]
+        return " ".join(rows).split()
+
+    def test_the_daemon_unit_starts_the_interpreter_isolated_and_drops_python_variables(self):
+        unit = install_host.DAEMON_UNIT
+        start = self.unit_value(unit, "ExecStart")
+        self.assertEqual(start[:3], ["%h/.local/share/omodachi/venv/bin/python", "-I",
+                                     "%h/.local/share/omodachi/venv/bin/omodachid"])
+        unset = set(self.unit_value(unit, "UnsetEnvironment"))
+        for name in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONUSERBASE", "PYTHONPLATLIBDIR",
+                     "PYTHONPYCACHEPREFIX", "PYTHONWARNINGS", "PYTHONBREAKPOINT", "PYTHONINSPECT"):
+            self.assertIn(name, unset)
+        # The herdr unit runs no Python of ours.
+        self.assertNotIn("python", install_host.HERDR_UNIT)
+
+    def fake_venv(self, home):
+        import os
+        venv = home / ".local/share/omodachi/venv/bin"
+        venv.mkdir(parents=True)
+        os.symlink(self.PYTHON, venv / "python")
+        probe = ("import json, sys\n"
+                 "print(json.dumps({'isolated': sys.flags.isolated, 'path': sys.path}))\n")
+        for name in ("omodachid", "omodachi-host"):
+            (venv / name).write_text("#!/usr/bin/env python3\n" + probe)
+            (venv / name).chmod(0o755)
+        return venv
+
+    def test_the_daemon_command_and_the_wrappers_ignore_a_poisoned_environment(self):
+        home = self.scratch / "home"
+        venv = self.fake_venv(home)
+        env = {**self.env, "HOME": str(home)}
+        self.run_python([str(venv / "python"), str(venv / "omodachid")], env=env)
+        self.assertIn("pythonpath-sitecustomize", self.markers())
+        self.marker.unlink()
+        # ExecStart as systemd runs it, %h expanded.
+        start = [part.replace("%h", str(home))
+                 for part in self.unit_value(install_host.DAEMON_UNIT, "ExecStart")]
+        daemon = self.run_python(start[:3], env=env)
+        self.assertEqual(json.loads(daemon.stdout)["isolated"], 1, daemon.stderr)
+        self.assertNotIn(str(venv), json.loads(daemon.stdout)["path"])
+        for name in ("omodachid", "omodachi-host"):
+            wrapper = self.scratch / name
+            wrapper.write_text(install_host.WRAPPER % name)
+            result = self.run_python(["/bin/sh", str(wrapper)], env=env)
+            self.assertEqual(json.loads(result.stdout)["isolated"], 1, result.stderr)
+        self.assertEqual(self.markers(), [])
+
+    # -- the daemon's app scanner --------------------------------------------
+
+    def test_the_app_scanner_runs_isolated(self):
+        from omodachi_core import catalog_providers
+        self.assertEqual(catalog_providers.SCANNER_COMMAND, ("/usr/bin/python3", "-I", "-B"))
+        scanner = Path(catalog_providers.__file__).resolve()
+        self.run_python([self.PYTHON, str(scanner), "--scan-apps"])
+        self.assertIn("user-site-pth", self.markers())
+        self.marker.unlink()
+        self.run_python([self.PYTHON, *catalog_providers.SCANNER_COMMAND[1:], str(scanner), "--scan-apps"])
+        self.assertEqual(self.markers(), [])

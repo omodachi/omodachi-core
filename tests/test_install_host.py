@@ -957,6 +957,135 @@ def mock_home(home):
     return mock.patch.object(Path, "home", return_value=home)
 
 
+class RemoveKeepsTheUsersFilesTests(unittest.TestCase):
+    """RELEASE-8: --remove and --purge delete what the installer made, and
+    nothing else - above all not agent-workspace, the hand-written files in
+    ~/.config/omodachi, or a src the plugin's bootstrap cannot show it made."""
+
+    def setUp(self):
+        import contextlib
+        import io
+        from unittest import mock
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        for target, value in ((Path, "home"), (install_host, "run"), (install_host, "remove_firewall")):
+            patcher = mock.patch.object(target, value, **(
+                {"return_value": self.home} if value == "home" else
+                {"new": (lambda *a, **k: _Completed())}))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.out = io.StringIO()
+        self.redirect = contextlib.redirect_stdout(self.out)
+        h = self.home
+        self.share = h / ".local/share/omodachi"
+        self.files = {
+            # the user's own
+            "workspace": self.share / "agent-workspace/notes/plan.md",
+            "menu": h / ".config/omodachi/omodachi-menu.jsonc",
+            "menu_backup": h / ".config/omodachi/omodachi-menu.jsonc.codex-bak",
+            "runtime": h / ".config/omodachi/desktop-runtime.json",
+            "stranger": self.share / "my-scratch/keep.txt",
+            "foreign_hook": self.share / "hooks/theme-set/mine.sh",
+            # the installer's and the daemon's
+            "secret": h / ".config/omodachi/device.secret",
+            "cert": h / ".config/omodachi/tls/server.pem",
+            "token": h / ".config/omodachi/plugin.token",
+            "preferences": h / ".config/omodachi/preferences/state.json",
+            "cache": h / ".cache/omodachi/install-status.json",
+            "state": h / ".local/state/omodachi/remote/journal.json",
+            "venv": self.share / "venv/bin/python",
+            "previous": self.share / "venv.previous/bin/python",
+            "src": self.share / "src/pyproject.toml",
+        }
+        for path in self.files.values():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x\n")
+        for hook in ("theme-set", "font-set"):
+            master = self.share / "hooks" / hook / "omodachi"
+            master.parent.mkdir(parents=True, exist_ok=True)
+            master.write_text(install_host.hook_script(hook))
+        (self.share / "src/.git").mkdir()
+
+    def own_source(self, identifier="0123456789abcdef" * 2):
+        (self.share / "src/.git/omodachi-install-id").write_text(identifier + "\n")
+        record = self.home / ".local/state/omodachi/core-source.json"
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(json.dumps({"schema": 1, "path": str(self.share / "src"),
+                                      "id": identifier, "pending": []}))
+        return record
+
+    def remove(self, **kwargs):
+        with self.redirect:
+            self.assertEqual(install_host.remove_local(sunshine=False, **kwargs), 0)
+        return self.out.getvalue()
+
+    def exists(self, *names):
+        return {name: self.files[name].exists() for name in names}
+
+    def test_purge_keeps_agent_workspace_and_the_users_config(self):
+        self.own_source()
+        out = self.remove(purge=True)
+        self.assertEqual(self.exists("workspace", "menu", "menu_backup", "runtime", "stranger",
+                                     "foreign_hook"), dict.fromkeys(
+            ("workspace", "menu", "menu_backup", "runtime", "stranger", "foreign_hook"), True))
+        self.assertEqual(self.exists("secret", "cert", "token", "preferences", "cache", "state",
+                                     "venv", "previous", "src"), dict.fromkeys(
+            ("secret", "cert", "token", "preferences", "cache", "state", "venv", "previous",
+             "src"), False))
+        self.assertFalse((self.share / "hooks/font-set").exists())
+        self.assertIn(str(self.share / "agent-workspace"), out)
+        self.assertIn(str(self.files["menu"]), out)
+        self.assertEqual(self.files["workspace"].read_text(), "x\n")
+
+    def test_remove_without_purge_keeps_config_and_workspace(self):
+        self.own_source()
+        out = self.remove()
+        self.assertTrue(all(self.exists("workspace", "menu", "secret", "cert", "token", "state",
+                                        "stranger", "foreign_hook").values()))
+        self.assertFalse(any(self.exists("venv", "previous", "src").values()))
+        self.assertIn(str(self.share / "agent-workspace"), out)
+
+    def assert_src_kept(self):
+        out = self.remove(purge=True)
+        self.assertIn("nothing shows the Omodachi plugin's installer made it", out)
+        self.assertTrue(self.files["src"].exists())
+
+    def test_a_src_without_a_record_is_kept(self):
+        self.assert_src_kept()
+
+    def test_a_src_with_another_id_is_kept(self):
+        self.own_source()
+        (self.share / "src/.git/omodachi-install-id").write_text("f" * 32 + "\n")
+        self.assert_src_kept()
+
+    def test_a_src_that_is_a_link_is_kept_and_so_is_its_target(self):
+        import shutil
+        shutil.rmtree(self.share / "src")
+        other = self.home / "elsewhere"
+        (other / ".git").mkdir(parents=True)
+        (other / "pyproject.toml").write_text("x\n")
+        (self.share / "src").symlink_to(other)
+        self.own_source()
+        out = self.remove(purge=True)
+        self.assertIn("nothing shows the Omodachi plugin's installer made it", out)
+        self.assertTrue((self.share / "src").is_symlink())
+        self.assertTrue((other / "pyproject.toml").exists())
+
+    def test_the_record_survives_a_purge_while_the_checkout_it_names_is_kept(self):
+        from unittest import mock
+        record = self.own_source()
+        real_exists = Path.exists
+
+        def pam_installed(path, *args, **kwargs):
+            return str(path) == "/etc/omodachi/pam.conf" or real_exists(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "exists", pam_installed):
+            self.remove(purge=True)
+        self.assertTrue(self.files["src"].exists(), "the PAM entry keeps the sources")
+        self.assertTrue(record.exists())
+        self.assertFalse(self.files["state"].exists())
+
 class Release7bIsolationTests(unittest.TestCase):
     """RELEASE-7b: every Python core starts - the root PAM step, the venv and pip,
     the daemon unit, the ~/.local/bin wrappers, the app scanner and the PAM helper -

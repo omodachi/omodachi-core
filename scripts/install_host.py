@@ -821,10 +821,27 @@ def remove_omarchy_surfaces(home: Path) -> dict:
             continue
         target.unlink()
         removed["hooks"][hook] = "removed"
+    # RELEASE-8: the master copies too - only files carrying our marker, then
+    # whatever directories that leaves empty.
     master = home / HOOK_SOURCE_DIR
-    if master.is_dir():
-        shutil.rmtree(master)
+    for hook in sorted(HOOK_COMMANDS):
+        copy = master / hook / HOOK_NAME
+        try:
+            if not copy.is_symlink() and HOOK_MARKER in copy.read_text():
+                copy.unlink()
+        except OSError:
+            pass
+        _remove_empty(master / hook)
+    _remove_empty(master)
     return removed
+
+
+def _remove_empty(directory: Path) -> None:
+    try:
+        if directory.is_dir() and not directory.is_symlink():
+            directory.rmdir()
+    except OSError:
+        pass  # not empty: something in it is not ours
 
 
 # INSTALL-1 §1.4. `omarchy plugin remove` takes the panel away and leaves
@@ -836,6 +853,56 @@ def remove_omarchy_surfaces(home: Path) -> dict:
 # the host to reinstall it should not have to pair every device again.
 REMOVED_UNITS = ("omodachid.service", "omodachi-herdr.service", "omodachi-agent.service")
 CONFIG_DIR = ".config/omodachi"
+
+# RELEASE-8. What --remove and --purge may delete is what the installer (or
+# the daemon it installed) made, never the user's own files:
+#  - ~/.local/share/omodachi: only the entries below. agent-workspace is the
+#    agent's working directory - the user's files - and is always kept, as is
+#    anything else nobody here made. src goes only when the plugin's
+#    bootstrap can show it made it (the same id it keeps in its .git and in
+#    ~/.local/state/omodachi/core-source.json).
+#  - ~/.config/omodachi: --purge promises the device secret, the certificate,
+#    every pairing and the daemon's other state; it keeps the files a person
+#    writes there by hand (the menu layer, its set-aside copies, and
+#    desktop-runtime.json, the documented render_density knob, which the
+#    installer never creates).
+SHARE_DIR = ".local/share/omodachi"
+SHARE_MADE = ("venv", "venv.previous", "hooks")
+USER_CONFIG = ("omodachi-menu.jsonc", "desktop-runtime.json")
+USER_CONFIG_PREFIXES = ("omodachi-menu.jsonc.codex-bak",)
+SOURCE_RECORD = ".local/state/omodachi/core-source.json"
+SOURCE_ID_FILE = "omodachi-install-id"
+
+
+def source_is_the_bootstraps(home: Path) -> bool:
+    """Whether ~/.local/share/omodachi/src is the checkout the plugin's
+    bootstrap made: a real directory with a real .git whose id file names the
+    id its record holds (the record's "pending" ids included)."""
+    source = home / REMOTE_SOURCE
+    identifier = source / ".git" / SOURCE_ID_FILE
+    try:
+        if (source.is_symlink() or not source.is_dir() or (source / ".git").is_symlink()
+                or identifier.is_symlink() or not identifier.is_file()):
+            return False
+        with identifier.open("rb") as handle:
+            found = handle.read(64).decode("ascii", "replace").strip()
+        record = json.loads((home / SOURCE_RECORD).read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(record, dict) or record.get("path") != str(source) or len(found) != 32:
+        return False
+    return found == record.get("id") or found in (record.get("pending") or [])
+
+
+def _is_user_config(name: str) -> bool:
+    return name in USER_CONFIG or name.startswith(USER_CONFIG_PREFIXES)
+
+
+def _delete(path: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        path.unlink(missing_ok=True)
+    else:
+        shutil.rmtree(path, ignore_errors=True)
 
 
 def remove_local(*, purge=False, sunshine=True) -> int:
@@ -885,7 +952,7 @@ def remove_local(*, purge=False, sunshine=True) -> int:
         except OSError:
             pass
 
-    share = home / ".local/share/omodachi"
+    share = home / SHARE_DIR
     # AUTH-1's PAM entry is root-owned and only `--remove-pam` can take it
     # back - and `--remove-pam` runs the packaged pam_install.py out of these
     # very sources. Deleting them while the entry is still installed would
@@ -895,12 +962,18 @@ def remove_local(*, purge=False, sunshine=True) -> int:
     pam_installed = Path("/etc/omodachi/pam.conf").exists()
     removed["pam_entry_present"] = pam_installed
     shutil.rmtree(share / "venv.previous", ignore_errors=True)
-    for child, key in ((share / "venv", "venv"), (share / "src", "sources")):
-        if key == "sources" and pam_installed:
-            continue
-        if child.is_dir():
-            shutil.rmtree(child, ignore_errors=True)
-            removed[key] = True
+    if (share / "venv").is_dir():
+        shutil.rmtree(share / "venv", ignore_errors=True)
+        removed["venv"] = True
+    source = share / "src"
+    if os.path.lexists(source) and not pam_installed:
+        if source_is_the_bootstraps(home):
+            shutil.rmtree(source, ignore_errors=True)
+            removed["sources"] = True
+        else:
+            removed["sources_kept"] = str(source)
+            print(f"kept {source}: nothing shows the Omodachi plugin's installer made it, "
+                  f"so it is not this uninstaller's to delete.", flush=True)
     if pam_installed:
         print("the device-approval PAM entry is still installed, so the sources were kept.\n"
               f"  python3 {share / 'src/scripts/install_host.py'} --local --remove-pam\n"
@@ -910,18 +983,45 @@ def remove_local(*, purge=False, sunshine=True) -> int:
     remove_firewall()
     run(["systemctl", "--user", "daemon-reload"], check=False)
 
+    kept = []
     if purge:
-        for directory in (home / CONFIG_DIR, home / ".cache/omodachi",
-                          home / ".local/state/omodachi", share):
-            if directory.is_dir():
-                shutil.rmtree(directory, ignore_errors=True)
+        config = home / CONFIG_DIR
+        if config.is_dir() and not config.is_symlink():
+            for child in sorted(config.iterdir()):
+                if _is_user_config(child.name):
+                    kept.append(child)
+                else:
+                    _delete(child)
+            _remove_empty(config)
+        shutil.rmtree(home / ".cache/omodachi", ignore_errors=True)
+        state = home / ".local/state/omodachi"
+        if state.is_dir() and not state.is_symlink():
+            for child in sorted(state.iterdir()):
+                # The plugin's ownership record outlives a checkout it still
+                # names, so that checkout stays provably the bootstrap's.
+                if child.name == Path(SOURCE_RECORD).name and os.path.lexists(share / "src"):
+                    continue
+                _delete(child)
+            _remove_empty(state)
         removed["purged"] = True
     else:
-        # agent-workspace is the user's own files; the rest of the tree is ours.
-        for leftover in ("hooks",):
-            shutil.rmtree(share / leftover, ignore_errors=True)
         print(f"kept {home / CONFIG_DIR} (device secret, certificate, pairings). "
               f"Add --purge to remove it too.", flush=True)
+    # ~/.local/share/omodachi: what the installer made is gone (sunshine/ was
+    # judged entry by entry above); the rest - agent-workspace, and anything
+    # nobody here made - stays, with or without --purge.
+    if share.is_dir() and not share.is_symlink():
+        for name in SHARE_MADE:
+            if name == "hooks":
+                _remove_empty(share / name)
+            elif os.path.lexists(share / name):
+                _delete(share / name)
+        kept += [child for child in sorted(share.iterdir()) if child.name != "src"]
+        _remove_empty(share)
+    if kept:
+        removed["kept"] = [str(path) for path in kept]
+        print("kept, because they are yours rather than the installer's:\n  "
+              + "\n  ".join(str(path) for path in kept), flush=True)
     print(json.dumps(removed, sort_keys=True), flush=True)
     return 0
 
@@ -1355,8 +1455,10 @@ def main(argv=None) -> int:
                              "sources, the wrappers, the desktop entry, the managed Sunshine "
                              "fork, the firewall rules and the Omarchy surfaces")
     parser.add_argument("--purge", action="store_true",
-                        help="with --remove, also delete ~/.config/omodachi - the device "
-                             "secret, the host certificate and every pairing")
+                        help="with --remove, also delete the device secret, the host "
+                             "certificate, every pairing and the rest of the host's state; "
+                             "agent-workspace and the files you wrote in ~/.config/omodachi "
+                             "(omodachi-menu.jsonc, desktop-runtime.json) are kept")
     parser.add_argument("--vnc", action=argparse.BooleanOptionalAction, default=True,
                         help="install WayVNC, Remote's second backend and the one that needs "
                              "no GPU (default: %(default)s)")

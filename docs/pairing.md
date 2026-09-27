@@ -238,6 +238,18 @@ Three things this is not:
 - It is not a takeover. A key body already sitting on a line this host does not
   own, or on another device's line, is refused (`409 public_key_not_owned` /
   `409 public_key_owned_by_other_device`) rather than adopted.
+- It is not a grant (RELEASE-9). Only a device whose local Approve landed an
+  SSH key (`grants.ssh: true`) may rotate here. Any other device gets
+  `409 ssh_approval_required`; the key it offered waits ten minutes for the
+  person at the computer: `omodachi-host ssh pending`, then
+  `omodachi-host ssh approve <device_id>` (or `reject`).
+
+Every line core writes is `restrict,pty,expiry-time="<UTC>Z" <key> # omodachi:<device>`:
+no forwarding of any kind and no `~/.ssh/rc`, a terminal, and an end one day
+after the device's credential ends. A credential renewal moves the end with it;
+the daemon rewrites any older, unrestricted owned line into this shape when it
+starts (a line whose device has no credential left gets an end in the past).
+`install_host.py --remove` deletes every owned line (`ssh_keys.remove_marked_lines`).
 
 `GET /v1/ssh/key` answers the same device with an inventory and no key:
 

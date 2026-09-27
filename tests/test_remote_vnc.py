@@ -1,5 +1,6 @@
 import io
 import json
+import os
 from pathlib import Path
 import socket
 import tempfile
@@ -20,9 +21,16 @@ class WayVNCRuntimeTests(unittest.TestCase):
             process=Process()
             def spawn(argv,**kwargs):
                 calls.append(argv);fd=kwargs['pass_fds'][0]
-                borrowed=socket.fromfd(fd,socket.AF_INET,socket.SOCK_STREAM)
-                try:self.assertEqual(borrowed.getsockname()[0],'127.0.0.1')
+                # RELEASE-9 (B3): a Unix socket in the session's own 0700
+                # directory, not a loopback TCP port anybody on the host can dial.
+                borrowed=socket.fromfd(fd,socket.AF_UNIX,socket.SOCK_STREAM)
+                try:
+                    self.assertEqual(borrowed.family,socket.AF_UNIX)
+                    self.assertEqual(borrowed.getsockname(),str(root/'rfb.sock'))
                 finally:borrowed.close()
+                self.assertEqual(os.stat(root/'rfb.sock').st_mode&0o777,0o600)
+                self.assertEqual(os.stat(root).st_mode&0o777,0o700)
+                self.assertEqual(argv[-1],'fd:'+str(fd))
                 self.assertIn('-R',argv);self.assertEqual(argv[argv.index('-o')+1],'OMODACHI-test')
                 return process
             def run(argv,**kwargs):
@@ -33,15 +41,33 @@ class WayVNCRuntimeTests(unittest.TestCase):
                 return SimpleNamespace(returncode=0,stdout=json.dumps({'code':0,'data':data}))
             vnc=ManagedWayVNC(root,environment=lambda:{},process_factory=spawn,command_runner=run)
             result=vnc.start('OMODACHI-test',{'width':800,'height':1280},{'width':400,'height':640})
-            # Host-internal endpoint only: the loopback port is what core's own
-            # WSS bridge dials, and it is never part of a client document.
-            self.assertEqual(result['host'],'127.0.0.1');self.assertFalse(result['automatic_resizing'])
+            # Host-internal endpoint only: the socket is what core's own WSS
+            # bridge dials, and it is never part of a client document.
+            self.assertEqual(result['socket'],str(root/'rfb.sock'));self.assertFalse(result['automatic_resizing'])
+            self.assertNotIn('port',result);self.assertNotIn('host',result)
             self.assertEqual(result['logical_size'],{'width':400,'height':640})
             self.assertNotIn('transport',result);self.assertNotIn('framebuffer_pixels',result)
             self.assertFalse(vnc.verify_frame({'width':800,'height':1280}))
             client_count[0]=1;self.assertTrue(vnc.verify_frame({'width':800,'height':1280}))
             self.assertFalse(vnc.verify_frame({'width':1280,'height':800}))
             self.assertTrue(vnc.stop());self.assertTrue(process.ended)
+            self.assertFalse((root/'rfb.sock').exists())
+    def test_the_rfb_socket_refuses_a_directory_it_does_not_own_privately(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'session';root.mkdir(mode=0o755)
+            vnc=ManagedWayVNC(root,environment=lambda:{})
+            listener=vnc._bind_private()
+            try:
+                self.assertEqual(os.stat(root).st_mode&0o777,0o700)
+                self.assertEqual(os.stat(root/'rfb.sock').st_mode&0o777,0o600)
+                # A live listener is never unlinked from under itself.
+                from omodachi_core.remote.errors import RemoteError
+                with self.assertRaises(RemoteError):vnc._bind_private()
+            finally:listener.close()
+            # A dead one of ours is cleared; a file that is not a socket is refused.
+            vnc._bind_private().close()
+            os.unlink(root/'rfb.sock');(root/'rfb.sock').write_text('not a socket')
+            with self.assertRaises(Exception):vnc._bind_private()
     def test_backend_choice_is_explicit_and_persistent(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'choice.json';store=HostBackendPreference(path)

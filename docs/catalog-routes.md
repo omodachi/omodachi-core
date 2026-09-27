@@ -92,7 +92,13 @@ row's process does not live in `omodachid.service`'s cgroup and die with it.
   `rm -r…`, `sudo`/`pkexec`, an `omarchy-remove-*` / `omarchy-refresh-*` /
   `omarchy-setup-security-*` script, a service restart that takes audio,
   network or input away, an update, a credential or boot change. The client
-  asks for a second tap; core does not enforce it.
+  asks for a second tap, and since RELEASE-9 core enforces it: the first
+  `:invoke` of a `confirm` row from a device answers `409
+  confirmation_required` with `error.detail.confirm_token` (43 characters,
+  one use, 30 s, bound to that device and row) and runs nothing. The row runs
+  on a second call from the same device inside the window - carrying
+  `confirm_token`, or, for a client that predates it, simply being that second
+  call. The panel (the person at the computer) is not asked twice.
 * A row that cannot be run stays `ready: false` with a reason: an empty action
   is `menu_action_empty`; a bare command that reads a terminal (`passwd`,
   `gum`, an editor …) with no terminal wrapper around it is

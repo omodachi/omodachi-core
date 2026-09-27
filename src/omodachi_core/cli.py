@@ -171,6 +171,9 @@ def daemon_main(argv=None) -> int:
         service.pairing = PairingStore(authority, Path(args.secret_file).parent / "pairing.json")
         from .herdr_bridge import HerdrSessionChoices
         service.herdr_choices = HerdrSessionChoices(Path(args.secret_file).parent / "herdr-sessions.json")
+        # RELEASE-9 (B2): lines written before this release had no `restrict`
+        # and no end; give every owned line both before anything can use it.
+        service.ssh_keys_reconcile()
         # AUTH-1. The broker holds no secret of its own: enrolled public keys
         # on disk, pending approvals in memory only. A daemon restart forgets
         # every pending approval, which is the correct answer - the PAM prompt
@@ -388,6 +391,13 @@ def host_main(argv=None) -> int:
                                  help="write the new certificate without restarting omodachid")
     ssh = sub.add_parser("ssh", help="the lines Omodachi owns in ~/.ssh/authorized_keys")
     ssh_sub = ssh.add_subparsers(dest="ssh_operation", required=True)
+    # RELEASE-9 (B2): a key a paired device offered without an SSH grant waits
+    # in the daemon for one of these.
+    for operation in ("pending", "approve", "reject"):
+        command = ssh_sub.add_parser(operation, help="keys devices offered after pairing, "
+                                                    "waiting for a local Approve")
+        if operation != "pending":
+            command.add_argument("device_id")
     for operation in ("authorize", "revoke", "list"):
         command = ssh_sub.add_parser(operation)
         command.add_argument("--home", type=Path, default=Path.home())
@@ -562,6 +572,15 @@ def host_main(argv=None) -> int:
                 result["restart_error"] = restart.stderr.strip()[:200]
         print(json.dumps({"ok": True, "result": result}, indent=2))
         return 0
+    if args.command == "ssh" and args.ssh_operation in {"pending", "approve", "reject"}:
+        params = {} if args.ssh_operation == "pending" else {"device_id": args.device_id}
+        try:
+            result = asyncio.run(JsonLineClient(args.socket, timeout=12).request(
+                "local.ssh." + args.ssh_operation, **params))
+        except (OSError, asyncio.TimeoutError):
+            result = {"ok": False, "error": "setup_required", "message": "daemon_unavailable"}
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("ok") else 1
     if args.command == "ssh":
         # Local administrator operation, like `tls`: the Unix owner of the file
         # is the only authority involved. No device credential, no daemon.
@@ -624,9 +643,14 @@ def host_main(argv=None) -> int:
         # `pair` and `devices`. `test` deliberately speaks the exact operation
         # the root PAM helper speaks, so what it prints is what PAM would see.
         if args.auth_operation == "test":
+            # RELEASE-9: like the root helper, this mints the approval id and
+            # nonce itself. What comes back is the device's signature; only the
+            # root helper can turn one into a PAM yes, against root's keys.
+            import secrets
             params = {"service": args.service, "user": os.environ.get("USER") or "",
                       "requester": os.environ.get("USER") or "", "tty": "omodachi-host auth test",
-                      "timeout": args.timeout}
+                      "timeout": args.timeout, "protocol": 2,
+                      "approval_id": "appr_" + secrets.token_hex(16), "nonce": secrets.token_urlsafe(32)}
             operation = "local.auth.approve"
         else:
             params = {"device_id": args.device_id} if args.auth_operation == "revoke" else {}

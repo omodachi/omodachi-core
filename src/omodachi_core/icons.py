@@ -53,7 +53,9 @@ Omarchy:
   icon and Qt does not context-filter when it draws it.
 
 Nothing here executes a row's command, reads an arbitrary path a client names,
-or takes a size a client did not bound.
+or takes a size a client did not bound. An absolute path is served only from an
+icon directory or when it is exactly an `Icon=` the host's catalog publishes
+(RELEASE-9).
 """
 from __future__ import annotations
 
@@ -306,6 +308,10 @@ class HostIcons:
         self._index: dict[str, str] | None = None
         self._index_stamp: tuple[int | None, ...] = ()
         self._index_at = 0.0
+        # RELEASE-9 (B5). A callable answering the absolute `Icon=` values the
+        # host's own catalog currently publishes. An absolute path outside the
+        # icon directories is served only if it is one of those.
+        self.declared = None
 
     # --- where the host keeps icons -------------------------------------
 
@@ -540,24 +546,41 @@ class HostIcons:
         return index
 
     def _allowed_roots(self) -> list[Path]:
-        """Where an absolute `Icon=` may point. Everything else is a 404."""
-        roots = list(self.base_dirs()) + [self.pixmaps]
+        """Directories that hold icons and nothing else.
+
+        RELEASE-9 (B5): every `…/icons` base directory, every `…/pixmaps`, and
+        the directory Omarchy's web-app installer writes its icons into. Not
+        `~/.local/share`, not `/opt`, not a whole `$XDG_DATA_DIRS` entry: those
+        hold anybody's files, and this endpoint used to hand any png, svg or
+        xpm under them to any paired device that named it.
+        """
+        roots = list(self.base_dirs()) + [self.pixmaps, self.home / ".local/share/applications/icons"]
         dirs = self.environ.get("XDG_DATA_DIRS", "").strip() or "/usr/local/share:/usr/share"
         for entry in dirs.split(":"):
             entry = entry.strip()
             if entry.startswith("/"):
-                roots.append(Path(entry))
-        roots.append(self.home / ".local/share")
-        roots.append(Path("/opt"))
+                roots.append(Path(entry) / "pixmaps")
         return roots
 
-    def _resolve_path(self, value: str) -> Path:
-        """An absolute `Icon=` value, admitted only under a known data root.
+    def _declared(self, *values: str) -> bool:
+        """Whether the host's own catalog publishes this exact `Icon=` value."""
+        source = self.declared
+        if not callable(source):
+            return False
+        try:
+            published = source()
+        except Exception:
+            return False
+        return any(value in published for value in values)
 
-        A client names this path, so the file must really live under one of the
-        directories a `.desktop` file is allowed to point at — after symlinks,
-        not before — and must be an image by extension. This is not a file
-        server.
+    def _resolve_path(self, value: str, *, as_published: str | None = None) -> Path:
+        """An absolute `Icon=` value, admitted only where an icon can be.
+
+        A client names this path, so it must be an image by extension and, after
+        symlinks, either live under an icon directory or be exactly an absolute
+        `Icon=` that one of this host's desktop entries declares (an app under
+        `/opt` that ships its own logo). Anything else is a 404: this is not a
+        file server.
         """
         candidate = Path(value)
         if not candidate.is_absolute() or candidate.suffix.lower() not in CONTENT_TYPES:
@@ -568,11 +591,15 @@ class HostIcons:
                 raise IconsUnavailable("icon_not_found")
         except (OSError, RuntimeError):
             raise IconsUnavailable("icon_not_found") from None
+        if real.suffix.lower() not in CONTENT_TYPES:
+            raise IconsUnavailable("icon_not_found")
         for root in self._allowed_roots():
             try:
                 real.relative_to(root.resolve(strict=False))
             except ValueError:
                 continue
+            return real
+        if self._declared(value, *(v for v in (as_published,) if v)):
             return real
         raise IconsUnavailable("icon_not_found")
 
@@ -592,7 +619,7 @@ class HostIcons:
         split = urlsplit(value)
         if split.netloc not in ("", "localhost") or split.query or split.fragment:
             raise IconsUnavailable("icon_not_found")
-        return self._resolve_path(unquote(split.path))
+        return self._resolve_path(unquote(split.path), as_published=value)
 
     def lookup(self, name: str, *, size: int = 64, scale: int = 1) -> dict[str, Any]:
         """The file this host would draw for `name`, in `iconSource()`'s order.

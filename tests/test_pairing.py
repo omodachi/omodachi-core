@@ -122,7 +122,12 @@ class OneApprovalThreeGrantsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["ssh"]["reason"], "added")
         self.assertEqual(result["grants"], {"companion": False, "media": False, "ssh": True})
         text = (self.home / ".ssh/authorized_keys").read_text()
-        self.assertEqual(text, f"ssh-ed25519 {KEY_BODY} # omodachi:ipad-real\n")
+        # RELEASE-9 (B2): restricted, and ending one credential TTL + a day on.
+        self.assertRegex(text, r'^restrict,pty,expiry-time="\d{14}Z" ssh-ed25519 '
+                         + KEY_BODY + " # omodachi:ipad-real\n$")
+        from omodachi_core.ssh_keys import AuthorizedKeys
+        ends = AuthorizedKeys(self.home).listing()[0]["expires_at"]
+        self.assertAlmostEqual(ends, time.time() + self.auth.ttl_seconds + 86400, delta=120)
 
         claim = self.service.pairing_claim(row["request_id"], {"request_secret": row["request_secret"]})
         self.assertEqual(claim["grants"], {"companion": True, "media": False, "ssh": True})
@@ -178,6 +183,101 @@ class OneApprovalThreeGrantsTests(unittest.IsolatedAsyncioTestCase):
                          f"ssh-ed25519 {OTHER_BODY} alex@laptop\n")
         self.auth.revoke_device("ipad-real")
         self.assertIsNone(self.auth.device_name("ipad-real"))
+
+
+class RequesterNameTests(unittest.TestCase):
+    """RELEASE-9 (B4): what a stranger may put in a notification title."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        base = Path(self.temp.name)
+        self.store = PairingStore(DeviceAuthenticator.from_file(base / "device.secret"), base / "pairing.json")
+
+    def named(self, name, device="ipad-x"):
+        return self.store.request(None, device, name, mode="open")["device_name"]
+
+    def test_newlines_controls_and_bidi_are_gone_and_the_length_is_bounded(self):
+        self.assertEqual(self.named("Leo\u2019s iPad\n\nApprove: granted"), "Leo\u2019s iPad Approve: granted")
+        self.assertEqual(self.named("evil\u202egnp.exe\u200b", "d2"), "evilgnp.exe")
+        self.assertEqual(self.named("a\x1b[31mred\x07", "d3"), "a[31mred")
+        self.assertEqual(len(self.named("x" * 80, "d4")), 48)
+        self.assertEqual(self.named("Pad \U0001F34E", "d5"), "Pad \U0001F34E")
+
+    def test_a_name_that_is_nothing_once_cleaned_is_refused(self):
+        for name in ("", "\u202e\u200b", "\n\t ", "x" * 300):
+            with self.subTest(name=name), self.assertRaises(ServiceError):
+                self.named(name)
+
+    def test_the_panels_own_device_id_cannot_be_requested(self):
+        from omodachi_core.protocol import PLUGIN_DEVICE_ID
+        with self.assertRaises(ServiceError):
+            self.store.request(None, PLUGIN_DEVICE_ID, "Omodachi panel", mode="open")
+
+
+class SshGrantTests(unittest.IsolatedAsyncioTestCase):
+    """RELEASE-9 (B2): `PUT /v1/ssh/key` is for a device an Approve gave a terminal."""
+
+    asyncSetUp = OneApprovalThreeGrantsTests.asyncSetUp
+    asyncTearDown = OneApprovalThreeGrantsTests.asyncTearDown
+    request = OneApprovalThreeGrantsTests.request
+    approve = OneApprovalThreeGrantsTests.approve
+
+    def pair(self, key):
+        row = self.request(key=key)
+        self.approve(row["request_id"])
+        claim = self.service.pairing_claim(row["request_id"], {"request_secret": row["request_secret"]})
+        return claim
+
+    async def test_a_device_granted_ssh_at_approval_may_rotate_its_key(self):
+        self.pair(KEY)
+        result = self.service.ssh_key("ipad-real", {"public_key": f"ssh-ed25519 {OTHER_BODY} new"})
+        self.assertEqual(result["reason"], "replaced")
+        text = (self.home / ".ssh/authorized_keys").read_text()
+        self.assertIn(OTHER_BODY, text)
+        self.assertTrue(text.startswith("restrict,pty,expiry-time="))
+
+    async def test_a_device_paired_without_a_key_cannot_add_one_on_its_own(self):
+        self.pair(None)
+        with self.assertRaises(ServiceError) as caught:
+            self.service.ssh_key("ipad-real", {"public_key": f"ssh-ed25519 {OTHER_BODY} sneaky"})
+        self.assertEqual((caught.exception.code, caught.exception.status), ("ssh_approval_required", 409))
+        self.assertFalse((self.home / ".ssh/authorized_keys").exists())
+        # It waits for the person at the computer.
+        pending = self.service._dispatch_local("local.ssh.pending", {}, lambda: True)["requests"]
+        self.assertEqual([row["device_id"] for row in pending], ["ipad-real"])
+        approved = self.service._dispatch_local("local.ssh.approve", {"device_id": "ipad-real"}, lambda: True)
+        self.assertTrue(approved["authorized"])
+        self.assertTrue(approved["grant_recorded"])
+        self.assertIn(OTHER_BODY, (self.home / ".ssh/authorized_keys").read_text())
+        # ...after which the device may rotate like any granted one.
+        result = self.service.ssh_key("ipad-real", {"public_key": KEY})
+        self.assertEqual(result["reason"], "replaced")
+
+    async def test_a_rejected_or_unknown_request_writes_nothing(self):
+        self.pair(None)
+        with self.assertRaises(ServiceError):
+            self.service.ssh_key("ipad-real", {"public_key": f"ssh-ed25519 {OTHER_BODY} x"})
+        self.service._dispatch_local("local.ssh.reject", {"device_id": "ipad-real"}, lambda: True)
+        with self.assertRaises(ServiceError) as caught:
+            self.service._dispatch_local("local.ssh.approve", {"device_id": "ipad-real"}, lambda: True)
+        self.assertEqual(caught.exception.code, "ssh_request_unknown")
+        self.assertFalse((self.home / ".ssh/authorized_keys").exists())
+
+    async def test_a_revoked_device_has_no_grant_left_to_rotate_with(self):
+        self.pair(KEY)
+        self.service._dispatch_local("local.devices.revoke", {"device_id": "ipad-real"}, lambda: True) \
+            if self.service.media_pairing is not None else self.store.forget_device("ipad-real")
+        with self.assertRaises(ServiceError) as caught:
+            self.service.ssh_key("ipad-real", {"public_key": f"ssh-ed25519 {OTHER_BODY} again"})
+        self.assertEqual(caught.exception.code, "ssh_approval_required")
+
+    async def test_renewal_extends_the_line_with_the_credential(self):
+        self.pair(KEY)
+        from omodachi_core.ssh_keys import AuthorizedKeys
+        later = int(time.time()) + 90 * 86400
+        self.service.ssh_key_renewed("ipad-real", later)
+        self.assertEqual(AuthorizedKeys(self.home).listing()[0]["expires_at"], later + 86400)
 
 
 class OpenPairingTests(unittest.IsolatedAsyncioTestCase):

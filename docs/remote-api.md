@@ -98,8 +98,9 @@ For Sunshine the client launches with its existing Moonlight pairing identity;
 core has already bound the owned output to the fork's lease. For VNC the client
 opens `path` as a WebSocket on the same host origin it is already talking to,
 with the same Bearer credential and the same pinned certificate; core dials the
-owned WayVNC listener on loopback and passes bytes through. The port is never
-part of any response, and nothing is exposed on the LAN by either backend.
+owned WayVNC listener - a Unix socket in the session's 0700 directory - and
+passes bytes through. Its path is never part of any response, and nothing is
+exposed on the LAN or on loopback TCP by the VNC backend.
 
 WayVNC shows its **first** client two framebuffer sizes, so core settles it
 before a session gets a bridge and the document names both (see

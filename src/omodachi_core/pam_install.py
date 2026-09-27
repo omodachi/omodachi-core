@@ -4,8 +4,12 @@
 The whole contract of this module is reversibility. Before a service file is
 touched, its exact bytes are copied to `/etc/omodachi/pam-backup/<service>.orig`
 (or, for a service that had no `/etc` file at all, a `.absent` marker is written
-instead), and `remove()` puts the file back byte for byte or deletes it. The
-unit tests assert the byte equality, and so does the Docker harness.
+instead). RELEASE-9: `remove()` does not write that old copy back - it would
+undo every change made to the file since - but takes exactly our two lines out
+of the file as it is now, and keeps a file it cannot do that to cleanly
+unchanged, reporting the conflict. A service file this installer created from
+the vendor copy is deleted only when, without our lines, it is still the
+vendor file.
 
 `system-auth` is never touched. Only the per-service files are, and only by
 inserting a marker comment and one rule above the first `auth` rule:
@@ -76,7 +80,10 @@ VENDOR_PAM_DIR = "usr/lib/pam.d"
 # because they are the same kind of prompt, not because they are installed by
 # default: approving your own screen unlock from a tablet lying next to the
 # laptop is a different trade than approving a sudo, and it is opt-in.
-KNOWN_SERVICES = ("sudo", "polkit-1", "hyprlock", "omarchy-lock-password", "su")
+#
+# RELEASE-9: `su` is gone. Approving `su` means approving a login as whichever
+# user the command names, which is not the trade anybody makes by opting in.
+KNOWN_SERVICES = ("sudo", "polkit-1", "hyprlock", "omarchy-lock-password")
 DEFAULT_SERVICES = ("sudo", "polkit-1")
 DEFAULT_TIMEOUT = 45
 _SERVICE = re.compile(r"[a-z][a-z0-9._-]{0,63}\Z")
@@ -85,6 +92,8 @@ _SERVICE = re.compile(r"[a-z][a-z0-9._-]{0,63}\Z")
 # directory of it back. The number picks the file's place in the drop-in sort
 # order; the name is what makes it findable and removable.
 POLKIT_HELPER_UNIT = "polkit-agent-helper@.service"
+# RELEASE-9. The root-owned device key store the helper verifies against.
+STORE_KEYS = "etc/omodachi/pam/keys.json"
 DROPIN_DIR = "etc/systemd/system/" + POLKIT_HELPER_UNIT + ".d"
 DROPIN_NAME = "60-omodachi.conf"
 # The service whose prompt this drop-in is for. No polkit in the service list,
@@ -94,6 +103,21 @@ POLKIT_SERVICE = "polkit-1"
 # The tmpfiles fragment that makes the socket directory a user cannot make.
 TMPFILES_PATH = "etc/tmpfiles.d/omodachi.conf"
 SHARED_RUNTIME_ROOT = "/run/omodachi"
+
+
+def _enroll_module():
+    """pam_enroll, beside this file: as a package module, or as the plain file
+    root was handed (install_host.py's loader runs these as files under -I)."""
+    try:
+        from . import pam_enroll  # type: ignore[attr-defined]
+        return pam_enroll
+    except ImportError:
+        import importlib.util
+        location = Path(__file__).resolve().parent / "pam_enroll.py"
+        spec = importlib.util.spec_from_file_location("omodachi_pam_enroll", location)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
 
 
 class PamInstallError(RuntimeError):
@@ -130,6 +154,46 @@ def pam_line(timeout=DEFAULT_TIMEOUT, helper="/" + HELPER_PATH) -> str:
 def _ours(row: str) -> bool:
     """Lines this installer owns: its marker comment and its own rule."""
     return MARKER in row or Path(HELPER_PATH).name in row
+
+
+# RELEASE-9. What `remove()` takes out of a live PAM file: exactly the two
+# lines `_insert` writes - the marker comment, byte for byte, and the rule in
+# the shape `pam_line` writes (any timeout). Any other line that mentions the
+# marker or the helper was edited by somebody since, and is a conflict.
+_OUR_RULE = re.compile(r"auth {6}sufficient {3}pam_exec\.so quiet stdout "
+                       + re.escape("/" + HELPER_PATH) + r" --timeout \d{1,3}")
+
+
+def _exactly_ours(row: str) -> bool:
+    line = row.rstrip("\n")
+    return line == MARKER_COMMENT or bool(_OUR_RULE.fullmatch(line))
+
+
+# Every service an install of any version could have touched (`su` included:
+# earlier versions allowed it), so a removal finds all of them.
+REMOVABLE_SERVICES = ("sudo", "polkit-1", "hyprlock", "omarchy-lock-password", "su")
+
+
+def _seed_digest(absent: Path) -> str:
+    try:
+        for line in absent.read_text(errors="replace").splitlines():
+            if line.startswith("seed_sha256="):
+                return line.partition("=")[2].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def strip_ours(text: str) -> tuple[str, list[str]]:
+    """(text without our two lines, lines that mention us but were changed)."""
+    kept, conflicts = [], []
+    for row in text.splitlines(keepends=True):
+        if _exactly_ours(row):
+            continue
+        if _ours(row):
+            conflicts.append(row.rstrip("\n"))
+        kept.append(row)
+    return "".join(kept), conflicts
 
 
 class PamInstaller:
@@ -200,7 +264,14 @@ class PamInstaller:
         vendor = self.vendor_file(service)
         if not vendor.exists():
             raise PamInstallError("pam_service_missing", f"no PAM file for {service!r}")
-        self._write(target, vendor.read_bytes(), 0o644)
+        seed = vendor.read_bytes()
+        self._write(target, seed, 0o644)
+        # RELEASE-9: what the copy was, so remove() can still recognise it as
+        # ours after a package update changes the vendor file.
+        absent = self.absent_marker(service)
+        if absent.exists():
+            self._write(absent, absent.read_bytes().rstrip(b"\n") + b"\nseed_sha256="
+                        + hashlib.sha256(seed).hexdigest().encode() + b"\n", 0o600)
         return "seeded-from-vendor"
 
     @staticmethod
@@ -364,6 +435,10 @@ class PamInstaller:
                   f"socket={socket}\n"
                   f"services={','.join(names)}\n"
                   f"timeout={timeout}\n"
+                  # RELEASE-9: the helper verifies every approval itself, against
+                  # the keys in this root-owned store (pam_enroll.py).
+                  f"keys=/{STORE_KEYS}\n"
+                  "protocol=2\n"
                   + (f"debug={debug}\n" if debug else ""))
         self._write(self.path(CONFIG_PATH), config.encode(), 0o644)
 
@@ -402,56 +477,80 @@ class PamInstaller:
                 "runtime_dir": runtime}
 
     def remove(self, *, keep_backups=False) -> dict:
-        """Put every touched file back exactly as it was."""
+        """Take our lines out of the PAM files as they are now.
+
+        RELEASE-9. Before this, `remove()` wrote the backup taken at the first
+        install back over the service file, which also undid every change the
+        user or a package made to `sudo` or `polkit-1` since. Now each file is
+        read as it is and only the two lines `_insert` wrote are taken out;
+        everything else in it stays byte for byte. A line that mentions the
+        marker or the helper but is not exactly ours is a conflict: that file
+        is left completely unchanged and named in `conflicts`, with the line.
+        An `/etc` copy this installer made of a vendor-only service (`.absent`)
+        is deleted only when, without our lines, it is still exactly the
+        vendor file; otherwise it is kept and reported. The backups are then
+        only records, and are deleted with the rest of /etc/omodachi.
+        """
         manifest = {}
         try:
             manifest = json.loads(self.manifest_file().read_text())
         except (OSError, ValueError):
             manifest = {}
-        services = manifest.get("services") or []
-        if not services:
-            # No manifest (or a broken one) is not a reason to leave a line in
-            # a PAM file: fall back to every service we could have touched.
-            def touched(name):
-                if self.backup_file(name).exists() or self.absent_marker(name).exists():
-                    return True
-                try:
-                    return any(_ours(row) for row in
-                               self.service_file(name).read_text(errors="surrogateescape").splitlines())
-                except OSError:
-                    return False
-            services = [name for name in KNOWN_SERVICES if touched(name)]
-        restored = []
+        # Every service we could have touched, from the manifest, a backup
+        # record, or our marker in the live file.
+        def touched(name):
+            if name in (manifest.get("services") or []):
+                return True
+            if self.backup_file(name).exists() or self.absent_marker(name).exists():
+                return True
+            try:
+                return any(_ours(row) for row in
+                           self.service_file(name).read_text(errors="surrogateescape").splitlines())
+            except OSError:
+                return False
+        services = [name for name in REMOVABLE_SERVICES if touched(name)]
+        restored, conflicts = [], []
         for service in services:
             target, backup, absent = self.service_file(service), self.backup_file(service), self.absent_marker(service)
-            if backup.exists():
-                self._write(target, backup.read_bytes(), 0o644)
-                how = "restored"
-            elif absent.exists():
-                if target.exists():
-                    target.unlink()
-                how = "removed"
-            elif target.exists():
-                # No record of the original. Strip our own line and nothing else.
-                text = target.read_text(errors="surrogateescape")
-                stripped = "".join(row for row in text.splitlines(keepends=True) if not _ours(row))
-                if stripped != text:
-                    self._write(target, stripped.encode("utf-8", errors="surrogateescape"), 0o644)
-                how = "stripped"
-            else:
+            if not target.exists():
                 how = "absent"
-            if not keep_backups:
+            else:
+                text = target.read_text(encoding="utf-8", errors="surrogateescape")
+                stripped, clash = strip_ours(text)
+                vendor = self.vendor_file(service)
+                if clash:
+                    how = "conflict"
+                    conflicts.append({"service": service, "file": str(target), "lines": clash})
+                elif absent.exists() and (
+                        (vendor.is_file() and stripped.encode("utf-8", errors="surrogateescape")
+                         == vendor.read_bytes())
+                        or hashlib.sha256(stripped.encode("utf-8", errors="surrogateescape")).hexdigest()
+                        == _seed_digest(absent)):
+                    # Our own shadow copy, and nothing in it but the vendor
+                    # stack: the vendor file is in charge again.
+                    target.unlink()
+                    how = "removed"
+                else:
+                    if stripped != text:
+                        self._write(target, stripped.encode("utf-8", errors="surrogateescape"),
+                                    target.stat().st_mode & 0o777)
+                    how = ("stripped-kept-copy" if absent.exists() else "stripped")
+            if not keep_backups and how != "conflict":
+                # A conflicting service keeps its records, so the next removal
+                # - after the lines are fixed by hand - still knows it is ours.
                 for path in (backup, absent):
                     if path.exists():
                         path.unlink()
             restored.append({"service": service, "file": str(target), "how": how})
         dropin = self.remove_dropin()
         runtime = self.remove_runtime_dir()
+        # RELEASE-9: the enrolled device keys go with the entry they served.
+        keys = _enroll_module().PamKeyStore(self.root).remove()
         for relative in (HELPER_PATH, CONFIG_PATH):
             path = self.path(relative)
             if path.exists():
                 path.unlink()
-        if not keep_backups and self.manifest_file().exists():
+        if not keep_backups and not conflicts and self.manifest_file().exists():
             self.manifest_file().unlink()
         directory = self.path(BACKUP_DIR)
         if not keep_backups and directory.is_dir() and not any(directory.iterdir()):
@@ -459,7 +558,8 @@ class PamInstaller:
         parent = self.path("etc/omodachi")
         if not keep_backups and parent.is_dir() and not any(parent.iterdir()):
             parent.rmdir()
-        return {"removed": True, "services": restored, "dropin": dropin, "runtime_dir": runtime}
+        return {"removed": not conflicts, "services": restored, "conflicts": conflicts,
+                "dropin": dropin, "runtime_dir": runtime, "keys": keys}
 
     def status(self) -> dict:
         try:
@@ -497,6 +597,11 @@ class PamInstaller:
 
 
 def main(argv=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in {"enroll", "unenroll", "keys"}:
+        # RELEASE-9: the device key store is its own program; this is the one
+        # entry point install_host.py's root loader runs.
+        return _enroll_module().main(argv)
     parser = argparse.ArgumentParser(prog="omodachi-pam-install", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("action", choices=("install", "remove", "status", "verify-restored"))
@@ -522,6 +627,10 @@ def main(argv=None) -> int:
                                        timeout=args.timeout, debug=args.debug_log)
         elif args.action == "remove":
             result = installer.remove(keep_backups=args.keep_backups)
+            if result["conflicts"]:
+                print(json.dumps({"ok": False, "error": "pam_conflict", "result": result},
+                                 indent=2, sort_keys=True))
+                return 3
         elif args.action == "verify-restored":
             result = installer.verify_restored()
         else:

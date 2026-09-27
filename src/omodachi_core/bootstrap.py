@@ -254,6 +254,7 @@ def create_service(hub: Hub, *, demo=False, default_menu: Path | None = None,
         service.theme=HostTheme()
         service.fonts=HostFonts()
         service.icons=HostIcons()
+        service.icons.declared=service.declared_icon_paths
         from .audio_uplink import MicrophoneArbiter
         from .voice_service import VoiceService
         # One virtual microphone exists, so the Remote uplink and the voice

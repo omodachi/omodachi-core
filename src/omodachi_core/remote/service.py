@@ -125,6 +125,25 @@ class RemoteService:
         session = self.manager.current() if self.manager is not None else None
         return (session.id, session.device_id) if session is not None else None
 
+    def _remote_allowed(self, device):
+        """RELEASE-9 (B5). A device whose Remote was taken back gets no screen.
+
+        The Sunshine backend already refused it (no client certificate), but
+        the VNC backend never asked: a device with its Remote grant revoked on
+        the computer could still see and drive the screen over WayVNC. The
+        answer comes from the same record the Sunshine refusal does.
+        """
+        core = self.core
+        media = getattr(core, "media_pairing", None) if core is not None else None
+        if media is None:
+            return
+        try:
+            denied = media.remote_denied(device)
+        except Exception:
+            denied = True
+        if denied:
+            raise RemoteError("remote_access_revoked", 403)
+
     def _owned(self, device, session_id):
         session = self._require().get(session_id)
         if device is not None and session.device_id != device:
@@ -349,6 +368,7 @@ class RemoteService:
         # stops being true, rather than one capabilities poll later.
         await self.ensure_manager()
         manager = self._require()
+        self._remote_allowed(device)
         session = await self._job(lambda: manager.create(device, payload))
         await self.refresh_bar()
         return session.to_dict()
@@ -366,6 +386,7 @@ class RemoteService:
     async def switch_backend(self, device, session_id, payload):
         manager = self._require()
         self._owned(device, session_id)
+        self._remote_allowed(device)
         session = await self._job(lambda: manager.switch_backend(session_id, payload))
         return session.to_dict()
 
@@ -405,23 +426,24 @@ class RemoteService:
     # --- the VNC bridge ----------------------------------------------------
 
     def vnc_endpoint(self, device, session_id):
-        """The owned WayVNC loopback port, for this session's owner only.
+        """The owned WayVNC socket path, for this session's owner only.
 
         Everything a client is allowed to reach is decided here: the session
         must exist, be this device's, be ready, and actually be running the VNC
-        backend. The port is never part of any response.
+        backend. The path is never part of any response.
         """
         manager = self._require()
         session = self._owned(device, session_id)
+        self._remote_allowed(device)
         if session.backend != "vnc":
             raise RemoteError("vnc_bridge_unavailable", 409)
         if session.state != "ready":
             raise RemoteError("session_not_ready", 409)
         backend = manager.backends.get("vnc")
-        port = backend.loopback_port(session) if backend is not None else None
-        if type(port) is not int or not 1 <= port <= 65535:
+        path = backend.local_socket(session) if backend is not None else None
+        if not isinstance(path, str) or not path.startswith("/"):
             raise RemoteError("vnc_bridge_unavailable", 503)
-        return port
+        return path
 
     def claim_vnc_bridge(self, session_id, channel):
         if self._vnc_bridges.get(session_id) is not None:

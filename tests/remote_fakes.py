@@ -348,7 +348,7 @@ class FakeWayVNC:
         self.session_id, self._available = session_id, available
         self.running = False
         self.output = None
-        self.port = 5901
+        self.socket = "/run/user/1000/omodachi-test/rfb.sock"
         # What the backend asked WayVNC to serve. The real instance keeps both:
         # the output's buffer pixels and the compositor's logical size, which
         # are two different numbers on a scale-2 output (REMOTE-6).
@@ -371,7 +371,7 @@ class FakeWayVNC:
     def start(self, output, pixels, logical_size=None):
         self.running, self.output = True, output
         self.pixels, self.logical_size = dict(pixels), dict(logical_size) if logical_size else None
-        return {"backend": "vnc", "transport": "ssh-forward", "host": "127.0.0.1", "port": self.port,
+        return {"backend": "vnc", "transport": "ssh-forward", "socket": self.socket,
                 "output_id": output, "framebuffer_pixels": pixels}
 
     def settle(self, timeout=4.0):

@@ -57,7 +57,7 @@ every later client is served the settled size from its own ServerInit.
 
 `VncBackend.prepare` therefore **settles WayVNC itself** (`ManagedWayVNC.settle`)
 before the session is handed a bridge: one throwaway RFB connection on the owned
-loopback port asks for a full update, absorbs the correction and goes away, so
+socket asks for a full update, absorbs the correction and goes away, so
 the session's real client meets one size and no mid-stream resize. It is best
 effort and bounded; a prime that could not finish is not a failed session.
 
@@ -93,8 +93,11 @@ SPEC-E3 shape — `output_mode_pixels == logical_size == framebuffer_pixels`, a
 quarter of the bytes on the wire, and no resize at all — for Sunshine as well.
 
 WayVNC runs with `-R`, `-o <owned output>`, a private control socket and a
-pre-bound `127.0.0.1` file descriptor. Nothing is exposed on the LAN and no
-extra user account is created. Per-instance stderr goes to a bounded owned
+pre-bound Unix socket (`rfb.sock`, 0600, in the session's own 0700 directory)
+handed over as `fd:N`. Nothing is exposed on the LAN, nothing listens on
+loopback TCP (RELEASE-9: an unauthenticated loopback port could be driven by
+any local account or host-network container), and no extra user account is
+created. Per-instance stderr goes to a bounded owned
 diagnostic file, never into a response.
 
 ## The WSS bridge
@@ -108,8 +111,8 @@ client holding a shell account on the host.
 Core answers the upgrade only for the device that owns a `ready` session whose
 backend is `vnc`; a foreign device gets `403 permission_denied`, an unknown
 session `404 session_not_found`, a Sunshine session `409
-vnc_bridge_unavailable`. It then connects `127.0.0.1:<owned WayVNC port>` and
-copies bytes: **one WebSocket BINARY message is a run of TCP bytes**, with no
+vnc_bridge_unavailable`. It then connects the owned WayVNC socket and
+copies bytes: **one WebSocket BINARY message is a run of stream bytes**, with no
 framing, length prefix, base64 or envelope in either direction. TEXT frames are
 not a control channel and close the bridge. Either end closing closes the other;
 a revoked credential or a released session ends it within a second. At most one

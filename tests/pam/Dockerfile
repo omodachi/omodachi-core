@@ -41,6 +41,7 @@ COPY src /opt/omodachi/src
 RUN pip install --no-cache-dir -e /opt/omodachi
 
 COPY tests/pam/fake_device.py /opt/harness/fake_device.py
+COPY tests/pam/fake_daemon_attack.py /opt/harness/fake_daemon_attack.py
 COPY tests/pam/cases.sh /opt/harness/cases.sh
 RUN chmod +x /opt/harness/cases.sh
 

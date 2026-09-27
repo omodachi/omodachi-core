@@ -3,6 +3,9 @@
 Everything runs against a `--root` sandbox, so no test here can touch the
 machine's real `/etc/pam.d` even if it is run as root by mistake.
 """
+import base64
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -13,6 +16,8 @@ import threading
 import unittest
 
 from omodachi_core import pam_helper
+from omodachi_core.biometric import approval_message
+from tests.test_biometric import keypair, sign
 from omodachi_core.pam_install import (DROPIN_DIR, DROPIN_NAME, MARKER, MARKER_COMMENT,
                                        POLKIT_HELPER_UNIT, TMPFILES_PATH, PamInstallError,
                                        PamInstaller, pam_line)
@@ -93,11 +98,47 @@ class PamInstallerTests(unittest.TestCase):
         self.install()
         self.assertNotEqual((self.root / "etc/pam.d/sudo").read_bytes(), original)
         result = self.installer.remove()
-        self.assertEqual([row["how"] for row in result["services"]], ["restored"])
+        self.assertEqual([row["how"] for row in result["services"]], ["stripped"])
         self.assertEqual((self.root / "etc/pam.d/sudo").read_bytes(), original)
         self.assertFalse((self.root / "usr/local/bin/omodachi-pam").exists())
         self.assertFalse((self.root / "etc/omodachi/pam.conf").exists())
         self.assertFalse((self.root / "etc/omodachi").exists())
+
+    # RELEASE-9: remove works on the file as it is now, never the old backup.
+    def test_changes_made_after_the_install_survive_the_removal(self):
+        self.install()
+        edited = self.sudo().replace("session\t\toptional\tpam_systemd.so class=none\n",
+                                     "session\t\toptional\tpam_systemd.so class=none\n"
+                                     "auth\t\toptional\tpam_faildelay.so delay=2000000\n")
+        (self.root / "etc/pam.d/sudo").write_text(edited)
+        result = self.installer.remove()
+        self.assertEqual(result["conflicts"], [])
+        after = self.sudo()
+        self.assertIn("pam_faildelay.so delay=2000000", after)
+        self.assertNotIn("omodachi", after)
+        self.assertEqual(after, ARCH_SUDO + "auth\t\toptional\tpam_faildelay.so delay=2000000\n")
+
+    def test_a_line_of_ours_somebody_edited_is_a_conflict_and_the_file_is_kept(self):
+        self.install()
+        text = self.sudo().replace("--timeout 45", "--timeout 45 --debug")
+        (self.root / "etc/pam.d/sudo").write_text(text)
+        result = self.installer.remove()
+        self.assertFalse(result["removed"])
+        self.assertEqual(result["conflicts"][0]["service"], "sudo")
+        self.assertIn("--debug", result["conflicts"][0]["lines"][0])
+        self.assertEqual(self.sudo(), text)
+        # The helper goes regardless, so the line left behind can only fail
+        # and fall through to the password.
+        self.assertFalse((self.root / "usr/local/bin/omodachi-pam").exists())
+        from omodachi_core import pam_install
+        import contextlib
+        import io
+        self.install()
+        (self.root / "etc/pam.d/sudo").write_text(self.sudo().replace("--timeout 45", "--timeout 45 -x"))
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = pam_install.main(["remove", "--root", str(self.root)])
+        self.assertEqual(code, 3)
+        self.assertIn("pam_conflict", out.getvalue())
 
     def test_a_vendor_only_service_is_shadowed_and_the_shadow_is_deleted_again(self):
         self.install(services=("sudo", "polkit-1"))
@@ -109,6 +150,44 @@ class PamInstallerTests(unittest.TestCase):
         self.installer.remove()
         self.assertFalse(shadow.exists())
         self.assertEqual((self.root / "usr/lib/pam.d/polkit-1").read_text(), VENDOR_POLKIT)
+
+    def test_our_shadow_copy_that_somebody_edited_is_kept_without_our_lines(self):
+        self.install(services=("sudo", "polkit-1"))
+        shadow = self.root / "etc/pam.d/polkit-1"
+        shadow.write_text(shadow.read_text() + "session    optional     pam_mine.so\n")
+        result = self.installer.remove()
+        self.assertEqual({row["service"]: row["how"] for row in result["services"]}["polkit-1"],
+                         "stripped-kept-copy")
+        self.assertEqual(shadow.read_text(), VENDOR_POLKIT + "session    optional     pam_mine.so\n")
+
+    def test_our_shadow_copy_goes_even_after_the_vendor_file_changed(self):
+        # RELEASE-9: the seed's digest is recorded, so a polkit update that
+        # changes /usr/lib/pam.d/polkit-1 does not strand our /etc copy.
+        self.install(services=("sudo", "polkit-1"))
+        (self.root / "usr/lib/pam.d/polkit-1").write_text(VENDOR_POLKIT + "session optional pam_new.so\n")
+        result = self.installer.remove()
+        self.assertEqual({row["service"]: row["how"] for row in result["services"]}["polkit-1"], "removed")
+        self.assertFalse((self.root / "etc/pam.d/polkit-1").exists())
+
+    def test_a_conflict_keeps_the_records_so_a_later_removal_can_finish(self):
+        self.install()
+        text = self.sudo().replace("--timeout 45", "--timeout 45 --debug")
+        (self.root / "etc/pam.d/sudo").write_text(text)
+        self.installer.remove()
+        self.assertTrue(self.installer.backup_file("sudo").exists())
+        self.assertTrue(self.installer.manifest_file().exists())
+        # The administrator deletes the edited line by hand; the next removal finishes.
+        (self.root / "etc/pam.d/sudo").write_text(
+            "".join(row for row in text.splitlines(keepends=True) if "omodachi" not in row))
+        result = self.installer.remove()
+        self.assertEqual(result["conflicts"], [])
+        self.assertFalse((self.root / "etc/omodachi").exists())
+
+    def test_a_su_line_from_an_earlier_version_is_still_removed(self):
+        (self.root / "etc/pam.d/su").write_text("#%PAM-1.0\n" + MARKER_COMMENT + "\n" + pam_line(45)
+                                                 + "\nauth required pam_unix.so\n")
+        self.installer.remove()
+        self.assertEqual((self.root / "etc/pam.d/su").read_text(), "#%PAM-1.0\nauth required pam_unix.so\n")
 
     def test_a_service_with_no_file_anywhere_is_refused_rather_than_invented(self):
         with self.assertRaises(PamInstallError) as caught:
@@ -315,7 +394,11 @@ class PolkitSandboxTests(unittest.TestCase):
 
 
 class _Daemon:
-    """A one-shot socket that answers whatever the test tells it to."""
+    """A one-shot socket that answers whatever the test tells it to.
+
+    `reply` is bytes, or a function of the request that returns bytes - which
+    is how a test plays a daemon that relays to a real (test) device key.
+    """
 
     def __init__(self, directory, reply, *, delay=0.0):
         self.path = str(Path(directory) / "daemon.sock")
@@ -335,12 +418,14 @@ class _Daemon:
                 return
             with connection:
                 try:
-                    self.requests.append(json.loads(connection.recv(65536).split(b"\n")[0]))
+                    request = json.loads(connection.recv(65536).split(b"\n")[0])
+                    self.requests.append(request)
                     if self.delay:
                         import time
                         time.sleep(self.delay)
-                    if self.reply is not None:
-                        connection.sendall(self.reply)
+                    reply = self.reply(request) if callable(self.reply) else self.reply
+                    if reply is not None:
+                        connection.sendall(reply)
                 except OSError:
                     pass
 
@@ -352,27 +437,53 @@ class _Daemon:
             pass
 
 
+HOST_ID = "0123456789abcdef0123456789abcdef"
+
+
 class PamHelperTests(unittest.TestCase):
-    """The helper's only job is to never say yes when it should not."""
+    """The helper's only job is to never say yes when it should not.
+
+    RELEASE-9: "yes" is now a signature this process verifies against a key in
+    a root-owned store. The test process plays root by owning the store, so
+    `TRUSTED_UID` is pointed at it; every other check is the production one.
+    """
 
     def setUp(self):
         self.directory = Path(tempfile.mkdtemp())
+        os.chmod(self.directory, 0o755)
         self.owner = __import__("pwd").getpwuid(os.getuid()).pw_name
         self.daemon = None
         self.environment = dict(os.environ)
+        self.trusted = pam_helper.TRUSTED_UID
+        pam_helper.TRUSTED_UID = os.getuid()
+        self.private, self.public = keypair()
+        self.write_keys()
 
     def tearDown(self):
+        pam_helper.TRUSTED_UID = self.trusted
         if self.daemon:
             self.daemon.close()
         os.environ.clear()
         os.environ.update(self.environment)
         shutil.rmtree(self.directory, ignore_errors=True)
 
+    def write_keys(self, keys=None, *, owner=None, mode=0o600):
+        keys = {"ipad": self.public} if keys is None else keys
+        path = self.directory / "keys.json"
+        path.write_text(json.dumps({"version": 1, "owner": owner or self.owner, "host_id": HOST_ID,
+                                    "keys": {device: {"public_key": base64.b64encode(key).decode(),
+                                                      "label": "Leo's iPad"}
+                                             for device, key in keys.items()}}))
+        os.chmod(path, mode)
+        return path
+
     def config(self, **overrides):
         values = {"owner": self.owner, "socket": str(self.directory / "daemon.sock"),
-                  "services": "sudo", "timeout": "5", **overrides}
+                  "services": "sudo", "timeout": "5", "keys": str(self.directory / "keys.json"),
+                  **overrides}
         path = self.directory / "pam.conf"
         path.write_text("".join(f"{key}={value}\n" for key, value in values.items() if value is not None))
+        os.chmod(path, 0o644)
         return str(path)
 
     def environ(self, **overrides):
@@ -383,9 +494,22 @@ class PamHelperTests(unittest.TestCase):
     def run_helper(self, config=None, argv=("--timeout", "5")):
         return pam_helper.main(["--config", config or self.config(), *argv])
 
-    def approve(self, device_name="Leo's iPad"):
-        body = json.dumps({"ok": True, "result": {"approved": True, "device_name": device_name}})
-        self.daemon = _Daemon(self.directory, (body + "\n").encode())
+    def signed_reply(self, request, *, private=None, device_id="ipad", nonce=None, approval_id=None,
+                     host_id=HOST_ID, service=None, user=None, device_name="Leo's iPad"):
+        """What a real daemon hands back after a real device signed the frame."""
+        approval_id = approval_id or request["approval_id"]
+        message = approval_message(host_id=host_id, approval_id=approval_id,
+                                   nonce=nonce or request["nonce"], service=service or request["service"],
+                                   user=user or request["user"], device_id=device_id)
+        signature = base64.b64encode(sign(self.private if private is None else private, message)).decode()
+        body = {"ok": True, "result": {"approved": True, "approval_id": request["approval_id"],
+                                       "device_id": device_id, "device_name": device_name,
+                                       "signature": signature}}
+        return (json.dumps(body) + "\n").encode()
+
+    def approve(self, device_name="Leo's iPad", **signing):
+        self.daemon = _Daemon(self.directory, lambda request: self.signed_reply(
+            request, device_name=device_name, **signing))
 
     def test_an_explicit_approval_is_the_only_success(self):
         self.environ()
@@ -477,11 +601,110 @@ class PamHelperTests(unittest.TestCase):
         self.assertEqual(self.daemon.requests, [])
 
     def test_a_hostile_device_name_is_not_printed(self):
+        """The name printed comes from root's store, never from the reply."""
         self.environ()
         self.approve(device_name="ok\r\nSUDO: granted")
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            self.assertEqual(self.run_helper(), 0)
+        self.assertEqual(printed.getvalue(), "Approved on Leo's iPad\n")
+        self.assertIsNone(pam_helper.printable_label("bad\nname"))
+        self.assertIsNone(pam_helper.printable_label("evil\u202eflipped"))
+
+    # -- RELEASE-9 B1: a same-user process cannot satisfy PAM ---------------
+    def test_a_fake_daemon_that_just_says_yes_is_refused(self):
+        """The pre-RELEASE-9 attack, verbatim: bind the socket, answer approved."""
+        self.environ()
+        body = json.dumps({"ok": True, "result": {"approved": True, "device_name": "iPad",
+                                                  "device_id": "ipad", "outcome": "approved"}})
+        self.daemon = _Daemon(self.directory, (body + "\n").encode())
+        self.assertEqual(self.run_helper(), 1)
+        # ...and with the approval id it was handed echoed back, still no.
+        self.daemon.close()
+        self.daemon = _Daemon(self.directory, lambda request: (json.dumps({"ok": True, "result": {
+            "approved": True, "approval_id": request["approval_id"], "device_id": "ipad",
+            "signature": base64.b64encode(b"\x30\x06\x02\x01\x01\x02\x01\x01").decode()}}) + "\n").encode())
+        self.assertEqual(self.run_helper(), 1)
+
+    def test_a_key_the_user_controls_does_not_answer(self):
+        """Signing with a key that is not in root's store - the user-writable one."""
+        self.environ()
+        other, _public = keypair()
+        self.approve(private=other)
+        self.assertEqual(self.run_helper(), 1)
+
+    def test_a_replayed_signature_does_not_answer_a_new_prompt(self):
+        self.environ()
+        self.approve(nonce="A" * 43)
+        self.assertEqual(self.run_helper(), 1)
+
+    def test_a_signature_for_another_approval_host_service_or_user_is_refused(self):
+        self.environ()
+        for signing in ({"approval_id": "appr_" + "0" * 32}, {"host_id": "f" * 32},
+                        {"service": "polkit-1"}, {"user": "root"}):
+            with self.subTest(**signing):
+                self.approve(**signing)
+                self.assertEqual(self.run_helper(), 1)
+                self.daemon.close()
+                self.daemon = None
+
+    def test_a_device_root_never_enrolled_is_refused_even_with_a_valid_signature(self):
+        self.environ()
+        self.approve(device_id="stranger")
+        self.assertEqual(self.run_helper(), 1)
+
+    def test_the_helper_mints_the_nonce_and_names_the_keys_it_accepts(self):
+        self.environ()
+        self.approve()
         self.assertEqual(self.run_helper(), 0)
-        self.assertIsNone(pam_helper.decide({"ok": True, "result": {
-            "approved": True, "device_name": "bad\nname"}})[1])
+        self.assertEqual(self.run_helper(), 0)
+        first, second = self.daemon.requests
+        self.assertEqual(first["protocol"], 2)
+        self.assertRegex(first["approval_id"], r"^appr_[0-9a-f]{32}$")
+        self.assertRegex(first["nonce"], r"^[A-Za-z0-9_-]{43}$")
+        self.assertNotEqual(first["nonce"], second["nonce"])
+        self.assertNotEqual(first["approval_id"], second["approval_id"])
+        self.assertEqual(first["host_id"], HOST_ID)
+        self.assertEqual(first["devices"], {"ipad": pam_helper.key_fingerprint(self.public)})
+
+    def test_no_enrolled_key_means_the_daemon_is_never_asked(self):
+        self.environ()
+        self.approve()
+        self.write_keys({})
+        self.assertEqual(self.run_helper(), 1)
+        (self.directory / "keys.json").unlink()
+        self.assertEqual(self.run_helper(), 1)
+        self.assertEqual(self.daemon.requests, [])
+
+    def test_a_key_store_or_config_someone_else_could_write_is_not_trusted(self):
+        self.environ()
+        self.approve()
+        self.write_keys(mode=0o664)
+        self.assertEqual(self.run_helper(), 1)
+        self.write_keys(mode=0o600)
+        config = self.config()
+        os.chmod(config, 0o666)
+        self.assertEqual(self.run_helper(config), 1)
+        self.assertEqual(self.daemon.requests, [])
+        # A store enrolled for somebody else is not this owner's.
+        self.write_keys(owner="somebody")
+        self.assertEqual(self.run_helper(), 1)
+
+    def test_a_key_store_owned_by_the_user_is_refused_in_production(self):
+        """TRUSTED_UID is root outside the tests: a user-owned file never passes."""
+        pam_helper.TRUSTED_UID = 0
+        if os.getuid() == 0:
+            self.skipTest("running as root")
+        self.environ()
+        self.approve()
+        self.assertEqual(self.run_helper(), 1)
+        self.assertEqual(self.daemon.requests, [])
+
+    def test_the_helper_and_the_daemon_sign_the_same_bytes(self):
+        from omodachi_core import biometric
+        fields = dict(host_id=HOST_ID, approval_id="appr_" + "a" * 32, nonce="n" * 43,
+                      service="sudo", user="alex", device_id="ipad")
+        self.assertEqual(pam_helper.approval_message(**fields), biometric.approval_message(**fields))
+        self.assertIs(biometric.verify_signature, pam_helper.verify_signature)
 
 
 if __name__ == "__main__":

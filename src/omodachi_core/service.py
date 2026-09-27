@@ -10,9 +10,12 @@ import asyncio
 from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
+import hmac
 import json
+import os
 from pathlib import Path
 import re
+import secrets
 import time
 import threading
 import uuid
@@ -138,6 +141,9 @@ class CoreService:
         self._focused_record: dict | None = None
         from .ssh_keys import AuthorizedKeys
         self.ssh_keys = AuthorizedKeys()
+        # RELEASE-9 (B2). Keys a device offered without an SSH grant, waiting
+        # for a local Approve: device -> {public_key, fingerprint, expires_at}.
+        self._ssh_pending: dict[str, dict] = {}
         self._agent_probe = None
         self._agent_probe_task = None
         self._herdr_layout_task = None
@@ -295,6 +301,24 @@ class CoreService:
             if code in {"icon_not_found", "icon_too_large"}:
                 raise ServiceError(code, status=404, fallback=HostIcons.FALLBACK) from None
             raise ServiceError(code, status=400) from None
+
+    def declared_icon_paths(self) -> set:
+        """RELEASE-9 (B5): the absolute `Icon=` values the published catalog carries.
+
+        The only absolute paths `/v1/icons` serves outside the icon directories.
+        Read from the last published snapshot; nothing is refreshed for it.
+        """
+        snapshot = self._catalog or {}
+        found = set()
+        for row in snapshot.get("entries") or ():
+            value = row.get("icon") if isinstance(row, dict) else None
+            if isinstance(value, str) and (value.startswith("/") or value.startswith("file://")):
+                found.add(value)
+            for app in (row.get("apps") or ()) if isinstance(row, dict) else ():
+                value = app.get("icon") if isinstance(app, dict) else None
+                if isinstance(value, str) and (value.startswith("/") or value.startswith("file://")):
+                    found.add(value)
+        return found
 
     def notify_theme_changed(self) -> dict:
         """The `theme-set` hook ran. Re-read, and publish only a real change."""
@@ -667,11 +691,30 @@ class CoreService:
                         result["remote"] = self._grant_remote(result["device_id"], result["request_id"], local_authorize)
                         granted["media"] = bool(result["remote"].get("media_authorized"))
                     if result.get("ssh_public_key"):
-                        result["ssh"] = self._authorize_ssh(result["ssh_public_key"], result["device_id"])
+                        # RELEASE-9: the credential is issued at the claim, so
+                        # the line ends one TTL (plus the grace day) from now.
+                        result["ssh"] = self._authorize_ssh(result["ssh_public_key"], result["device_id"],
+                                                            self._ssh_expiry(None))
                         granted["ssh"] = bool(result["ssh"].get("authorized"))
                     if granted:
                         result["grants"] = pairing.grant(result["request_id"], **granted)["grants"]
                     return result
+            if operation.startswith("local.ssh."):
+                # RELEASE-9 (B2): a key a device offered after pairing without
+                # an SSH grant lands only through this local Approve.
+                action = operation.removeprefix("local.ssh.")
+                if action == "pending":
+                    fields(payload)
+                    now = time.time()
+                    return {"requests": [{"device_id": device, "fingerprint": row["fingerprint"],
+                                          "device_name": self.hub.auth.device_name(device),
+                                          "expires_at": int(row["expires_at"])}
+                                         for device, row in sorted(self._ssh_pending.items())
+                                         if row["expires_at"] > now]}
+                if action in {"approve", "reject"}:
+                    fields(payload, ("device_id",))
+                    return self._decide_ssh(identifier(payload["device_id"]), approve=action == "approve")
+                raise ServiceError("route_unavailable", status=404)
             if operation.startswith("local.auth."):
                 action = operation.removeprefix("local.auth.")
                 if self.biometric is None:
@@ -966,13 +1009,33 @@ class CoreService:
         authority is the credential on this request: a device can only ever
         replace its own line, and `device_id` is never read from the body.
         """
-        from .ssh_keys import SshKeyError
+        from .ssh_keys import SshKeyError, fingerprint, parse_public_key
         fields(payload, ("public_key",))
         public_key = payload["public_key"]
         if not isinstance(public_key, str):
             raise ServiceError("invalid_request", "public_key must be one OpenSSH line")
+        # RELEASE-9 (B2). Only a device a local Approve gave a terminal to may
+        # state its key here. Anything else is held for a new local Approve
+        # (`omodachi-host ssh approve <device>`) and refused until then: a
+        # credential alone is not an SSH login.
+        grants = self._ssh_grants(device)
+        if not (grants or {}).get("ssh"):
+            try:
+                kind, body = parse_public_key(public_key)
+            except SshKeyError as error:
+                raise ServiceError(error.code, error.code, 400) from None
+            self._ssh_pending = {key: row for key, row in self._ssh_pending.items()
+                                 if row["expires_at"] > time.time()}
+            if device not in self._ssh_pending and len(self._ssh_pending) >= 16:
+                raise ServiceError("ssh_approval_capacity", status=429)
+            self._ssh_pending[device] = {"public_key": f"{kind} {body}", "fingerprint": fingerprint(body),
+                                         "expires_at": time.time() + 600}
+            _ssh_journal({"event": "ssh.key.approval_required", "device_id": device,
+                          "fingerprint": fingerprint(body)})
+            raise ServiceError("ssh_approval_required",
+                               "this device was not granted a terminal; approve it on the computer", 409)
         try:
-            result = self.ssh_keys.replace(public_key, device)
+            result = self.ssh_keys.replace(public_key, device, self._ssh_expiry(device))
         except SshKeyError as error:
             raise ServiceError(error.code, error.code, 409 if error.code.startswith("public_key_") else 400) from None
         except OSError:
@@ -1024,11 +1087,119 @@ class CoreService:
                           "devices": sorted(result["devices"])})
         return result
 
-    def _authorize_ssh(self, public_key, device):
+    # RELEASE-9 (B4). How long a refused `confirm` row stays armed for the
+    # second, deliberate call that runs it.
+    CONFIRM_WINDOW = 30.0
+
+    def _require_confirmation(self, device, entry_id, token):
+        """A `route.confirm` row runs only on a second, deliberate call.
+
+        Study 04 A-68 made the client ask twice; nothing on the host made it so,
+        so any credential could reboot or factory-reset the machine in one
+        request. Now the first call is refused `409 confirmation_required` with
+        a one-use `confirm_token` (detail), and only a second call for the same
+        row from the same device inside the window runs it - with the token, or,
+        for a client that predates it, simply as that second call. The panel is
+        the person at the computer and is not asked twice.
+        """
+        arms = getattr(self, "_confirm_arms", None)
+        if arms is None:
+            arms = self._confirm_arms = {}
+        now = time.monotonic()
+        for key in [key for key, (_token, until) in arms.items() if until <= now]:
+            del arms[key]
+        armed = arms.pop((device, entry_id), None)
+        if armed is not None and (token is None or hmac.compare_digest(token, armed[0])):
+            return
+        if len(arms) >= 256:
+            raise ServiceError("confirmation_capacity", status=429)
+        token = secrets.token_urlsafe(32)
+        arms[(device, entry_id)] = (token, now + self.CONFIRM_WINDOW)
+        raise ServiceError("confirmation_required", "this action changes the computer; send it again to confirm",
+                           409, confirm_token=token, expires_in=int(self.CONFIRM_WINDOW))
+
+    def _ssh_grants(self, device):
+        pairing = getattr(self, "pairing", None)
+        if pairing is None:
+            return None
+        try:
+            return pairing.grants_for(device)
+        except (ServiceError, OSError, ValueError):
+            return None
+
+    def _ssh_expiry(self, device):
+        """When a device's `authorized_keys` line stops opening the terminal.
+
+        RELEASE-9 (B2): the end of the device's credential plus the grace day.
+        With no credential yet (the approve, before the claim) it is one full
+        TTL from now; the claim issues exactly that.
+        """
+        from .ssh_keys import EXPIRY_GRACE_SECONDS
+        auth = self.hub.auth
+        ends = None
+        if device is not None:
+            try:
+                ends = next((row.get("expires_at") for row in auth.list_devices()
+                             if row["device_id"] == device and row.get("active_credentials")), None)
+            except Exception:
+                ends = None
+        if ends is None:
+            ends = int(time.time()) + int(getattr(auth, "ttl_seconds", 30 * 24 * 3600))
+        return int(ends) + EXPIRY_GRACE_SECONDS
+
+    def ssh_key_renewed(self, device, expires_at):
+        """The credential moved on; the terminal line moves with it."""
+        from .ssh_keys import EXPIRY_GRACE_SECONDS, SshKeyError
+        try:
+            result = self.ssh_keys.refresh_expiry(device, int(expires_at) + EXPIRY_GRACE_SECONDS)
+        except (SshKeyError, OSError, ValueError):
+            return None
+        if result["changed"]:
+            _ssh_journal({"event": "ssh.key.expiry_extended", "device_id": device,
+                          "expires_at": result["expires_at"]})
+        return result
+
+    def ssh_keys_reconcile(self):
+        """RELEASE-9 (B2), at daemon start: every owned line restricted and ending
+        with its device's credential; a line whose device has none is shut."""
+        from .ssh_keys import EXPIRY_GRACE_SECONDS, SshKeyError
+        try:
+            expiries = {row["device_id"]: int(row["expires_at"]) + EXPIRY_GRACE_SECONDS
+                        for row in self.hub.auth.list_devices()
+                        if row.get("active_credentials") and row.get("expires_at")}
+            result = self.ssh_keys.reconcile(expiries)
+        except (SshKeyError, OSError, ValueError, KeyError, TypeError):
+            return None
+        if result["changed"]:
+            _ssh_journal({"event": "ssh.key.reconciled", **result})
+        return result
+
+    def _decide_ssh(self, device, *, approve):
+        row = self._ssh_pending.pop(device, None)
+        if row is None or row["expires_at"] <= time.time():
+            raise ServiceError("ssh_request_unknown", status=404)
+        if not approve:
+            _ssh_journal({"event": "ssh.key.rejected", "device_id": device, "fingerprint": row["fingerprint"]})
+            return {"device_id": device, "authorized": False, "fingerprint": row["fingerprint"]}
+        from .ssh_keys import SshKeyError
+        try:
+            result = self.ssh_keys.replace(row["public_key"], device, self._ssh_expiry(device))
+        except SshKeyError as error:
+            raise ServiceError(error.code, error.code, 409) from None
+        except OSError:
+            raise ServiceError("authorized_keys_unreadable", status=503) from None
+        grants = self._ssh_grants(device)
+        if grants is not None:
+            self.pairing.grant(grants["request_id"], ssh=True)
+        _ssh_journal({"event": "ssh.key.approved", "device_id": device, "fingerprint": result["fingerprint"]})
+        return {"device_id": device, "authorized": True, "fingerprint": result["fingerprint"],
+                "grant_recorded": grants is not None}
+
+    def _authorize_ssh(self, public_key, device, expires_at=None):
         """Land one companion's public key, reporting failure instead of hiding it."""
         from .ssh_keys import SshKeyError
         try:
-            return self.ssh_keys.authorize(public_key, device)
+            return self.ssh_keys.authorize(public_key, device, expires_at)
         except SshKeyError as error:
             return {"authorized": False, "changed": False, "device": device, "error": error.code}
         except OSError:
@@ -1042,7 +1213,46 @@ class CoreService:
             # CLIP-1. A host with no clipboard bridge (demo, or a daemon
             # started outside a graphical session) offers the switch as
             # unsupported rather than as off: they are different answers.
-            "clipboard_supported": self.clipboard is not None}}
+            "clipboard_supported": self.clipboard is not None,
+            # RELEASE-9 (B1). Whether the root PAM step is on this machine at
+            # all, and whether it is the verifying helper (protocol 2). The
+            # panel offers the switch only when it would do something, and
+            # says "reinstall" for a helper that trusts the daemon's word.
+            **self.pam_integration()}}
+
+    #: The root-owned, world-readable config `install_host.py --pam` writes.
+    PAM_CONFIG = "/etc/omodachi/pam.conf"
+    PAM_CONFIG_OWNER = 0
+
+    def pam_integration(self) -> dict:
+        """`pam_installed` / `pam_protocol` / `pam_current` from the root config.
+
+        Installed means the config exists, is root's, and names this user; the
+        protocol is 1 for a config from before RELEASE-9 (no `protocol=` line).
+        """
+        import getpass
+        import stat as _stat
+        answer = {"pam_installed": False, "pam_protocol": None, "pam_current": False}
+        try:
+            info = os.lstat(self.PAM_CONFIG)
+            if not _stat.S_ISREG(info.st_mode) or info.st_uid != self.PAM_CONFIG_OWNER:
+                return answer
+            with open(self.PAM_CONFIG, "r", encoding="utf-8") as stream:
+                text = stream.read(65536)
+            values = {}
+            for line in text.splitlines():
+                key, sep, value = line.strip().partition("=")
+                if sep and not key.startswith("#"):
+                    values[key.strip()] = value.strip()
+            if values.get("owner") != getpass.getuser():
+                return answer
+            try:
+                protocol = int(values.get("protocol", "1"))
+            except ValueError:
+                protocol = 1
+        except (OSError, UnicodeError, KeyError):
+            return answer
+        return {"pam_installed": True, "pam_protocol": protocol, "pam_current": protocol >= 2}
 
     def apply_clipboard_preference(self):
         """Match the watcher to `clipboard_sync`. Safe to call when there is none."""
@@ -1690,7 +1900,10 @@ class CoreService:
         raise ServiceError("route_unavailable", status=404)
 
     def invoke(self, params: dict, device: str) -> dict:
-        fields(params, ("entry_id", "request_id", "catalog_revision"), ("params", "state_revision", "target_token", "workspace_binding", "execution_context"))
+        fields(params, ("entry_id", "request_id", "catalog_revision"), ("params", "state_revision", "target_token", "workspace_binding", "execution_context", "confirm_token"))
+        if "confirm_token" in params and not (isinstance(params["confirm_token"], str)
+                                              and re.fullmatch(r"[A-Za-z0-9_-]{43}", params["confirm_token"])):
+            raise ServiceError("invalid_request")
         entry_id, request_id = identifier(params["entry_id"]), identifier(params["request_id"])
         if entry_id.startswith('omodachi.shortcut.'):
             provider=getattr(self,'shortcut_provider',None)
@@ -1768,6 +1981,9 @@ class CoreService:
         descriptor = self.policy.prepare_invocation(entry, params=params.get("params"))
         if entry["route"].get("ready") is not True and descriptor.route != "desktop":
             raise ServiceError("route_unavailable", "route capability is unavailable", 409)
+        if (getattr(descriptor, "confirm", False) or (entry.get("route") or {}).get("confirm")) \
+                and device != PLUGIN_DEVICE_ID:
+            self._require_confirmation(device, entry_id, params.get("confirm_token"))
         if descriptor.route == "desktop" and not self.hub.capabilities_snapshot().get("desktop"):
             raise ServiceError("profile_unsupported", "Desktop adapter is not installed", 409)
         if descriptor.route == "host":

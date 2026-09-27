@@ -49,7 +49,7 @@ class _FixtureWayVNC:
     def available(self): return True
     def start(self, output, pixels, logical_size=None):
         self.pixels = dict(pixels)
-        return {"port": 5901}
+        return {"socket": "/run/user/1000/omodachi-fixture/rfb.sock"}
 
     def settle(self, timeout=4.0):
         # The real instance takes WayVNC's one mid-stream resize here, so the
@@ -116,12 +116,16 @@ def ssh_key_fixture(service: CoreService) -> dict[str, Any]:
         keys = AuthorizedKeys(Path(directory))
         keys.authorize(FIXTURE_SSH_KEY, "device-fixture-redacted")
         original, service.ssh_keys = service.ssh_keys, keys
+        # RELEASE-9 (B2): a device rotates only with the SSH grant its Approve
+        # recorded; the fixture device is one that has it.
+        service._ssh_grants = lambda device: {"request_id": "pair_fixture", "ssh": True}
         try:
             return {"ssh-key.json": service.ssh_key("device-fixture-redacted",
                                                     {"public_key": FIXTURE_SSH_KEY_REPLACEMENT}),
                     "ssh-key-state.json": service.ssh_key_state("device-fixture-redacted")}
         finally:
             service.ssh_keys = original
+            del service._ssh_grants
 
 
 def pairing_fixtures(service: CoreService) -> dict[str, Any]:
@@ -730,9 +734,15 @@ def auth_fixtures():
             "secure_enclave": True, "signature": base64.b64encode(sign(private, enrollment_message(
                 host_id=Identity.host_id, device_id="ipad-fixture", challenge=challenge,
                 public_key_b64=public))).decode()})
+        # RELEASE-9: the root helper mints these; drawn from the same pinned
+        # sequence, in the same order, so the fixture bytes do not move.
+        approval_id = "appr_" + biometric.secrets.token_hex(16)
+        nonce = biometric.secrets.token_urlsafe(32)
         task = asyncio.create_task(broker.request({"service": "sudo", "user": "alex",
                                                    "requester": "alex", "tty": "pts/3",
-                                                   "timeout": 45}))
+                                                   "timeout": 45, "protocol": 2,
+                                                   "approval_id": approval_id, "nonce": nonce,
+                                                   "host_id": Identity.host_id}))
         await asyncio.sleep(0)
         approval_id = next(iter(broker._pending))
         record = broker._pending[approval_id]

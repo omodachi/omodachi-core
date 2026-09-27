@@ -275,6 +275,8 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         home = Path(self.temp.name)
         keys = AuthorizedKeys(home)
         self.service.ssh_keys = keys
+        # RELEASE-9 (B2): only a device an Approve granted a terminal rotates.
+        self.service._ssh_grants = lambda device: {"request_id": "pair_x", "ssh": True}
         paired, drifted = ed25519(1), ed25519(2)
         keys.authorize(paired, "phone-a")
         keys.authorize(ed25519(3), "phone-b")
@@ -308,6 +310,19 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         async with self.client.put(self.url + "/v1/ssh/key", json={"public_key": ed25519(5)}) as response:
             self.assertEqual(response.status, 401)
         self.assertEqual(len(keys.listing()), 2)
+
+    async def test_a_device_without_an_ssh_grant_cannot_put_a_key(self):
+        """RELEASE-9 (B2), over the real boundary: a credential is not a login."""
+        import base64
+        from omodachi_core.ssh_keys import AuthorizedKeys
+        blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + bytes([9]) * 32
+        keys = AuthorizedKeys(Path(self.temp.name))
+        self.service.ssh_keys = keys
+        async with self.client.put(self.url + "/v1/ssh/key", headers=self.headers(),
+                                   json={"public_key": "ssh-ed25519 " + base64.b64encode(blob).decode()}) as response:
+            status, result = response.status, await response.json()
+        self.assertEqual((status, result["error"]["code"]), (409, "ssh_approval_required"))
+        self.assertEqual(keys.listing(), [])
 
     async def test_a_device_can_read_the_key_this_host_holds_for_it(self):
         """UX-4 §2. `GET /v1/ssh/key` - fingerprints, for the caller only."""
@@ -349,6 +364,7 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + bytes([7]) * 32
         line = "ssh-ed25519 " + base64.b64encode(blob).decode() + " synthetic"
         self.service.ssh_keys = AuthorizedKeys(Path(self.temp.name))
+        self.service._ssh_grants = lambda device: {"request_id": "pair_x", "ssh": True}
         async with self.client.put(self.url + "/v1/ssh/key", headers=self.headers(),
                                    json={"public_key": line}) as response:
             document = await response.json()

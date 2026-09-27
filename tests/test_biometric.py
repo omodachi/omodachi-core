@@ -184,7 +184,7 @@ class _Identity:
     host_name = "omarchy"
 
 
-class BrokerTests(unittest.IsolatedAsyncioTestCase):
+class _BrokerCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.directory = Path(tempfile.mkdtemp())
         self.authority = DeviceAuthenticator(secret=b"\x11" * 32,
@@ -194,7 +194,8 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
         self.journal = _Journal()
         self.preferences = _Preferences(True)
         self.broker = ApprovalBroker(self.hub, self.keys, preferences=self.preferences,
-                                     host_identity=_Identity(), journal=self.journal)
+                                     host_identity=_Identity(), journal=self.journal,
+                                     pam_index=self.directory / "enrolled.json")
         self.private, self.public = keypair()
         self.connected = set()
         self.hub.connected_devices = lambda: set(self.connected)
@@ -215,9 +216,12 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
             "secure_enclave": True, "signature": base64.b64encode(sign(private, message)).decode()})
 
     async def raise_approval(self, **overrides):
+        """What the RELEASE-9 root helper sends: its own approval id and nonce."""
         payload = {"service": "sudo", "user": "alex", "requester": "alex",
-                   "tty": "pts/3", "timeout": 5, **overrides}
-        return await self.broker.request(payload)
+                   "tty": "pts/3", "timeout": 5, "protocol": 2,
+                   "approval_id": "appr_" + secrets.token_hex(16), "nonce": secrets.token_urlsafe(32),
+                   "host_id": _Identity.host_id, **overrides}
+        return await self.broker.request({k: v for k, v in payload.items() if v is not None})
 
     def pending_id(self):
         return next(iter(self.broker._pending))
@@ -230,6 +234,8 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
         signature = base64.b64encode(sign(self.private if private is None else private, message)).decode()
         return self.broker.resolve(approval_id, device_id, {"decision": "approve", "signature": signature})
 
+
+class BrokerTests(_BrokerCase):
     # -- enrolment --------------------------------------------------------
     def test_enrolment_needs_the_challenge_and_a_signature_that_matches_the_key(self):
         row = self.enrol()
@@ -273,7 +279,7 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
         cursor = self.hub.event_cursor
         result = await self.raise_approval()
         self.assertEqual(result, {"approved": False, "approval_id": None, "outcome": "disabled",
-                                  "device_id": None, "device_name": None})
+                                  "device_id": None, "device_name": None, "signature": None})
         self.assertEqual(self.hub.event_cursor, cursor, "nothing may be published when the host says no")
 
     async def test_the_device_switch_off_keeps_it_out_of_the_audience(self):
@@ -366,8 +372,7 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_timeout_ends_the_wait_and_tells_the_device(self):
         self.enrol()
         self.connected.add("ipad")
-        result = await self.broker.request({"service": "sudo", "user": "alex",
-                                            "requester": "alex", "timeout": 5})
+        result = await self.raise_approval(tty=None)
         self.assertEqual((result["approved"], result["outcome"]), (False, "timeout"))
         published = [event.type for event in self.hub.events_since(0, limit=None, device_id="ipad")]
         self.assertIn("auth.approval.requested", published)
@@ -528,3 +533,76 @@ class BrokerTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RootVerifiedApprovalTests(_BrokerCase):
+    """RELEASE-9 B1: the daemon relays what the root helper minted, and only that."""
+
+    async def asyncSetUp(self):
+        self.enrol()
+        self.connected.add("ipad")
+
+    async def test_a_helper_from_before_release_9_is_refused_and_nobody_is_asked(self):
+        published = []
+        self.hub.publish = lambda *args, **kwargs: published.append(args)
+        result = await self.raise_approval(protocol=None, approval_id=None, nonce=None)
+        self.assertEqual(result["outcome"], "helper_outdated")
+        self.assertFalse(result["approved"])
+        self.assertEqual(published, [])
+
+    async def test_the_frame_carries_the_helpers_approval_id_and_nonce(self):
+        frames = []
+        self.hub.publish = lambda kind, payload, **kwargs: frames.append((kind, payload))
+        approval_id, nonce = "appr_" + "b" * 32, "N" * 43
+        task = asyncio.create_task(self.raise_approval(approval_id=approval_id, nonce=nonce))
+        await asyncio.sleep(0.05)
+        self.assertEqual(frames[0][1]["approval_id"], approval_id)
+        self.assertEqual(frames[0][1]["nonce"], nonce)
+        self.answer(approval_id=approval_id)
+        result = await task
+        self.assertTrue(result["approved"])
+        # The signature goes back to the helper, which is what verifies it.
+        from omodachi_core.pam_helper import decide
+        keys = {"ipad": {"public_key": self.public, "label": "iPad"}}
+        self.assertEqual(decide({"ok": True, "result": result}, approval_id=approval_id, nonce=nonce,
+                                host_id=_Identity.host_id, service="sudo", user="alex", keys=keys), "ipad")
+
+    async def test_another_hosts_identity_is_refused(self):
+        result = await self.raise_approval(host_id="f" * 32)
+        self.assertEqual(result["outcome"], "host_id_mismatch")
+
+    async def test_a_device_whose_key_is_not_the_one_root_enrolled_is_not_asked(self):
+        from omodachi_core.pam_helper import key_fingerprint
+        _other, public = keypair()
+        result = await self.raise_approval(devices={"ipad": key_fingerprint(public)})
+        self.assertEqual(result["outcome"], "no_connected_device")
+        self.assertIn("auth.approval.key_not_enrolled", self.journal.kinds())
+
+    async def test_only_the_devices_root_enrolled_are_asked(self):
+        from omodachi_core.pam_helper import key_fingerprint
+        result = await self.raise_approval(devices={"someone-else": key_fingerprint(self.public)})
+        self.assertEqual(result["outcome"], "no_connected_device")
+
+    async def test_a_duplicate_approval_id_is_refused(self):
+        approval_id = "appr_" + "c" * 32
+        first = asyncio.create_task(self.raise_approval(approval_id=approval_id))
+        await asyncio.sleep(0.05)
+        second = await self.raise_approval(approval_id=approval_id)
+        self.assertEqual(second["outcome"], "duplicate_approval")
+        self.answer(approval_id=approval_id)
+        self.assertTrue((await first)["approved"])
+
+    async def test_su_and_login_are_no_longer_services(self):
+        for service in ("su", "login"):
+            result = await self.raise_approval(service=service)
+            self.assertEqual(result["outcome"], "unsupported_service")
+
+    def test_the_readable_index_says_which_keys_root_holds(self):
+        from omodachi_core.pam_helper import key_fingerprint
+        self.assertFalse(self.broker.key_rows()[0]["pam_enrolled"])
+        (self.directory / "enrolled.json").write_text(json.dumps({
+            "version": 1, "host_id": _Identity.host_id,
+            "devices": {"ipad": {"fingerprint": key_fingerprint(self.public)}}}))
+        self.assertTrue(self.broker.key_rows()[0]["pam_enrolled"])
+        self.assertEqual(self.broker.status()["pam_enrolled_devices"], ["ipad"])
+

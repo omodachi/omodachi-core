@@ -50,26 +50,74 @@ The normal way is the plugin:
 omarchy plugin add https://github.com/omodachi/omodachi-plugin.git --enable
 ```
 
-then press Install on its panel. The plugin clones this repository at the tag
-it pins (`v0.1.0` for plugin 0.1.0) and runs this installer for you, in a
-visible terminal.
+then press Install on its panel. The plugin fetches this repository at the one
+full commit its `omodachi.json` pins, checks the checkout byte for byte, and
+runs this installer for you in a visible terminal.
 
-By hand, on the computer itself, the same thing the plugin does:
+Without the panel, run the same bootstrap yourself; it does exactly what the
+button does, pin and checks included:
 
 ```sh
-git clone https://github.com/omodachi/omodachi-core.git ~/.local/share/omodachi/src
-python3 ~/.local/share/omodachi/src/scripts/install_host.py --local
+git clone https://github.com/omodachi/omodachi-plugin.git
+python3 -I -B omodachi-plugin/tools/install_host.py            # install
+python3 -I -B omodachi-plugin/tools/install_host.py --remove   # uninstall, keeping pairings
 ```
 
 (`install_host.py --host user@omarchy` from a development machine syncs `src/`,
 `pyproject.toml`, `requirements/host.lock` and the two scripts there first.)
-The installer runs on the system `python3` with the standard library only. It
-builds `~/.local/share/omodachi/venv` from those sources, generates a host certificate under
-`~/.config/omodachi/tls/` if there is none, writes `omodachid.service` and
-`omodachi-herdr.service` into `~/.config/systemd/user/`, installs
-`~/.local/bin/omodachi-panel` and the desktop entry, opens the LAN firewall
-rules and enables the units. It is idempotent, writes no credentials or device
-state, and never replaces an existing certificate.
+The installer runs on the system `python3` with the standard library only.
+
+### What Install changes on this computer
+
+| Where | What |
+| --- | --- |
+| `~/.local/share/omodachi/` | `src/` (the checked checkout, put there by the plugin's bootstrap), `venv/` built from it, `sunshine/<commit>/` (the managed fork), `hooks/` (the sources of the two Omarchy hooks), `agent-workspace/` (the default agent's working directory; yours, never deleted) |
+| `~/.config/omodachi/` | `device.secret`, `tls/` (a self-signed certificate, never replaced), `plugin.token` (the panel's own device credential, 0600, issued once), `sunshine-web-credentials.json` (see below); the daemon keeps its pairings and settings here too |
+| `~/.config/systemd/user/` | `omodachid.service` and `omodachi-herdr.service`, enabled and started; the managed Sunshine's `app-dev.lizardbyte.app.Sunshine.service` |
+| `~/.local/bin/`, `~/.local/share/applications/`, icons | the `omodachid`, `omodachi-host` and `omodachi-panel` commands, the desktop entry and its icon |
+| `~/.config/omarchy/` | `themed/omodachi-theme.json.tpl` and the `theme-set` and `font-set` hooks (installed with `omarchy hook install`); the current theme is re-applied headless so Omarchy renders the template. Nothing else there, and never `~/.config/hypr` |
+| `~/.config/sunshine/apps.json` | one app entry added (the original kept as `apps.json.omodachi-bak`) |
+| ufw (sudo) | allow rules for `8099/tcp` and the Sunshine ports from the private ranges and `tailscale0`; the installer then says whether ufw is actually active and filtering |
+| pacman | the fork's runtime libraries and `wayvnc`, only those missing |
+| `~/.local/state/omodachi/`, `~/.cache/omodachi/` | the installer's records (which venv and Sunshine unit it made), Remote's session journals, the downloaded Sunshine archive |
+| `/etc` (only with `--pam`) | the opt-in device-approval PAM helper, its lines in `/etc/pam.d/sudo` and `polkit-1`, and the root-owned store of the device keys it accepts (`/etc/omodachi/pam/`, filled only by `--pam`/`--pam-enroll` after you see each key and type your password); see `src/omodachi_core/pam_install.py` |
+
+While it runs, the daemon also adds one line per device you grant SSH to
+`~/.ssh/authorized_keys`, marked `# omodachi:<device>` and written as
+`restrict,pty,expiry-time=…` so it gives a terminal only and lapses with the
+device's credential (a device approved without SSH needs a new approval on this
+computer before it can add a key); points Voxtype's audio
+device at its own source while a device dictates, keeping the original as
+`config.toml.omodachi-dictation-bak` until it puts it back; moves the Omarchy
+bar with `omarchy bar position` during a Remote session and back after it; and
+runs the Omarchy menu's own `when` conditions to decide which rows to show.
+
+### Removing it
+
+`--remove` takes back what Install made and nothing else: the units, commands,
+desktop entry, venv, the managed Sunshine (its unit disabled only if Install
+enabled it; the fork's own state, including the clients it paired, only if
+`~/.config/sunshine` did not exist before Omodachi - otherwise it says that
+state is kept), the `apps.json` entry (and the file, if Install created it), the Omarchy template and hooks, the ufw
+rules, every `authorized_keys` line marked as Omodachi's, a Voxtype config left
+mid-dictation, and, if you used `--pam`, the PAM entry (it asks for your
+password in the terminal). If something that grants access cannot be taken
+back, it says the host was only partly removed and what to run, and exits 3.
+Pairings, the certificate and the device secret stay, so a reinstall does not
+have to pair again. `--remove --purge` deletes those too, but only the files
+Omodachi itself creates; anything else you put in `~/.config/omodachi`,
+`~/.cache/omodachi` or `~/.local/state/omodachi`, and `agent-workspace`, is
+kept and listed.
+
+A venv, a Sunshine unit or install directory, a `src` checkout, or a unit file,
+command, theme template or hook of Omodachi's name that the installer cannot
+show it made is never replaced or deleted: Install stops and says how to move
+it aside, and `--remove` keeps it and says so. Every file the installer writes
+goes through a new file and a rename, so it never writes through a link.
+
+If a device-approval PAM entry from before this release is on the computer,
+Install says the host is only partly installed and gives the `--pam` command
+that replaces it (exit 3), rather than reporting success.
 
 ### How the install is verified
 
@@ -108,7 +156,13 @@ The firewall step copies `omarchy-install-service-sunshine`. It opens
 `tailscale0` with the comment `omodachi-core`, and the managed Sunshine fork's
 `47984,47989,48010/tcp` and `47998:48000/udp` the same way with the comment
 `omodachi-sunshine`. It needs sudo, a failure only warns, `--no-firewall` skips
-it, and `--remove-firewall` takes exactly those two comments back out.
+it, and `--remove-firewall` takes exactly those two comments back out. Rules are
+only a filter when ufw is enabled with incoming traffic denied by default, so
+the step reads `ufw status verbose` afterwards and says which it is: when ufw
+is missing or inactive it says plainly that the daemon's and Sunshine's ports
+are reachable from every network the computer is on (`sudo ufw enable` turns
+the rules on). The daemon listens on `0.0.0.0:8099` either way, behind TLS and
+device credentials.
 
 ### The remote screen
 
@@ -119,6 +173,29 @@ repository's own Releases and puts it under
 `~/.local/share/omodachi/sunshine/`, then writes and enables the Sunshine user
 unit. Building from source is the fallback, and that fork's `FORK.md` carries
 the recipe, the upstream base and the locked submodule commits.
+
+It never takes over a Sunshine it did not set up: if the unit already exists
+without this installer's marker, comes from a package (the distribution's
+`sunshine`), or, with no unit of ours, has drop-ins nobody here wrote, the fork
+is not installed, the existing one and its `apps.json` are left exactly as they
+are, and Remote uses WayVNC. Drop-ins someone adds beside our own unit are kept
+as their customisation of it; if one replaces its `ExecStart`, the installer
+says the web page lockdown below is not in effect. A fork already
+on disk is trusted as the pinned build without downloading only when its
+`MANIFEST.sha256` hashes to the `manifest_sha256` pinned in
+`src/omodachi_core/data/versions.json`, every file matches it and nothing else
+is in the directory. Sunshine's web admin page (47990) is started with
+`origin_web_ui_allowed=pc` and with its own credentials file already holding a
+random user name and a password hash no password is known to match, so it
+answers this computer only and nobody - on this computer or the network - can
+claim it by being first to set a password, which upstream otherwise allows
+until someone opens it. The installer reads the lockdown back from the unit
+systemd resolved before saying so. It uses that credentials file of its own
+even where `~/.config/sunshine/sunshine_state.json` already holds a login:
+before this release that page could be claimed by anyone, so a login found
+there is not taken as the user's. Nothing in that file is changed; to use the
+fork's web page yourself, set a login with
+`<fork>/sunshine credentials_file=$HOME/.config/omodachi/sunshine-web-credentials.json --creds <user> <password>`.
 
 The package is pinned, not "latest": `src/omodachi_core/data/versions.json`
 names the fork commit this core was tested against and the archive's sha256,

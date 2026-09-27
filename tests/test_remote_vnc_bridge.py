@@ -1,7 +1,7 @@
 """The WSS <-> TCP bridge that carries WayVNC over the pinned TLS connection.
 
 Everything here runs against a real aiohttp server, a real WebSocket and a real
-loopback TCP server standing in for WayVNC. Nothing is stubbed at the transport
+Unix-socket server standing in for WayVNC. Nothing is stubbed at the transport
 layer, because the whole point of the bridge is that the bytes are untouched.
 """
 from __future__ import annotations
@@ -28,11 +28,15 @@ GREETING = b"RFB 003.008\n"
 
 
 class LoopbackWayVNC:
-    """A loopback TCP server that speaks the first two RFB moves and echoes."""
+    """A Unix-socket server that speaks the first two RFB moves and echoes.
 
-    def __init__(self):
+    RELEASE-9 (B3): WayVNC listens on a socket in the session's 0700 directory,
+    so that is what this stands in for.
+    """
+
+    def __init__(self, path=None):
         self.server = None
-        self.port = 0
+        self.path = path
         self.received = bytearray()
         self.connections = 0
         self.eof = asyncio.Event()
@@ -59,8 +63,7 @@ class LoopbackWayVNC:
             finally:
                 self.eof.set()
                 writer.close()
-        self.server = await asyncio.start_server(serve, "127.0.0.1", 0)
-        self.port = self.server.sockets[0].getsockname()[1]
+        self.server = await asyncio.start_unix_server(serve, self.path)
 
     async def close(self):
         for writer in self.writers:
@@ -75,14 +78,14 @@ class VncBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.wayvnc = LoopbackWayVNC()
+        self.wayvnc = LoopbackWayVNC(str(self.root / "rfb.sock"))
         await self.wayvnc.start()
         self.addAsyncCleanup(self.wayvnc.close)
         build = FakeWayVNC.factory()
 
         def factory(session_id):
             instance = build(session_id)
-            instance.port = self.wayvnc.port
+            instance.socket = self.wayvnc.path
             return instance
 
         self.compositor = FakeCompositor()
@@ -161,6 +164,29 @@ class VncBridgeTests(unittest.IsolatedAsyncioTestCase):
                 seen += message.data
         self.assertEqual(bytes(seen), payload)
         self.assertEqual(bytes(self.wayvnc.received), payload)
+
+    async def test_a_device_whose_remote_was_revoked_gets_no_vnc_screen(self):
+        """RELEASE-9 (B5): the VNC backend asks the same question Sunshine does."""
+        class Media:
+            denied = set()
+            def remote_denied(self, device_id):
+                return device_id in self.denied
+        media = Media()
+        self.service.media_pairing = media
+        session = await self.start()
+        media.denied.add("ipad-a")
+        with self.assertRaises(aiohttp.WSServerHandshakeError) as caught:
+            async with self.bridge(session):
+                pass
+        self.assertEqual(caught.exception.status, 403)
+        self.assertEqual(self.wayvnc.connections, 0)
+        headers = {"Authorization": "Bearer " + self.token}
+        async with self.http.delete(self.url + "/v1/remote/sessions/" + session["id"], headers=headers):
+            pass
+        async with self.http.post(self.url + "/v1/remote/sessions", headers=headers,
+                                  json={**profile_request(), "backend": "vnc"}) as response:
+            self.assertEqual(response.status, 403)
+            self.assertEqual((await response.json())["error"]["code"], "remote_access_revoked")
 
     async def test_only_the_session_owner_can_open_the_bridge(self):
         session = await self.start()

@@ -135,15 +135,69 @@ class ArchiveShapeTests(unittest.TestCase):
 
     def test_reinstalling_the_same_build_replaces_the_directory_rather_than_merging(self):
         # A stale shader from an older tree beside a newer binary is invisible:
-        # the fork logs a compile error and streams on the CPU.
+        # the fork logs a compile error and streams on the CPU. So a reinstall
+        # swaps in a whole new directory rather than extracting over the old.
         with tempfile.TemporaryDirectory() as scratch:
             home = Path(scratch)
             archive = build_archive(home / "p.tar.gz")
             directory = Path(package.unpack(archive, home)["directory"])
-            (directory / "assets/shaders/opengl/Stale.frag").write_text("old")
+            before = (directory / "sunshine").stat().st_ino
             package.unpack(archive, home)
-            self.assertFalse((directory / "assets/shaders/opengl/Stale.frag").exists())
+            self.assertNotEqual((directory / "sunshine").stat().st_ino, before)
             self.assertEqual(package.verify_manifest(directory), [])
+            self.assertEqual(sorted(path.name for path in directory.parent.iterdir()), ["abc1234"])
+
+    def test_a_same_named_directory_somebody_changed_is_kept_and_the_install_stops(self):
+        # RELEASE-9: only a tree that is exactly an archive's contents is ours
+        # to replace; an added file makes it somebody's.
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            archive = build_archive(home / "p.tar.gz")
+            directory = Path(package.unpack(archive, home)["directory"])
+            (directory / "assets/shaders/opengl/Mine.frag").write_text("mine")
+            with self.assertRaises(package.SunshinePackageError) as caught:
+                package.unpack(archive, home)
+            self.assertEqual(caught.exception.code, "sunshine_directory_not_ours")
+            self.assertEqual((directory / "assets/shaders/opengl/Mine.frag").read_text(), "mine")
+            self.assertEqual(sorted(path.name for path in directory.parent.iterdir()), ["abc1234"])
+
+
+class PristineTests(unittest.TestCase):
+    """RELEASE-9: what makes an unpacked tree provably an archive's contents."""
+
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(self.scratch.cleanup)
+        self.home = Path(self.scratch.name)
+        archive = build_archive(self.home / "p.tar.gz")
+        self.directory = Path(package.unpack(archive, self.home)["directory"])
+        self.manifest = package.digest(self.directory / "MANIFEST.sha256")
+
+    def test_an_untouched_tree_is_pristine_against_its_own_manifest_hash(self):
+        self.assertEqual(package.pristine(self.directory, self.manifest), "")
+        self.assertEqual(package.pristine(self.directory), "")
+
+    def test_a_manifest_that_is_not_the_pinned_one_is_refused(self):
+        self.assertIn("not the one the pinned archive carries",
+                      package.pristine(self.directory, "0" * 64))
+
+    def test_a_changed_file_an_extra_file_or_a_link_is_refused(self):
+        (self.directory / "LICENSE").write_text("changed\n")
+        self.assertIn("LICENSE does not match", package.pristine(self.directory))
+
+    def test_an_extra_file_or_link_is_refused(self):
+        (self.directory / "lib").mkdir()
+        (self.directory / "lib/libinjected.so").write_bytes(b"\0")
+        self.assertIn("lib/libinjected.so", package.pristine(self.directory))
+        (self.directory / "lib/libinjected.so").unlink()
+        (self.directory / "lib").rmdir()
+        (self.directory / "extra").symlink_to("/etc/passwd")
+        self.assertIn("extra", package.pristine(self.directory))
+
+    def test_a_link_in_place_of_the_directory_is_refused(self):
+        link = self.home / "linked"
+        link.symlink_to(self.directory)
+        self.assertIn("is not a directory", package.pristine(link))
 
 
 class EncoderTests(unittest.TestCase):
@@ -198,18 +252,34 @@ class UnitTests(unittest.TestCase):
             self.assertFalse(result["packaged_unit"])
             self.assertIn("WorkingDirectory=", unit.read_text())
 
-    def test_a_host_that_already_has_the_packaged_unit_only_gets_a_drop_in(self):
+    def test_a_sunshine_the_distribution_installed_is_not_taken_over(self):
+        # RELEASE-9: before, a drop-in replaced ExecStart of the user's own
+        # packaged Sunshine with the fork. Now it is refused and nothing is written.
         with tempfile.TemporaryDirectory() as scratch:
             home = Path(scratch)
+            runner = Recorder({"systemctl --user cat": (
+                0, "# /usr/lib/systemd/user/app-dev.lizardbyte.app.Sunshine.service\n[Service]\n", "")})
+            with self.assertRaises(package.SunshinePackageError) as caught:
+                package.ensure_unit(home, home / "install", arguments=["capture=wlr"], runner=runner)
+            self.assertEqual(caught.exception.code, "sunshine_not_ours")
+            self.assertFalse((home / package.UNIT_DIR).exists())
+            self.assertFalse(runner.argv_containing("enable"))
+            self.assertFalse(runner.argv_containing("restart"))
+
+    def test_our_own_drop_in_on_a_packaged_unit_is_still_ours_to_update(self):
+        # An install from before RELEASE-9 made exactly this; it stays managed.
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            dropin = home / package.UNIT_DIR / (package.SUNSHINE_UNIT + ".d") / package.DROPIN_NAME
+            dropin.parent.mkdir(parents=True)
+            dropin.write_text(package.dropin_text(home / "old", ["capture=wlr"]))
             runner = Recorder({"systemctl --user cat": (
                 0, "# /usr/lib/systemd/user/app-dev.lizardbyte.app.Sunshine.service\n[Service]\n", "")})
             result = package.ensure_unit(home, home / "install", arguments=["capture=wlr"],
                                          runner=runner)
             self.assertTrue(result["packaged_unit"])
-            dropin = home / package.UNIT_DIR / (package.SUNSHINE_UNIT + ".d") / package.DROPIN_NAME
-            self.assertTrue(dropin.is_file())
+            self.assertIn(str(home / "install"), dropin.read_text())
             self.assertFalse((home / package.UNIT_DIR / package.SUNSHINE_UNIT).exists())
-            self.assertIn("ExecStart=\n", dropin.read_text())
 
     def test_the_unit_is_enabled_and_not_only_written(self):
         # 2026-09-20: the binary was there, the drop-in was there, and nothing
@@ -255,24 +325,219 @@ class RemovalTests(unittest.TestCase):
             handmade = home / package.INSTALL_ROOT / "deadbee"
             handmade.mkdir(parents=True)
             (handmade / "sunshine").write_text("a developer's own build")
-            runner = Recorder({"systemctl --user cat": (1, "", "")})
+            (handmade / "SOURCE").write_text("commit=deadbee\n")
+            runner = Recorder({"systemctl --user cat": (1, "", ""),
+                               "is-enabled": (1, "not-found\n", "")})
             package.ensure_unit(home, home / package.INSTALL_ROOT / "abc1234",
                                 arguments=["capture=wlr"], runner=runner)
             removed = package.remove(home, runner=runner)
             self.assertEqual(removed["installs"], ["abc1234"])
             self.assertTrue(removed["unit"])
             self.assertTrue((handmade / "sunshine").is_file())
-            self.assertTrue(runner.argv_containing("disable --now"))
+            self.assertIn(str(handmade), removed["kept"])
+            self.assertTrue(runner.argv_containing("stop " + package.SUNSHINE_UNIT))
+            self.assertTrue(runner.argv_containing("disable " + package.SUNSHINE_UNIT))
+            self.assertFalse((home / package.UNIT_RECORD).exists())
+            self.assertFalse((home / package.WEB_CREDENTIALS).exists())
 
-    def test_a_unit_somebody_else_wrote_is_not_ours_to_delete(self):
+    def test_a_unit_somebody_else_wrote_is_not_ours_to_delete_stop_or_disable(self):
         with tempfile.TemporaryDirectory() as scratch:
             home = Path(scratch)
             unit = home / package.UNIT_DIR / package.SUNSHINE_UNIT
             unit.parent.mkdir(parents=True)
             unit.write_text("[Service]\nExecStart=/usr/bin/sunshine\n")
-            removed = package.remove(home, runner=Recorder())
+            runner = Recorder()
+            removed = package.remove(home, runner=runner)
             self.assertFalse(removed["unit"])
             self.assertTrue(unit.is_file())
+            self.assertNotIn("state_kept", removed)
+            # RELEASE-9: the user's own Sunshine keeps running and stays enabled.
+            self.assertEqual(runner.argv_containing("disable"), [])
+            self.assertEqual(runner.argv_containing("stop"), [])
+
+    def test_a_unit_that_was_enabled_before_the_install_is_not_disabled(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            runner = Recorder({"systemctl --user cat": (1, "", ""),
+                               "is-enabled": (0, "enabled\n", "")})
+            package.ensure_unit(home, home / "install", arguments=["capture=wlr"], runner=runner)
+            self.assertEqual(json.loads((home / package.UNIT_RECORD).read_text())["enabled_before"],
+                             "enabled")
+            removed = package.remove(home, runner=runner)
+            self.assertFalse(removed["disabled"])
+            self.assertIn("was enabled before", removed["left_enabled"])
+            self.assertEqual(runner.argv_containing("disable"), [])
+
+    def test_the_drop_in_directory_is_never_removed_with_somebody_elses_drop_ins_in_it(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            directory = home / package.UNIT_DIR / (package.SUNSHINE_UNIT + ".d")
+            directory.mkdir(parents=True)
+            (directory / package.DROPIN_NAME).write_text(package.dropin_text(home / "x", []))
+            mine = directory / "10-my-env.conf"
+            mine.write_text("[Service]\nEnvironment=MINE=1\n")
+            unit = home / package.UNIT_DIR / package.SUNSHINE_UNIT
+            unit.write_text(package.unit_text(home / "x", []))
+            runner = Recorder({"systemctl --user cat": (1, "", "")})
+            result = package.ensure_unit(home, home / "install", arguments=["capture=wlr"], runner=runner)
+            self.assertEqual(result["strangers"], [str(mine)])
+            self.assertFalse((directory / package.DROPIN_NAME).exists())  # ours, stale
+            self.assertEqual(mine.read_text(), "[Service]\nEnvironment=MINE=1\n")
+            package.remove(home, runner=runner)
+            self.assertEqual(mine.read_text(), "[Service]\nEnvironment=MINE=1\n")
+
+
+class ForkStateTests(unittest.TestCase):
+    """RELEASE-9: the fork's own state (its paired clients above all) goes with it
+    when the configuration directory was Omodachi's to begin with."""
+
+    def install_and_remove(self, *, existed):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            config = home / package.SUNSHINE_CONFIG
+            if existed:
+                config.mkdir(parents=True)
+            runner = Recorder({"systemctl --user cat": (1, "", "")})
+            package.ensure_unit(home, home / "install", arguments=[], runner=runner)
+            (config / "credentials").mkdir(parents=True, exist_ok=True)
+            for name in package.FORK_FILES:
+                (config / name).write_text("fork\n")
+            (config / "sunshine.conf").write_text("")
+            (config / "mine.txt").write_text("mine\n")
+            removed = package.remove(home, runner=runner)
+            return removed, sorted(str(p.relative_to(config)) for p in config.rglob("*"))
+
+    def test_the_forks_files_go_when_the_directory_was_made_for_it(self):
+        removed, left = self.install_and_remove(existed=False)
+        self.assertEqual(left, ["mine.txt"])
+        self.assertIn("sunshine_state.json", removed["fork_files"])
+
+    def test_a_directory_that_was_there_before_keeps_its_state_and_says_so(self):
+        removed, left = self.install_and_remove(existed=True)
+        self.assertIn("sunshine_state.json", left)
+        self.assertIn("devices paired through Omodachi's Sunshine stay", removed["state_kept"])
+
+    def test_the_lockdown_is_read_back_from_what_systemd_resolved(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            creds = "credentials_file=" + str(home / package.WEB_CREDENTIALS)
+            locked = Recorder({"show -p ExecStart": (0, "{ path=/x/sunshine ; argv[]=/x/sunshine capture=wlr "
+                                                        "origin_web_ui_allowed=pc " + creds + " ; }", "")})
+            overridden = Recorder({"show -p ExecStart": (0, "{ path=/x/sunshine ; argv[]=/x/sunshine ; }", "")})
+            self.assertTrue(package.web_locked(home, runner=locked))
+            self.assertFalse(package.web_locked(home, runner=overridden))
+            self.assertIsNone(package.web_locked(home, runner=Recorder({"show": (1, "", "")})))
+
+
+class OwnershipTests(unittest.TestCase):
+    """RELEASE-9: the unit is written only where there is none, or ours."""
+
+    def test_a_unit_file_the_user_wrote_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            unit = home / package.UNIT_DIR / package.SUNSHINE_UNIT
+            unit.parent.mkdir(parents=True)
+            unit.write_text("[Service]\nExecStart=/opt/my/sunshine\n")
+            runner = Recorder({"systemctl --user cat": (0, "# " + str(unit) + "\n", "")})
+            for call in (lambda: package.ensure_unit(home, home / "i", arguments=[], runner=runner),
+                         lambda: package.install("/nonexistent.tar.zst", home, sha256="a" * 64,
+                                                 runner=runner)):
+                with self.assertRaises(package.SunshinePackageError) as caught:
+                    call()
+                self.assertEqual(caught.exception.code, "sunshine_not_ours")
+            self.assertEqual(unit.read_text(), "[Service]\nExecStart=/opt/my/sunshine\n")
+            self.assertFalse(runner.argv_containing("enable"))
+            self.assertFalse((home / package.INSTALL_ROOT).exists())  # nothing was even fetched
+
+    def test_drop_ins_nobody_here_wrote_stop_a_fresh_install(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            directory = home / package.UNIT_DIR / (package.SUNSHINE_UNIT + ".d")
+            directory.mkdir(parents=True)
+            (directory / "override.conf").write_text("[Service]\nExecStart=\nExecStart=/x\n")
+            owner = package.unit_owner(home, runner=Recorder({"systemctl --user cat": (1, "", "")}))
+            self.assertEqual(owner["state"], "foreign")
+            self.assertIn("override.conf", owner["reason"])
+
+    def test_a_fresh_install_records_that_the_unit_did_not_exist(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            runner = Recorder({"systemctl --user cat": (1, "", ""), "is-enabled": (1, "", "")})
+            package.ensure_unit(home, home / "install", arguments=["capture=wlr"], runner=runner)
+            record = home / package.UNIT_RECORD
+            self.assertEqual(json.loads(record.read_text())["enabled_before"], "not-found")
+            self.assertEqual(record.stat().st_mode & 0o777, 0o600)
+            # A second install keeps the first answer: the unit is ours now.
+            package.ensure_unit(home, home / "install", arguments=["capture=wlr"],
+                                runner=Recorder({"systemctl --user cat": (1, "", ""),
+                                                 "is-enabled": (0, "enabled\n", "")}))
+            self.assertEqual(json.loads(record.read_text())["enabled_before"], "not-found")
+
+    def test_an_unchanged_unit_is_not_restarted_when_asked_not_to(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            runner = Recorder({"systemctl --user cat": (1, "", ""),
+                               "is-active": (0, "active\n", "")})
+            package.ensure_unit(home, home / "install", arguments=["capture=wlr"], runner=runner)
+            again = Recorder({"systemctl --user cat": (1, "", ""), "is-active": (0, "active\n", "")})
+            result = package.ensure_unit(home, home / "install", arguments=["capture=wlr"],
+                                         runner=again, restart=False)
+            self.assertFalse(result["changed"])
+            self.assertFalse(result["restarted"])
+            self.assertEqual(again.argv_containing("restart"), [])
+
+
+class WebLockdownTests(unittest.TestCase):
+    """RELEASE-9: the fork's admin page (47990) cannot be claimed by a first caller."""
+
+    def test_the_unit_keeps_the_page_to_this_computer_with_a_login_nobody_knows(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            runner = Recorder({"systemctl --user cat": (1, "", "")})
+            result = package.ensure_unit(home, home / "install", arguments=["capture=wlr"],
+                                         runner=runner)
+            credentials = home / package.WEB_CREDENTIALS
+            text = (home / package.UNIT_DIR / package.SUNSHINE_UNIT).read_text()
+            self.assertIn(" origin_web_ui_allowed=pc", text)
+            self.assertIn(" credentials_file=" + str(credentials) + "\n", text)
+            self.assertIn("origin_web_ui_allowed=pc", result["arguments"])
+            self.assertEqual(credentials.stat().st_mode & 0o777, 0o600)
+            login = json.loads(credentials.read_text())
+            self.assertEqual(sorted(login), ["password", "salt", "username"])
+            self.assertRegex(login["username"], r"^omodachi-[0-9a-f]{16}$")
+            self.assertRegex(login["password"], r"^[0-9A-F]{64}$")
+            # Kept, never replaced, on the next install; never in the unit text.
+            package.ensure_unit(home, home / "install", arguments=["capture=wlr"], runner=runner)
+            self.assertEqual(json.loads(credentials.read_text()), login)
+            self.assertNotIn(login["password"], text)
+
+    def test_arguments_read_back_from_a_running_unit_are_not_doubled(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            result = package.ensure_unit(
+                home, home / "install", runner=Recorder({"systemctl --user cat": (1, "", "")}),
+                arguments=["capture=wlr", "origin_web_ui_allowed=lan", "credentials_file=/tmp/x"])
+            self.assertEqual([argument for argument in result["arguments"]
+                              if argument.startswith(("origin_web_ui_allowed", "credentials_file"))],
+                             ["origin_web_ui_allowed=pc",
+                              "credentials_file=" + str(home / package.WEB_CREDENTIALS)])
+
+    def test_a_credentials_file_that_is_not_ours_stops_the_install(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            credentials = home / package.WEB_CREDENTIALS
+            credentials.parent.mkdir(parents=True)
+            credentials.symlink_to(home / "elsewhere")
+            with self.assertRaises(package.SunshinePackageError) as caught:
+                package.ensure_unit(home, home / "install", arguments=[],
+                                    runner=Recorder({"systemctl --user cat": (1, "", "")}))
+            self.assertEqual(caught.exception.code, "sunshine_web_credentials_unusable")
+            self.assertFalse((home / "elsewhere").exists())
+
+    def test_a_path_with_a_space_stays_one_argument(self):
+        text = package.unit_text(Path("/home/a b/x"), ["credentials_file=/home/a b/c.json"])
+        self.assertIn('ExecStart="/home/a b/x/sunshine" "credentials_file=/home/a b/c.json"', text)
+        self.assertIn('WorkingDirectory="/home/a b/x"', text)
 
 
 class InstallTests(unittest.TestCase):
@@ -398,9 +663,13 @@ class PinTests(unittest.TestCase):
     def test_a_pin_that_points_at_latest_or_has_no_checksum_is_refused(self):
         with tempfile.TemporaryDirectory() as scratch:
             table = Path(scratch) / "versions.json"
-            for entry in ({"version": "328d231", "url": package.LATEST_PACKAGE, "sha256": "a" * 64},
-                          {"version": "328d231", "url": "https://x/releases/download/t/a.tar.zst", "sha256": ""},
-                          {"version": "main", "url": "https://x/releases/download/t/a.tar.zst", "sha256": "a" * 64}):
+            good = {"url": "https://x/releases/download/t/a.tar.zst", "manifest_sha256": "b" * 64}
+            for entry in ({"version": "328d231", "url": package.LATEST_PACKAGE, "sha256": "a" * 64,
+                           "manifest_sha256": "b" * 64},
+                          {**good, "version": "328d231", "sha256": ""},
+                          {**good, "version": "main", "sha256": "a" * 64},
+                          {"version": "328d231", "url": good["url"], "sha256": "a" * 64},
+                          {**good, "version": "328d231", "sha256": "a" * 64, "manifest_sha256": "x"}):
                 table.write_text(json.dumps({"sunshine_package": entry}))
                 with self.assertRaises(package.SunshinePackageError) as refused:
                     package.pinned(table)
@@ -419,6 +688,10 @@ class PinTests(unittest.TestCase):
         pin = package.pinned()
         self.assertEqual((pin["version"], pin["satisfied_by"]), ("328d231", []))
         self.assertEqual(pin["sha256"], "0f5a8f0b4e654bde7bac3e82fc878c888b4d5f3011a2d6416a6f067b6dc565d9")
+        # RELEASE-9: the MANIFEST.sha256 inside that archive, measured from it.
+        self.assertEqual(pin["manifest_sha256"],
+                         "701043786fea2a92f66c7a4ac9e419072c80bb530c7e026157d3d88934cdee68")
+        self.assertEqual(package.choose(environ={})["manifest_sha256"], pin["manifest_sha256"])
         self.assertTrue(pin["url"].endswith(
             "/releases/download/sunshine-328d231/omodachi-sunshine-328d231-x86_64.tar.zst"))
 
@@ -440,6 +713,21 @@ class PinTests(unittest.TestCase):
                                  (directory_name, False, "active"))
                 self.assertEqual(package.satisfies(found["version"], package.choose(environ={})),
                                  satisfied, directory_name)
+
+    def test_our_marked_unit_counts_as_ours_when_there_is_no_drop_in(self):
+        # RELEASE-9 VM: an install from v0.1.3 has a whole unit of ours and no
+        # drop-in; reading the absent drop-in used to hide the unit's marker.
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            directory = home / package.INSTALL_ROOT / "328d231"
+            directory.mkdir(parents=True)
+            (directory / "sunshine").write_text("#!/bin/sh\n")
+            unit = home / package.UNIT_DIR / package.SUNSHINE_UNIT
+            unit.parent.mkdir(parents=True)
+            unit.write_text(package.unit_text(directory, ["capture=wlr"]))
+            found = package.installed_fork(home, runner=self.show(home, "328d231"))
+            self.assertTrue(found["written_by_installer"])
+            self.assertEqual(found["arguments"], ["capture=wlr"])
 
     def test_satisfied_by_still_lets_a_listed_commit_stand_in_for_the_pin(self):
         choice = {"source": "pin", "version": "328d231", "satisfied_by": ["17c6043"]}

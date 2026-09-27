@@ -21,8 +21,28 @@ The archive is what `scripts/package_release.sh` in the fork produces:
 
 Nothing here runs as root except the one `pacman -S --needed` for packages the
 host does not already have, and that only when the list is non-empty. Nothing
-here writes outside `~/.local/share/omodachi/sunshine` and
-`~/.config/systemd/user`, and `remove()` takes back exactly those.
+here writes outside `~/.local/share/omodachi/sunshine`, `~/.config/systemd/user`
+(the unit, or its one drop-in), `~/.config/omodachi/sunshine-web-credentials.json`
+and `~/.local/state/omodachi/sunshine-unit.json`, and `remove()` takes back
+exactly those.
+
+RELEASE-9. Only what this installer can show it made is written over, stopped,
+disabled or deleted:
+
+* the unit or drop-in is written only where there is none, or where the one
+  there carries MARKER; a Sunshine that something else set up (a unit file
+  without the marker, the distribution's `sunshine` package, drop-ins nobody
+  here wrote) is refused and left exactly as it is, and Remote uses VNC;
+* the unit's enabled state before the first install is recorded, and
+  `remove()` disables only a unit this installer enabled;
+* a `<sha>/` directory is replaced or deleted only when it is byte for byte a
+  release archive's contents (`pristine`), so a hand-built tree is kept;
+* the fork's web admin UI (47990) accepts connections from this computer only
+  (`origin_web_ui_allowed=pc`) and has a login from the moment it starts: a
+  random user name and a random password hash that no password is known to
+  match, in a 0600 file of ours, never printed. Upstream leaves that page
+  unclaimed until somebody opens it and sets a password - the first caller
+  wins - and a managed fork has nobody to open it.
 
 Standard library only: this module is imported by the installer script running
 under the system interpreter, before the virtualenv exists.
@@ -35,6 +55,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shutil
 import subprocess
 import tarfile
@@ -70,21 +91,25 @@ _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
 def pinned(path: Path = VERSIONS) -> dict:
-    """`sunshine_package` from the core version table: {version, url, sha256, satisfied_by}."""
+    """`sunshine_package` from the core version table:
+    {version, url, sha256, manifest_sha256, satisfied_by}."""
     try:
         entry = json.loads(path.read_text())["sunshine_package"]
         version, url, sha256 = entry["version"], entry["url"], entry["sha256"]
+        manifest = entry["manifest_sha256"]
         url = url.replace("{repository}", SUNSHINE_REPOSITORY) if isinstance(url, str) else url
         satisfied = entry.get("satisfied_by", [])
         if (not _COMMIT.fullmatch(version) or not isinstance(url, str) or "://" not in url
                 or "/releases/latest/" in url or not re.fullmatch(r"[0-9a-f]{64}", sha256)
+                or not re.fullmatch(r"[0-9a-f]{64}", manifest)
                 or not isinstance(satisfied, list) or not all(isinstance(v, str) and _COMMIT.fullmatch(v)
                                                                for v in satisfied)):
             raise ValueError
     except (OSError, ValueError, KeyError, TypeError):
         raise SunshinePackageError("sunshine_package_pin_invalid",
                                    f"{path} has no usable sunshine_package pin") from None
-    return {"version": version, "url": url, "sha256": sha256, "satisfied_by": list(satisfied)}
+    return {"version": version, "url": url, "sha256": sha256, "manifest_sha256": manifest,
+            "satisfied_by": list(satisfied)}
 
 
 def choose(spec: str | None = None, sha256: str | None = None, *, environ=None,
@@ -111,7 +136,8 @@ def choose(spec: str | None = None, sha256: str | None = None, *, environ=None,
                 f"drop --sunshine-sha256/${SHA256_ENV} or name the archive it belongs to "
                 f"with --sunshine-package")
         return {"source": "pin", "spec": pin["url"], "sha256": pin["sha256"],
-                "version": pin["version"], "satisfied_by": pin["satisfied_by"]}
+                "version": pin["version"], "satisfied_by": pin["satisfied_by"],
+                "manifest_sha256": pin.get("manifest_sha256")}
     if sha256 is None:
         raise SunshinePackageError(
             "sunshine_package_sha256_required",
@@ -160,16 +186,58 @@ def installed_fork(home: Path, *, runner=None) -> dict | None:
     except OSError:
         pass
     dropin = home / UNIT_DIR / (SUNSHINE_UNIT + ".d") / DROPIN_NAME
-    try:
-        written_by_us = MARKER in dropin.read_text() or MARKER in (home / UNIT_DIR / SUNSHINE_UNIT).read_text()
-    except OSError:
-        written_by_us = False
+    # Each file on its own: a missing drop-in must not hide our marked unit
+    # (RELEASE-9 found the one read raising for the other).
+    written_by_us = _marked(dropin) or _marked(home / UNIT_DIR / SUNSHINE_UNIT)
     enabled = _systemctl(["is-enabled", SUNSHINE_UNIT], runner)
     active = _systemctl(["is-active", SUNSHINE_UNIT], runner)
+    argv = re.search(r"\bargv\[\]=(.*?)(?: ;|$)", result.stdout or "")
+    arguments = argv.group(1).split()[1:] if argv else []
     return {"version": version, "directory": str(directory), "binary": str(binary),
-            "written_by_installer": written_by_us,
+            "written_by_installer": written_by_us, "arguments": arguments,
             "enabled": (enabled.stdout or "").strip() or "unknown",
             "active": (active.stdout or "").strip() or "unknown"}
+
+
+def pristine(directory: Path, manifest_sha256: str | None = None) -> str:
+    """"" when `directory` is exactly a release archive's contents, else why not.
+
+    RELEASE-9. A real directory (not a link) holding a MANIFEST.sha256 - which,
+    when `manifest_sha256` is given, must itself hash to it - where every file
+    the manifest names hashes to its line, and nothing else: no file, link or
+    other entry the manifest does not list. Such a tree holds nothing that is
+    not in a published archive, so it is safe to trust as that build, to replace
+    and to delete; anything else is somebody's and is kept.
+    """
+    try:
+        if directory.is_symlink() or not directory.is_dir():
+            return f"{directory} is not a directory"
+        manifest = directory / "MANIFEST.sha256"
+        if manifest.is_symlink() or not manifest.is_file():
+            return "it has no MANIFEST.sha256"
+        if manifest_sha256 is not None and digest(manifest) != manifest_sha256:
+            return "its MANIFEST.sha256 is not the one the pinned archive carries"
+        listed = set()
+        for line in manifest.read_text().splitlines():
+            expected, _, name = line.partition("  ")
+            if not name:
+                continue
+            relative = Path(name)
+            if relative.is_absolute() or ".." in relative.parts:
+                return f"its manifest names {name!r}, outside the directory"
+            member = directory / relative
+            if member.is_symlink() or not member.is_file() or digest(member) != expected:
+                return f"{relative} does not match its manifest line"
+            listed.add(relative)
+        for base, directories, files in os.walk(directory):
+            for name in files + [entry for entry in directories
+                                 if os.path.islink(os.path.join(base, entry))]:
+                relative = Path(os.path.relpath(os.path.join(base, name), directory))
+                if relative != Path("MANIFEST.sha256") and relative not in listed:
+                    return f"it holds {relative}, which no release archive has"
+    except (OSError, ValueError) as error:
+        return f"it could not be read ({error})"
+    return ""
 
 
 def satisfies(installed_version: str, choice: dict) -> bool:
@@ -317,15 +385,24 @@ def unpack(archive_path: Path, home: Path) -> dict:
     # A reinstall of the same build replaces the directory rather than merging
     # into it: a stale shader from an older tree next to a newer binary is the
     # kind of thing that only shows up as a silent software-encoder fallback.
-    previous = None
-    if target.exists():
-        previous = target.with_name(target.name + ".previous")
-        shutil.rmtree(previous, ignore_errors=True)
-        target.rename(previous)
+    # RELEASE-9: but only a directory that is exactly an archive's contents
+    # (`pristine`). A tree somebody built or changed by hand under the same
+    # name is theirs: nothing is replaced and the install stops.
+    aside = None
+    if os.path.lexists(target):
+        why = pristine(target)
+        if why:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise SunshinePackageError(
+                "sunshine_directory_not_ours",
+                f"{target} is already there and is not a release archive this installer "
+                f"unpacked ({why}); it was left as it is. Move it aside and install again")
+        aside = Path(tempfile.mkdtemp(prefix=".replaced-", dir=root))
+        target.rename(aside / "old")
     unpacked.rename(target)
     shutil.rmtree(staging, ignore_errors=True)
-    if previous is not None:
-        shutil.rmtree(previous, ignore_errors=True)
+    if aside is not None:
+        shutil.rmtree(aside, ignore_errors=True)
     (target / "sunshine").chmod(0o755)
     return {"sha": sha, "directory": str(target)}
 
@@ -417,14 +494,23 @@ ExecStart=
 """
 
 
+def _word(value: str) -> str:
+    """One ExecStart word: `%` is systemd's specifier character, and a path
+    with a space in it has to be quoted to stay one argument."""
+    value = value.replace("%", "%%")
+    if any(character.isspace() or character in "\"'\\;" for character in value):
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return value
+
+
 def _body(directory: Path, arguments) -> str:
     # WorkingDirectory is load-bearing, not tidiness: the packaged binary has
     # the *relative* path "assets" compiled in as SUNSHINE_ASSETS_DIR, which is
     # the only way one build can serve every user. Without this line the fork
     # finds no shaders, logs five compile errors and streams on the CPU.
     return "\n".join([
-        f"WorkingDirectory={directory}",
-        "ExecStart=" + " ".join([str(directory / "sunshine"), *arguments]),
+        f"WorkingDirectory={_word(str(directory))}",
+        "ExecStart=" + " ".join(_word(str(part)) for part in [directory / "sunshine", *arguments]),
         "Environment=SUNSHINE_MANAGED_LOCAL_PAIRING=1",
     ])
 
@@ -435,6 +521,71 @@ def unit_text(directory: Path, arguments) -> str:
 
 def dropin_text(directory: Path, arguments) -> str:
     return DROPIN_TEMPLATE.format(marker=MARKER, body=_body(directory, arguments))
+
+
+# --- the web admin UI (RELEASE-9) --------------------------------------------
+# The fork, like upstream, always serves its admin UI on 47990, and until that
+# UI has a login the first caller to POST /api/password sets one - no CSRF
+# token is needed without an Origin header, and the address check is skipped
+# too. Upstream expects the person who installed it to open the welcome page;
+# a managed fork has nobody who will. So the unit points the fork at a
+# credentials file of our own, made before the fork ever starts: a random user
+# name, a random salt and a random value where the password hash goes, which
+# no password is known to hash to. Nobody can log in, so nobody can claim it,
+# and nothing secret is written anywhere or printed. `origin_web_ui_allowed=pc`
+# on top keeps the page to this computer. The user's own Sunshine state
+# (~/.config/sunshine/sunshine_state.json) is not touched.
+WEB_CREDENTIALS = ".config/omodachi/sunshine-web-credentials.json"
+WEB_ONLY_THIS_COMPUTER = "origin_web_ui_allowed=pc"
+WEB_ARGUMENT_KEYS = ("origin_web_ui_allowed", "credentials_file")
+_WEB_KEYS = ("username", "salt", "password")
+
+
+def ensure_web_credentials(home: Path) -> dict:
+    """Our credentials file for the fork's web UI: kept if it is there, else made."""
+    path = home / WEB_CREDENTIALS
+    if os.path.lexists(path):
+        try:
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("not a regular file")
+            value = json.loads(path.read_text())
+            if not (isinstance(value, dict) and all(isinstance(value.get(key), str) and value[key]
+                                                    for key in _WEB_KEYS)):
+                raise ValueError("not a login")
+        except (OSError, ValueError) as error:
+            raise SunshinePackageError(
+                "sunshine_web_credentials_unusable",
+                f"{path} is there but is not a login this installer wrote ({error}); it was "
+                f"left as it is. Delete it and install again") from None
+        return {"path": str(path), "created": False}
+    body = {"username": "omodachi-" + secrets.token_hex(8), "salt": secrets.token_hex(8),
+            "password": secrets.token_hex(32).upper()}
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                         0o600)
+    with os.fdopen(descriptor, "w") as handle:
+        handle.write(json.dumps(body, indent=4) + "\n")
+    return {"path": str(path), "created": True}
+
+
+def web_arguments(home: Path) -> list[str]:
+    """The two fork arguments that close the web UI, creating the login if needed."""
+    credentials = ensure_web_credentials(home)
+    return [WEB_ONLY_THIS_COMPUTER, "credentials_file=" + credentials["path"]]
+
+
+def remove_web_credentials(home: Path) -> bool:
+    path = home / WEB_CREDENTIALS
+    try:
+        if path.is_symlink() or not path.is_file():
+            return False
+        value = json.loads(path.read_text())
+        if not (isinstance(value, dict) and str(value.get("username", "")).startswith("omodachi-")):
+            return False
+        path.unlink()
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def render_nodes(dri: Path = Path("/dev/dri")) -> list[Path]:
@@ -477,12 +628,11 @@ def _systemctl(arguments, runner=None):
 
 
 def unit_is_packaged(*, runner=None) -> bool:
-    """True when something outside this installer already provides the unit.
+    """True when something outside this user's unit directory provides the unit.
 
     On a machine with the distribution's `sunshine` package installed the unit
-    exists in /usr/lib/systemd/user and the user's own copy would shadow it.
-    There we write only a drop-in, exactly as a developer host has had since
-    SPEC-B1; on a machine that has never had Sunshine we write the whole unit.
+    exists in /usr/lib/systemd/user. That is a Sunshine somebody else set up,
+    and RELEASE-9 no longer takes it over with a drop-in (see `unit_owner`).
     """
     result = _systemctl(["cat", SUNSHINE_UNIT], runner)
     if result.returncode != 0:
@@ -493,58 +643,211 @@ def unit_is_packaged(*, runner=None) -> bool:
     return False
 
 
-def ensure_unit(home: Path, directory: Path, *, arguments=None, runner=None) -> dict:
-    """Write the unit (or just its drop-in), reload, enable, and start it.
+# RELEASE-9. What the unit was before this installer first wrote it, so that
+# --remove disables only what Install enabled.
+UNIT_RECORD = ".local/state/omodachi/sunshine-unit.json"
+# `systemctl is-enabled` answers for which "enable" was this installer's doing.
+_NOT_ENABLED = ("not-found", "disabled", "")
+
+
+def _marked(path: Path) -> bool:
+    """A regular file (never a link) that carries MARKER."""
+    try:
+        return not path.is_symlink() and path.is_file() and MARKER in path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def unit_owner(home: Path, *, runner=None) -> dict:
+    """Whose Sunshine unit this is, deciding nothing and changing nothing.
+
+    {"state": "absent" | "ours" | "foreign", "shape": "unit" | "dropin",
+     "reason": why foreign, "strangers": drop-ins nobody here wrote}.
+    """
+    unit_path = home / UNIT_DIR / SUNSHINE_UNIT
+    dropin_dir = home / UNIT_DIR / (SUNSHINE_UNIT + ".d")
+    dropin = dropin_dir / DROPIN_NAME
+    ours_dropin = _marked(dropin)
+    strangers = []
+    if dropin_dir.is_dir() and not dropin_dir.is_symlink():
+        strangers = [str(child) for child in sorted(dropin_dir.iterdir())
+                     if not (child == dropin and ours_dropin)]
+    elif os.path.lexists(dropin_dir):
+        strangers = [str(dropin_dir)]
+    if os.path.lexists(unit_path):
+        if _marked(unit_path):
+            # Drop-ins beside our own unit are the user's customisation of it,
+            # the way systemd intends; they are kept and never edited.
+            return {"state": "ours", "shape": "unit", "reason": "", "strangers": strangers}
+        return {"state": "foreign", "shape": "unit", "strangers": strangers,
+                "reason": f"{unit_path} is a Sunshine unit this installer did not write"}
+    if unit_is_packaged(runner=runner):
+        if ours_dropin:
+            return {"state": "ours", "shape": "dropin", "reason": "", "strangers": strangers}
+        return {"state": "foreign", "shape": "dropin", "strangers": strangers,
+                "reason": (f"Sunshine is already installed on this computer by something other "
+                           f"than Omodachi ({SUNSHINE_UNIT} comes from outside {UNIT_DIR}, "
+                           f"for example the distribution's sunshine package), and Omodachi "
+                           f"does not take over a Sunshine it did not set up")}
+    if strangers:
+        return {"state": "foreign", "shape": "unit", "strangers": strangers,
+                "reason": (f"{dropin_dir} holds drop-ins this installer did not write "
+                           f"({', '.join(Path(name).name for name in strangers)}), which would "
+                           f"change what the unit it writes runs")}
+    return {"state": "absent", "shape": "unit", "reason": "", "strangers": [],
+            "stale_dropin": ours_dropin}
+
+
+def _write_text(path: Path, text: str, mode: int = 0o644) -> bool:
+    """Write `text` through a new file and a rename; False when already so."""
+    try:
+        if not path.is_symlink() and path.is_file() and path.read_text() == text:
+            return False
+    except (OSError, UnicodeDecodeError):
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, name = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(handle, "w") as stream:
+            os.fchmod(stream.fileno(), mode)
+            stream.write(text)
+        os.replace(name, path)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+    return True
+
+
+def _read_record(home: Path) -> dict:
+    try:
+        value = json.loads((home / UNIT_RECORD).read_text())
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def web_locked(home: Path, *, runner=None) -> bool | None:
+    """Whether the ExecStart systemd will run carries both web UI arguments.
+
+    RELEASE-9: a drop-in beside our unit that sets its own ExecStart would drop
+    them, so the lockdown is read back from what systemd resolved rather than
+    assumed from what was written. None when systemd could not be asked.
+    """
+    result = _systemctl(["show", "-p", "ExecStart", "--value", SUNSHINE_UNIT], runner)
+    text = result.stdout or "" if result.returncode == 0 else ""
+    if "argv[]=" not in text:
+        return None
+    return (WEB_ONLY_THIS_COMPUTER in text
+            and ("credentials_file=" + str(home / WEB_CREDENTIALS)) in text)
+
+
+# RELEASE-9: the files the fork itself writes into its configuration directory
+# (config.cpp: sunshine.conf, sunshine_state.json - its paired clients -,
+# sunshine.log, credentials/). They are deleted by remove() only when that
+# directory did not exist before this installer's first install, which
+# ensure_unit records; otherwise they belong to a Sunshine that was here before.
+SUNSHINE_CONFIG = ".config/sunshine"
+FORK_FILES = ("sunshine_state.json", "sunshine.log", "credentials/cacert.pem",
+              "credentials/cakey.pem")
+
+
+def ensure_unit(home: Path, directory: Path, *, arguments=None, runner=None,
+                restart: bool = True, config_created: bool | None = None) -> dict:
+    """Write our unit (or our drop-in), reload, enable, and start it.
 
     The 2026-09-20 host incident was this step missing its middle word: the
     unit file existed and the binary was there, but nothing had ever run
     `enable`, so the fork was not in graphical-session.target.wants and never
     came back after a reboot. Remote then cached "unavailable" for the life of
     the daemon.
+
+    RELEASE-9: only over a unit or drop-in that is ours or absent
+    (`unit_owner`); a foreign one raises `sunshine_not_ours` and nothing is
+    written. The first time, the unit's enabled/active state is recorded for
+    `remove()`. `restart=False` restarts only if the unit text changed or the
+    fork is not running.
     """
-    arguments = encoder_arguments() if arguments is None else arguments
+    owner = unit_owner(home, runner=runner)
+    if owner["state"] == "foreign":
+        raise SunshinePackageError("sunshine_not_ours", owner["reason"] + "; it was left as it is")
+    arguments = encoder_arguments() if arguments is None else list(arguments)
+    arguments = [argument for argument in arguments
+                 if argument.partition("=")[0] not in WEB_ARGUMENT_KEYS] + web_arguments(home)
     unit_dir = home / UNIT_DIR
-    unit_dir.mkdir(parents=True, exist_ok=True)
     unit_path = unit_dir / SUNSHINE_UNIT
     dropin = unit_dir / (SUNSHINE_UNIT + ".d") / DROPIN_NAME
-    packaged = unit_is_packaged(runner=runner)
+    packaged = owner["shape"] == "dropin"
+    if not _read_record(home):
+        before = {"enabled": (_systemctl(["is-enabled", SUNSHINE_UNIT], runner).stdout or "").strip(),
+                  "active": (_systemctl(["is-active", SUNSHINE_UNIT], runner).stdout or "").strip()}
+        if owner["state"] == "ours":
+            # An install from before RELEASE-9: a whole unit of ours did not
+            # exist before we wrote it; a drop-in on somebody's unit, unknown.
+            before = {"enabled": "not-found" if owner["shape"] == "unit" else "unknown",
+                      "active": "unknown"}
+        if config_created is None:
+            config_created = not os.path.lexists(home / SUNSHINE_CONFIG)
+        _write_text(home / UNIT_RECORD, json.dumps(
+            {"schema": 1, "unit": SUNSHINE_UNIT, "shape": owner["shape"],
+             "enabled_before": before["enabled"] or "not-found",
+             "active_before": before["active"] or "unknown",
+             "config_created": bool(config_created) and owner["state"] == "absent"},
+            indent=1) + "\n", 0o600)
     if packaged:
-        # Our own full unit, if an earlier run wrote one, has to go first or it
-        # keeps shadowing the packaged unit the drop-in is meant to amend.
-        if unit_path.is_file() and MARKER in unit_path.read_text():
-            unit_path.unlink()
-        dropin.parent.mkdir(parents=True, exist_ok=True)
-        dropin.write_text(dropin_text(directory, arguments))
-        dropin.chmod(0o644)
-        written = str(dropin)
+        written = dropin
+        changed = _write_text(dropin, dropin_text(directory, arguments))
     else:
-        shutil.rmtree(dropin.parent, ignore_errors=True)
-        unit_path.write_text(unit_text(directory, arguments))
-        unit_path.chmod(0o644)
-        written = str(unit_path)
-    _systemctl(["daemon-reload"], runner)
+        written = unit_path
+        changed = _write_text(unit_path, unit_text(directory, arguments))
+        if _marked(dropin):
+            # Ours, from when a packaged unit was here; it would override the
+            # ExecStart just written. Only that one file goes.
+            dropin.unlink()
+            _remove_empty(dropin.parent)
+            changed = True
+    if changed:
+        _systemctl(["daemon-reload"], runner)
     enabled = _systemctl(["enable", SUNSHINE_UNIT], runner)
-    started = _systemctl(["restart", SUNSHINE_UNIT], runner)
-    state = _systemctl(["is-active", SUNSHINE_UNIT], runner)
-    return {"unit": written, "packaged_unit": packaged, "arguments": arguments,
+    state = (_systemctl(["is-active", SUNSHINE_UNIT], runner).stdout or "").strip()
+    started = None
+    if restart or changed or state != "active":
+        started = _systemctl(["restart", SUNSHINE_UNIT], runner)
+        state = (_systemctl(["is-active", SUNSHINE_UNIT], runner).stdout or "").strip()
+    return {"unit": str(written), "packaged_unit": packaged, "arguments": arguments,
+            "changed": changed, "strangers": owner["strangers"],
+            "web_locked": web_locked(home, runner=runner),
             "enabled": enabled.returncode == 0,
             "enable_detail": (enabled.stderr or "").strip()[:200] or None,
-            "started": started.returncode == 0,
-            "start_detail": (started.stderr or "").strip()[:200] or None,
-            "active": (state.stdout or "").strip() or "unknown"}
+            "started": started is None or started.returncode == 0,
+            "restarted": started is not None,
+            "start_detail": ((started.stderr or "").strip()[:200] or None) if started else None,
+            "active": state or "unknown"}
+
+
+def _remove_empty(directory: Path) -> None:
+    try:
+        if directory.is_dir() and not directory.is_symlink():
+            directory.rmdir()
+    except OSError:
+        pass  # not empty: something in it is not ours
 
 
 def install(spec: str, home: Path, *, sha256=None, cache=None, runner=None,
-            opener=urllib.request.urlopen, adapter=None) -> dict:
+            opener=urllib.request.urlopen, adapter=None, config_created=None) -> dict:
     """The whole path: fetch, verify, unpack, dependencies, unit, enable.
 
     `sha256` is required: an archive is never unpacked unless it hashes to a
-    value the caller - the version table or the user - supplied.
+    value the caller - the version table or the user - supplied. A Sunshine
+    unit somebody else set up stops it before anything is downloaded.
     """
     expected = (sha256 or "").strip().lower()
     if not _SHA256.fullmatch(expected):
         raise SunshinePackageError("sunshine_package_sha256_required",
                                    f"no sha256 to check {spec} against; nothing was downloaded")
+    owner = unit_owner(home, runner=runner)
+    if owner["state"] == "foreign":
+        raise SunshinePackageError("sunshine_not_ours", owner["reason"]
+                                   + "; it was left as it is and nothing was downloaded")
     cache = cache or (home / ".cache/omodachi/sunshine")
     archive = fetch(spec, cache, opener=opener)
     actual = digest(archive)
@@ -559,7 +862,8 @@ def install(spec: str, home: Path, *, sha256=None, cache=None, runner=None,
         raise SunshinePackageError("sunshine_package_manifest_mismatch",
                                    f"{len(bad)} file(s) do not match MANIFEST.sha256: {bad[:3]}")
     packages = install_packages(package_depends(directory), runner=runner)
-    unit = ensure_unit(home, directory, arguments=encoder_arguments(adapter=adapter), runner=runner)
+    unit = ensure_unit(home, directory, arguments=encoder_arguments(adapter=adapter), runner=runner,
+                       config_created=config_created)
     source = {}
     try:
         for line in (directory / "SOURCE").read_text().splitlines():
@@ -573,39 +877,83 @@ def install(spec: str, home: Path, *, sha256=None, cache=None, runner=None,
             "unit": unit, "source": source}
 
 
+# Names this module gives the transient directories it makes under
+# INSTALL_ROOT (tempfile.mkdtemp: the prefix and eight of [a-z0-9_]).
+_TRANSIENT = re.compile(r"\.(unpack|replaced)-[a-z0-9_]{8}\Z")
+
+
 def remove(home: Path, *, runner=None) -> dict:
-    """Stop and disable the fork, and take back only what install() wrote."""
-    _systemctl(["disable", "--now", SUNSHINE_UNIT], runner)
-    removed = {"unit": False, "dropin": False, "installs": []}
+    """Take back what install() made, and only that.
+
+    RELEASE-9: the unit is stopped only when the unit or drop-in that starts
+    it is ours, and disabled only when this installer enabled it (the record
+    ensure_unit keeps, or, for an install from before that record, a whole
+    unit of ours - which did not exist before it was written). Only our own
+    unit file or drop-in is deleted, never the drop-in directory with anything
+    else in it; only a `<sha>/` that is exactly an archive's contents goes.
+    """
     unit_path = home / UNIT_DIR / SUNSHINE_UNIT
-    try:
-        if MARKER in unit_path.read_text():
+    dropin = home / UNIT_DIR / (SUNSHINE_UNIT + ".d") / DROPIN_NAME
+    ours_unit, ours_dropin = _marked(unit_path), _marked(dropin)
+    record = _read_record(home)
+    removed = {"unit": False, "dropin": False, "installs": [], "kept": [],
+               "stopped": False, "disabled": False, "web_credentials": False}
+    if ours_unit or ours_dropin:
+        _systemctl(["stop", SUNSHINE_UNIT], runner)
+        removed["stopped"] = True
+        before = record.get("enabled_before") if record else ("not-found" if ours_unit else "unknown")
+        if before in _NOT_ENABLED:
+            _systemctl(["disable", SUNSHINE_UNIT], runner)
+            removed["disabled"] = True
+        else:
+            removed["left_enabled"] = (f"{SUNSHINE_UNIT} was {before} before Omodachi's install, "
+                                       f"so it was not disabled")
+        if ours_unit:
             unit_path.unlink()
             removed["unit"] = True
-    except OSError:
-        pass
-    dropin = home / UNIT_DIR / (SUNSHINE_UNIT + ".d") / DROPIN_NAME
-    try:
-        if MARKER in dropin.read_text():
+        if ours_dropin:
             dropin.unlink()
             removed["dropin"] = True
-            dropin.parent.rmdir()
-    except OSError:
-        pass
+            _remove_empty(dropin.parent)
+    elif os.path.lexists(unit_path) or os.path.lexists(dropin.parent):
+        removed["unit_not_ours"] = ("the Sunshine unit here was not written by this installer, "
+                                    "so it was not stopped, disabled or edited")
     root = home / INSTALL_ROOT
-    if root.is_dir():
+    if root.is_dir() and not root.is_symlink():
         for child in sorted(root.iterdir()):
-            # Only directories this installer could have made: a per-commit
-            # tree with our SOURCE file in it. A developer's hand-built
-            # directory has no SOURCE and is left where it is.
-            if child.is_dir() and (child / "SOURCE").is_file():
+            if (_TRANSIENT.fullmatch(child.name) and child.is_dir() and not child.is_symlink()) \
+                    or (ARCHIVE_NAME.match("omodachi-sunshine-" + child.name + "-x86_64")
+                        and not pristine(child)):
                 shutil.rmtree(child, ignore_errors=True)
                 removed["installs"].append(child.name)
-        try:
-            root.rmdir()
-        except OSError:
-            pass
-    _systemctl(["daemon-reload"], runner)
+            else:
+                removed["kept"].append(str(child))
+        _remove_empty(root)
+    removed["web_credentials"] = remove_web_credentials(home)
+    config = home / SUNSHINE_CONFIG
+    if record.get("config_created") and (ours_unit or ours_dropin):
+        # ~/.config/sunshine did not exist before Omodachi's first install, so
+        # what the fork wrote there - above all sunshine_state.json, the
+        # clients it trusts - was Omodachi's Sunshine's, and goes with it.
+        for name in FORK_FILES:
+            path = config / name
+            if not path.is_symlink() and path.is_file():
+                path.unlink()
+                removed.setdefault("fork_files", []).append(name)
+        conf = config / "sunshine.conf"
+        if not conf.is_symlink() and conf.is_file() and conf.stat().st_size == 0:
+            conf.unlink()   # the fork creates it empty; one with settings is kept
+        _remove_empty(config / "credentials")
+    elif (ours_unit or ours_dropin) and (config / "sunshine_state.json").is_file():
+        removed["state_kept"] = (f"{config / 'sunshine_state.json'} was there before Omodachi's "
+                                 f"install, so it is kept; devices paired through Omodachi's "
+                                 f"Sunshine stay in it until you delete it")
+    try:
+        (home / UNIT_RECORD).unlink()
+    except OSError:
+        pass
+    if removed["unit"] or removed["dropin"]:
+        _systemctl(["daemon-reload"], runner)
     return removed
 
 

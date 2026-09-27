@@ -36,6 +36,10 @@
           "enabled": {
             "type": "boolean",
             "description": "The device's own switch, as the device reported it. A key with this false is registered and not in any audience."
+          },
+          "pam_enrolled": {
+            "type": "boolean",
+            "description": "RELEASE-9: root holds this same key in /etc/omodachi/pam/keys.json, so this device can answer a real password prompt. False until the owner runs install_host.py --pam-enroll (which asks for the password), and false again after the key changes."
           }
         },
         "additionalProperties": false

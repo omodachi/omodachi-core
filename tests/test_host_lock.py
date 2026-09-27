@@ -183,11 +183,13 @@ class PipInvocationTests(unittest.TestCase):
             def record(argv, **kwargs):
                 calls.append(argv)
                 environments.append(kwargs.get("env"))
+                if argv[2:4] == ["-m", "venv"]:
+                    Path(argv[4]).mkdir()
 
             with mock.patch.object(install_host, "run", side_effect=record), \
                     mock.patch.dict(os.environ, poison), \
                     mock.patch.object(install_host.sys, "pycache_prefix", None):
-                install_host.install_venv(source, venv)
+                install_host.install_venv(source, venv, Path(scratch))
             # RELEASE-7b: -I, and an environment the installer chose.
             self.assertEqual(calls[0], ["python3", "-I", "-m", "venv", str(venv)])
             self.assertEqual(calls[1:], install_host.pip_commands(source, venv))
@@ -208,6 +210,11 @@ class VenvConvergenceTests(unittest.TestCase):
         (self.source / install_host.HOST_LOCK).write_text("")
         (self.venv / "lib").mkdir(parents=True)
         (self.venv / "lib/old-unhashed-package").write_text("from an older installer")
+        # RELEASE-9: an existing venv is replaced only when it is this
+        # installer's own - an id inside it that its record names.
+        self.home = Path(self.scratch.name) / "home"
+        (self.venv / install_host.VENV_ID_FILE).write_text("c" * 32 + "\n")
+        install_host._write_venv_ids(self.home, ["c" * 32])
 
     def fake(self, fail_on=None):
         def run(argv, **_):
@@ -219,7 +226,7 @@ class VenvConvergenceTests(unittest.TestCase):
 
     def test_an_existing_venv_is_replaced_not_upgraded(self):
         with mock.patch.object(install_host, "run", side_effect=self.fake()):
-            install_host.install_venv(self.source, self.venv)
+            install_host.install_venv(self.source, self.venv, self.home)
         self.assertFalse((self.venv / "lib/old-unhashed-package").exists())
         self.assertTrue((self.venv / "bin").is_dir())
         self.assertFalse(self.venv.with_name("venv.previous").exists())
@@ -228,7 +235,7 @@ class VenvConvergenceTests(unittest.TestCase):
         for step in ("--require-hashes", "--no-index"):
             with self.subTest(step=step), mock.patch.object(install_host, "run", side_effect=self.fake(step)):
                 with self.assertRaises(subprocess.CalledProcessError):
-                    install_host.install_venv(self.source, self.venv)
+                    install_host.install_venv(self.source, self.venv, self.home)
                 self.assertEqual((self.venv / "lib/old-unhashed-package").read_text(),
                                  "from an older installer")
                 self.assertFalse(self.venv.with_name("venv.previous").exists())
@@ -236,7 +243,7 @@ class VenvConvergenceTests(unittest.TestCase):
     def test_sources_without_a_lock_are_refused_before_anything_changes(self):
         (self.source / install_host.HOST_LOCK).unlink()
         with mock.patch.object(install_host, "run") as run, self.assertRaises(SystemExit):
-            install_host.install_venv(self.source, self.venv)
+            install_host.install_venv(self.source, self.venv, self.home)
         run.assert_not_called()
         self.assertTrue((self.venv / "lib/old-unhashed-package").exists())
 

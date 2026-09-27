@@ -12,7 +12,8 @@ import tempfile
 import unittest
 
 from omodachi_core.cli import host_main
-from omodachi_core.ssh_keys import AuthorizedKeys, MARKER, SshKeyError, duplicate_devices, fingerprint
+from omodachi_core.ssh_keys import (AuthorizedKeys, MARKER, SshKeyError, duplicate_devices, fingerprint,
+                                    remove_marked_lines, split_options)
 
 
 def _ed25519(seed: int, comment: str) -> str:
@@ -45,7 +46,7 @@ class AuthorizedKeysTests(unittest.TestCase):
         self.assertEqual((first["changed"], first["reason"]), (True, "added"))
         self.assertTrue(first["fingerprint"].startswith("SHA256:"))
         self.assertEqual(self.body(),
-                         "ssh-ed25519 " + IPAD.split()[1] + " " + MARKER + "omodachi-ipad\n")
+                         "restrict,pty ssh-ed25519 " + IPAD.split()[1] + " " + MARKER + "omodachi-ipad\n")
         again = self.keys.authorize(IPAD, "omodachi-ipad")
         self.assertEqual((again["changed"], again["reason"]), (False, "already_authorized"))
         self.assertEqual(self.body().count("ssh-ed25519"), 1)
@@ -248,6 +249,87 @@ class SshCommandTests(unittest.TestCase):
     def test_a_refused_key_is_a_named_code_and_a_nonzero_exit(self):
         code, result = self.run_command("ssh", "authorize", "not-a-key", "--device", "omodachi-ipad")
         self.assertEqual((code, result["ok"], result["error"]), (1, False, "invalid_public_key"))
+
+
+
+class Release9RestrictedLinesTests(unittest.TestCase):
+    """B2: every owned line is `restrict,pty`, ends with the credential, and
+    `--remove` can take every one of them back."""
+
+    EXPIRES = 1790000000  # 2026-09-21T14:13:20Z
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.keys = AuthorizedKeys(self.home)
+
+    def body(self):
+        return self.keys.path.read_text()
+
+    def seed(self, text):
+        self.keys.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.keys.path.write_text(text)
+
+    def test_a_new_line_is_restricted_and_expires_with_the_credential(self):
+        self.keys.authorize(IPAD, "omodachi-ipad", expires_at=self.EXPIRES)
+        self.assertEqual(self.body(), 'restrict,pty,expiry-time="20260921141320Z" ssh-ed25519 '
+                         + IPAD.split()[1] + " " + MARKER + "omodachi-ipad\n")
+        row = self.keys.listing()[0]
+        self.assertEqual((row["restricted"], row["expires_at"]), (True, self.EXPIRES))
+
+    def test_a_pre_release_9_line_is_restricted_in_place_on_the_next_authorize(self):
+        legacy = "ssh-ed25519 " + IPAD.split()[1] + " " + MARKER + "omodachi-ipad"
+        self.seed(USER_KEY + "\n" + legacy + "\n")
+        result = self.keys.authorize(IPAD, "omodachi-ipad", expires_at=self.EXPIRES)
+        self.assertEqual(result["reason"], "restricted")
+        lines = self.body().splitlines()
+        self.assertEqual(lines[0], USER_KEY)
+        self.assertTrue(lines[1].startswith('restrict,pty,expiry-time="20260921141320Z" ssh-ed25519 '))
+        self.assertEqual(len(lines), 2)
+
+    def test_renewal_moves_the_end_of_every_line_the_device_owns(self):
+        self.keys.authorize(IPAD, "omodachi-ipad", expires_at=self.EXPIRES)
+        self.keys.authorize(PHONE, "omodachi-phone", expires_at=self.EXPIRES)
+        self.assertEqual(self.keys.refresh_expiry("omodachi-ipad", self.EXPIRES + 86400)["changed"], 1)
+        ends = {row["device"]: row["expires_at"] for row in self.keys.listing()}
+        self.assertEqual(ends, {"omodachi-ipad": self.EXPIRES + 86400, "omodachi-phone": self.EXPIRES})
+
+    def test_reconcile_restricts_old_lines_and_shuts_those_with_no_credential(self):
+        self.seed(USER_KEY + "\n"
+                  + "ssh-ed25519 " + IPAD.split()[1] + " " + MARKER + "omodachi-ipad\n"
+                  + "ssh-ed25519 " + PHONE.split()[1] + " " + MARKER + "gone-device\n")
+        result = self.keys.reconcile({"omodachi-ipad": self.EXPIRES})
+        self.assertEqual(result["devices"], ["gone-device", "omodachi-ipad"])
+        rows = {row["device"]: row for row in self.keys.listing()}
+        self.assertEqual(rows["omodachi-ipad"]["expires_at"], self.EXPIRES)
+        self.assertLessEqual(rows["gone-device"]["expires_at"], int(__import__("time").time()))
+        self.assertTrue(all(row["restricted"] for row in rows.values()))
+        self.assertEqual(self.body().splitlines()[0], USER_KEY)
+        self.assertEqual(self.keys.reconcile({"omodachi-ipad": self.EXPIRES})["changed"], 0)
+
+    def test_the_users_own_option_lines_are_recognised_and_never_adopted(self):
+        own = 'from="10.0.0.0/8",command="echo \\"hi there\\"" ' + IPAD
+        self.seed(own + "\n")
+        self.assertEqual(split_options(own)[1], IPAD)
+        with self.assertRaises(SshKeyError) as caught:
+            self.keys.authorize(IPAD, "omodachi-ipad")
+        self.assertEqual(caught.exception.code, "public_key_not_owned")
+        self.assertEqual(self.body(), own + "\n")
+
+    def test_remove_marked_lines_takes_every_owned_line_and_nothing_else(self):
+        self.seed(USER_KEY + "\n# ssh-ed25519 AAAA " + MARKER + "commented\n")
+        self.keys.authorize(IPAD, "omodachi-ipad", expires_at=self.EXPIRES)
+        self.keys.authorize(PHONE, "omodachi-phone")
+        removed = remove_marked_lines(self.home)
+        self.assertEqual(len(removed), 2)
+        self.assertTrue(removed[0].startswith("SHA256:") and removed[0].endswith(" omodachi-ipad"))
+        self.assertEqual(self.body(), USER_KEY + "\n# ssh-ed25519 AAAA " + MARKER + "commented\n")
+        self.assertEqual(remove_marked_lines(self.home), [])
+
+    def test_remove_marked_lines_with_no_file_writes_nothing(self):
+        self.assertEqual(remove_marked_lines(self.home), [])
+        self.assertFalse(self.keys.path.exists())
 
 
 if __name__ == "__main__":

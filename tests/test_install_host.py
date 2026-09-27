@@ -37,9 +37,23 @@ STATUS = """Status: active
 """
 
 
+# `ufw show added` for the same rules: what removal reads, active or not.
+ADDED = """Added user rules (see 'ufw status' for running firewall):
+ufw allow from 192.168.1.22 to any port 22 proto tcp comment 'omodachi-dev-mac'
+ufw allow 53317/udp
+ufw allow from 172.16.0.0/12 to 172.17.0.1 port 53 proto udp comment 'allow-docker-dns'
+ufw limit 22/tcp comment 'omarchy-sshd'
+ufw allow from 192.168.1.22 to any port 47984,47989,48010 proto tcp comment 'omadochi-mac-pair-check'
+ufw allow from 192.168.1.22 to any port 47998:48000 proto udp comment 'omadochi-mac-pair-check'
+ufw allow from 10.0.0.0/8 to any port 8099 proto tcp comment 'omodachi-core'
+ufw allow in on tailscale0 to any port 47998:48000 proto udp comment 'omodachi-sunshine'
+"""
+
+
 class Recorder:
-    def __init__(self, *, status=STATUS, tailscale=True, fail_on=None):
+    def __init__(self, *, status=STATUS, added=ADDED, tailscale=True, fail_on=None):
         self.calls, self.status, self.tailscale, self.fail_on = [], status, tailscale, fail_on
+        self.added = added
 
     def run(self, argv, **kwargs):
         self.calls.append(list(argv))
@@ -47,6 +61,8 @@ class Recorder:
             return type("R", (), {"returncode": 0 if self.tailscale else 1, "stdout": ""})()
         if self.fail_on is not None and self.fail_on in argv:
             raise OSError("ufw refused")
+        if argv[:4] == ["sudo", "ufw", "show", "added"]:
+            return type("R", (), {"returncode": 0, "stdout": self.added})()
         return type("R", (), {"returncode": 0, "stdout": self.status})()
 
     def ufw_calls(self):
@@ -96,21 +112,30 @@ class FirewallTests(unittest.TestCase):
         self.install(recorder)
         self.assertFalse([call for call in recorder.ufw_calls() if "tailscale0" in call])
 
-    def test_install_deletes_the_legacy_single_mac_rules_and_nothing_else(self):
+    def test_install_deletes_no_rule_at_all(self):
+        # RELEASE-9: hand-written rules, whatever their comment, are not ours.
         recorder = Recorder()
         self.install(recorder)
-        deletes = [call for call in recorder.ufw_calls() if "delete" in call]
-        # Rule numbers shift on every delete, so they are spent highest first.
-        self.assertEqual([call[-1] for call in deletes], ["6", "5"])
+        self.assertEqual([call for call in recorder.ufw_calls() if "delete" in call], [])
 
     def test_removal_is_symmetric_and_never_spends_another_owner_s_rule(self):
         recorder = Recorder()
         self.patch(recorder)
         self.assertEqual(install_host.remove_firewall(), 0)
-        deletes = [call[-1] for call in recorder.ufw_calls() if "delete" in call]
-        # Only the omodachi-core rule in the fixture listing; the dev-mac ssh
-        # allowance, the Omarchy sshd rule and the docker DNS rules stay.
-        self.assertEqual(deletes, ["7"])
+        deletes = [" ".join(call) for call in recorder.ufw_calls() if "delete" in call]
+        # Only our two rules in the fixture listing; the dev-mac ssh allowance,
+        # the Omarchy sshd rule and the docker DNS rules stay.
+        self.assertEqual(deletes, [
+            "sudo ufw --force delete allow from 10.0.0.0/8 to any port 8099 proto tcp",
+            "sudo ufw --force delete allow in on tailscale0 to any port 47998:48000 proto udp"])
+
+    def test_removal_finds_the_rules_while_ufw_is_not_enabled(self):
+        # RELEASE-9 integration (clean VM): `ufw status numbered` lists nothing
+        # while ufw is inactive, so the rules Install added were never deleted.
+        recorder = Recorder(status="Status: inactive\n")
+        self.patch(recorder)
+        self.assertEqual(install_host.remove_firewall(), 0)
+        self.assertEqual(len([call for call in recorder.ufw_calls() if "delete" in call]), 2)
 
     def test_a_refused_firewall_warns_but_never_fails_the_install(self):
         recorder = Recorder(fail_on="allow")
@@ -125,128 +150,268 @@ class FirewallTests(unittest.TestCase):
         self.assertFalse(recorder.ufw_calls())
 
 
-class RuntimeConfigMigrationTests(unittest.TestCase):
-    def setUp(self):
-        import tempfile
-        self.temp = tempfile.TemporaryDirectory()
-        self.home = Path(self.temp.name)
-        self.addCleanup(self.temp.cleanup)
-        self.path = self.home / install_host.RUNTIME_CONFIG
-        self.path.parent.mkdir(parents=True)
+class FirewallTruthTests(unittest.TestCase):
+    """RELEASE-9: the summary says whether ufw is filtering anything at all."""
 
-    def write(self, value):
-        import json
-        self.path.write_text(json.dumps(value))
+    VERBOSE_ACTIVE = "Status: active\nLogging: on (low)\nDefault: deny (incoming), allow (outgoing), disabled (routed)\n"
 
-    def read(self):
-        import json
-        return json.loads(self.path.read_text())
+    def summary(self, status, *, which=True):
+        import contextlib
+        import io
+        from unittest import mock
+        recorder = Recorder(status=status)
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(install_host, "run", recorder.run), \
+                mock.patch.object(install_host.subprocess, "run", recorder.run), \
+                mock.patch.object(install_host.shutil, "which",
+                                  lambda name: ("/usr/bin/" + name) if which else None), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(install_host.configure_firewall(), 0)
+        return out.getvalue() + err.getvalue()
 
-    def test_dead_keys_go_and_the_journal_directory_follows_the_subsystem(self):
-        self.write({"version": 1, "hyprland_instance": "auto",
-                    "sunshine_socket": "/run/user/1000/omodachi-sunshine/pairing.sock",
-                    "journal_dir": str(self.home / install_host.OLD_JOURNAL_DIR),
-                    "recovery_output": "eDP-1", "devices": {}})
-        result = install_host.migrate_runtime_config(self.home)
-        self.assertTrue(result["migrated"])
-        value = self.read()
-        self.assertNotIn("recovery_output", value)
-        self.assertNotIn("devices", value)
-        self.assertEqual(value["journal_dir"], str(self.home / install_host.NEW_JOURNAL_DIR))
-        # The one thing the spec says to keep.
-        self.assertEqual(value["sunshine_socket"], "/run/user/1000/omodachi-sunshine/pairing.sock")
-        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+    def test_inactive_ufw_is_reported_as_filtering_nothing(self):
+        text = self.summary("Status: inactive\n")
+        self.assertIn("NOT active", text)
+        self.assertIn("reachable from every network", text)
+        self.assertIn("sudo ufw enable", text)
+        self.assertNotIn("are in place", text)
 
-    def test_an_already_migrated_file_is_left_byte_for_byte_alone(self):
-        self.write({"version": 1, "journal_dir": str(self.home / install_host.NEW_JOURNAL_DIR)})
-        before = self.path.read_text()
-        self.assertFalse(install_host.migrate_runtime_config(self.home)["migrated"])
-        self.assertEqual(self.path.read_text(), before)
+    def test_missing_ufw_is_reported_as_filtering_nothing(self):
+        text = self.summary("", which=False)
+        self.assertIn("ufw is not installed", text)
+        self.assertIn("reachable from every network", text)
 
-    def test_a_host_with_no_runtime_file_gets_no_invented_one(self):
-        self.path.unlink(missing_ok=True)
-        self.assertFalse(install_host.migrate_runtime_config(self.home)["migrated"])
-        self.assertFalse(self.path.exists())
+    def test_active_ufw_with_a_deny_default_names_the_ranges(self):
+        text = self.summary(self.VERBOSE_ACTIVE)
+        self.assertIn("ufw is active and denies incoming traffic by default", text)
+        self.assertIn("10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 and tailscale0", text)
+        self.assertIn("47990 is not opened", text)
 
-    def test_an_empty_legacy_journal_directory_goes_and_a_full_one_stays(self):
-        self.write({"version": 1})
-        old = self.home / install_host.OLD_JOURNAL_DIR
-        old.mkdir(parents=True)
-        self.assertTrue(install_host.migrate_runtime_config(self.home)["legacy_journal_dir_removed"])
-        self.assertFalse(old.exists())
-        old.mkdir(parents=True)
-        (old / "OMODACHI-0123.json").write_text("{}")
-        result = install_host.migrate_runtime_config(self.home)
-        self.assertFalse(result["legacy_journal_dir_removed"])
-        self.assertTrue(result["legacy_journal_dir_present"])
-        self.assertTrue(old.exists())
+    def test_active_ufw_that_allows_incoming_by_default_is_not_called_a_filter(self):
+        text = self.summary(self.VERBOSE_ACTIVE.replace("deny (incoming)", "allow (incoming)"))
+        self.assertIn("default for incoming traffic is allow", text)
+        self.assertIn("reachable from every network", text)
 
 
-class UserMenuMigrationTests(unittest.TestCase):
-    """The stale SPEC-A copy goes; a menu the user wrote never does."""
-
-    CODEX = """{
-  // the codex-era test layer SPEC-A copied under the new name
-  "omadochi": {"label": "Omadochi", "icon": "\ue000"},
-  "omadochi.desktop": {"label": "Remote screen", "surface": "desktop"},
-  "omadochi.workspace.select.1": {"label": "Workspace 1"}
-}
-"""
+class VenvOwnershipTests(unittest.TestCase):
+    """RELEASE-9 (after RELEASE-8's src): the venvs are replaced or deleted only
+    when this installer can show it made them."""
 
     def setUp(self):
-        import tempfile
+        from unittest import mock
         self.temp = tempfile.TemporaryDirectory()
-        self.home = Path(self.temp.name)
         self.addCleanup(self.temp.cleanup)
-        self.path = self.home / install_host.USER_MENU
-        self.path.parent.mkdir(parents=True)
+        self.home = Path(self.temp.name)
+        self.share = self.home / ".local/share/omodachi"
+        self.venv = self.share / "venv"
+        self.calls = []
 
-    def test_a_file_that_is_entirely_omadochi_is_renamed_aside(self):
-        self.path.write_text(self.CODEX)
-        result = install_host.migrate_user_menu(self.home)
-        self.assertTrue(result["renamed"])
-        self.assertEqual(result["entries"], 3)
-        self.assertFalse(self.path.exists())
-        backup = self.home / install_host.USER_MENU_BACKUP
-        self.assertEqual(backup.read_text(), self.CODEX)
+        def fake_run(argv, **kwargs):
+            self.calls.append(list(argv))
+            if argv[2:4] == ["-m", "venv"]:
+                Path(argv[4]).mkdir(parents=True)
+                (Path(argv[4]) / "pyvenv.cfg").write_text("home = /usr/bin\n")
+            return _Completed()
+        patcher = mock.patch.object(install_host, "run", fake_run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
-    def test_a_menu_the_user_wrote_is_never_touched(self):
-        body = '{"omadochi.desktop": {"label": "x"}, "leo.custom": {"label": "mine"}}'
-        self.path.write_text(body)
-        result = install_host.migrate_user_menu(self.home)
-        self.assertEqual(result, {"renamed": False, "reason": "not_the_codex_file"})
-        self.assertEqual(self.path.read_text(), body)
+    def tree(self, path):
+        import hashlib
+        digest = hashlib.sha256()
+        for item in sorted(path.rglob("*")):
+            digest.update(str(item.relative_to(path)).encode())
+            if item.is_file():
+                digest.update(item.read_bytes())
+        return digest.hexdigest()
 
-    def test_an_absent_or_unreadable_file_is_reported_not_invented(self):
-        self.assertEqual(install_host.migrate_user_menu(self.home),
-                         {"renamed": False, "reason": "absent"})
-        self.path.write_text("{ not json at all")
-        self.assertEqual(install_host.migrate_user_menu(self.home),
-                         {"renamed": False, "reason": "unreadable"})
-        self.assertTrue(self.path.exists())
+    def earlier_venv(self, path, *, url=None, extra=None):
+        site = path / "lib/python3.14/site-packages"
+        (path / "pyvenv.cfg").parent.mkdir(parents=True, exist_ok=True)
+        (path / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        pins = install_host._lock_pins(ROOT)
+        for name, version in list(pins.items()) + [("pip", "25.2")] + list((extra or {}).items()):
+            (site / f"{name}-{version}.dist-info").mkdir(parents=True)
+        core = site / "omodachi_core-0.2.0.dist-info"
+        core.mkdir(parents=True)
+        (core / "direct_url.json").write_text(json.dumps(
+            {"url": url or (self.home / install_host.REMOTE_SOURCE).as_uri(), "dir_info": {}}))
 
-    def test_a_second_run_keeps_the_first_backup(self):
-        self.path.write_text(self.CODEX)
-        install_host.migrate_user_menu(self.home)
-        self.path.write_text('{"omadochi": {"label": "second"}}')
-        result = install_host.migrate_user_menu(self.home)
-        self.assertTrue(result["renamed"])
-        self.assertTrue(result["backup"].endswith(".codex-bak.2"))
-        self.assertEqual((self.home / install_host.USER_MENU_BACKUP).read_text(), self.CODEX)
+    def test_a_fresh_install_records_the_venv_it_makes(self):
+        install_host.install_venv(ROOT, self.venv, self.home)
+        identifier = (self.venv / install_host.VENV_ID_FILE).read_text().strip()
+        self.assertEqual(install_host._read_venv_ids(self.home), [identifier])
+        self.assertEqual((self.home / install_host.VENV_RECORD).stat().st_mode & 0o777, 0o600)
+        self.assertEqual(install_host.venv_ownership(self.home, self.venv)[0], "ours")
+        # A reinstall replaces it, and the record names only the new one.
+        install_host.install_venv(ROOT, self.venv, self.home)
+        second = (self.venv / install_host.VENV_ID_FILE).read_text().strip()
+        self.assertNotEqual(second, identifier)
+        self.assertEqual(install_host._read_venv_ids(self.home), [second])
+        self.assertFalse((self.share / "venv.previous").exists())
 
-    def test_the_packaged_layer_alone_still_publishes_the_real_entries(self):
-        """With the stale file gone, core reads its own packaged menu."""
-        import sys
-        sys.path.insert(0, str(ROOT / "src"))
-        from omodachi_core.bootstrap import create_service
-        from omodachi_core.hub import Hub
-        self.path.write_text(self.CODEX)
-        install_host.migrate_user_menu(self.home)
-        service = create_service(Hub(), demo=True,
-                                 omodachi_menu=self.path if self.path.exists() else None)
-        ids = {row["id"] for row in service.refresh_catalog()["entries"]}
-        self.assertFalse([value for value in ids if value.startswith("omadochi")])
-        self.assertIn("omodachi.workspace.select.1", ids)
+    def test_a_venv_somebody_else_made_is_refused_and_byte_identical(self):
+        for name in ("venv", "venv.previous"):
+            with self.subTest(name=name):
+                path = self.share / name
+                (path / "bin").mkdir(parents=True)
+                (path / "bin/python").write_text("mine")
+                (path / "pyvenv.cfg").write_text("home = /usr/bin\n")
+                before = self.tree(path)
+                refusal = install_host.venv_refusal(self.home, ROOT)
+                self.assertIn("is not a virtualenv this installer made", refusal)
+                self.assertIn(str(path), refusal)
+                with self.assertRaises(SystemExit):
+                    install_host.install_venv(ROOT, self.venv, self.home)
+                self.assertEqual(self.tree(path), before)
+                import shutil
+                shutil.rmtree(path)
+
+    def test_an_id_that_is_not_in_the_record_is_not_ours(self):
+        (self.venv).mkdir(parents=True)
+        (self.venv / install_host.VENV_ID_FILE).write_text("a" * 32 + "\n")
+        install_host._write_venv_ids(self.home, ["b" * 32])
+        self.assertEqual(install_host.venv_ownership(self.home, self.venv)[0], "foreign")
+
+    def test_a_link_is_never_ours(self):
+        target = self.home / "elsewhere"
+        target.mkdir()
+        self.share.mkdir(parents=True)
+        self.venv.symlink_to(target)
+        self.assertEqual(install_host.venv_ownership(self.home, self.venv)[0], "foreign")
+
+    def test_an_earlier_installs_venv_is_adopted_and_replaced(self):
+        self.earlier_venv(self.venv)
+        self.assertEqual(install_host.venv_ownership(self.home, self.venv, ROOT), ("earlier", ""))
+        self.assertEqual(install_host.venv_refusal(self.home, ROOT), "")
+        install_host.install_venv(ROOT, self.venv, self.home)
+        self.assertEqual(install_host.venv_ownership(self.home, self.venv)[0], "ours")
+
+    def test_a_venv_that_only_looks_like_an_earlier_one_is_not_adopted(self):
+        for case, options in (("other source", {"url": "file:///home/u/my-checkout"}),
+                              ("extra package", {"extra": {"requests": "2.32.0"}})):
+            with self.subTest(case=case):
+                import shutil
+                shutil.rmtree(self.venv, ignore_errors=True)
+                self.earlier_venv(self.venv, **options)
+                kind, _ = install_host.venv_ownership(self.home, self.venv, ROOT)
+                self.assertEqual(kind, "foreign", case)
+
+    def test_remove_deletes_only_ours(self):
+        install_host.install_venv(ROOT, self.venv, self.home)
+        stranger = self.share / "venv.previous"
+        (stranger / "bin").mkdir(parents=True)
+        (stranger / "bin/python").write_text("mine")
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = install_host.remove_venvs(self.home)
+        self.assertEqual(result["removed"], ["venv"])
+        self.assertIn(str(stranger), result["kept"])
+        self.assertTrue((stranger / "bin/python").exists())
+        self.assertFalse((self.home / install_host.VENV_RECORD).exists())
+
+    def test_a_failed_install_puts_the_old_venv_back_and_forgets_the_new_id(self):
+        install_host.install_venv(ROOT, self.venv, self.home)
+        first = install_host._read_venv_ids(self.home)
+        import subprocess
+        from unittest import mock
+
+        def failing(argv, **kwargs):
+            if argv[2:4] == ["-m", "venv"]:
+                Path(argv[4]).mkdir(parents=True)
+                return _Completed()
+            raise subprocess.CalledProcessError(1, argv)
+        with mock.patch.object(install_host, "run", failing), \
+                mock.patch.object(install_host.sys, "stderr"), \
+                self.assertRaises(subprocess.CalledProcessError):
+            install_host.install_venv(ROOT, self.venv, self.home)
+        self.assertEqual(install_host._read_venv_ids(self.home), first)
+        self.assertEqual(install_host.venv_ownership(self.home, self.venv)[0], "ours")
+
+
+class InstallerFilesTests(unittest.TestCase):
+    """RELEASE-9: Install writes its units, commands, template and hook sources
+    only over nothing or over its own, and never through a link."""
+
+    def test_files_that_are_not_the_installers_stop_the_install(self):
+        for relative, text in ((".config/systemd/user/omodachid.service", "[Service]\nExecStart=/opt/mine\n"),
+                               (".local/bin/omodachi-host", "#!/bin/sh\necho mine\n"),
+                               (".config/omarchy/themed/omodachi-theme.json.tpl", '{"mine": 1}\n'),
+                               (".local/share/omodachi/hooks/theme-set/omodachi", "#!/bin/sh\n")):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as scratch:
+                home = Path(scratch)
+                (home / relative).parent.mkdir(parents=True)
+                (home / relative).write_text(text)
+                self.assertIn(str(home / relative), install_host.files_refusal(home, ROOT))
+                with self.assertRaises(install_host.NotOurs):
+                    install_host.write(home / relative, "new\n", ours=lambda text: False)
+                self.assertEqual((home / relative).read_text(), text)
+
+    def test_earlier_installs_files_are_recognised_as_the_installers(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            old = install_host.DAEMON_UNIT.replace(install_host.UNIT_MARKER + "\n", "")
+            (home / ".config/systemd/user").mkdir(parents=True)
+            (home / ".config/systemd/user/omodachid.service").write_text(old)
+            (home / ".local/bin").mkdir(parents=True)
+            (home / ".local/bin/omodachid").write_text(install_host.WRAPPER % "omodachid")
+            template = home / install_host.THEMED_DIR / install_host.THEME_TEMPLATE
+            template.parent.mkdir(parents=True)
+            template.write_text((ROOT / "src/omodachi_core/data" / install_host.THEME_TEMPLATE).read_text())
+            self.assertEqual(install_host.files_refusal(home, ROOT), "")
+
+    def test_a_link_is_replaced_not_written_through(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            victim = home / "victim"
+            victim.write_text("precious\n")
+            link = home / "unit.service"
+            link.symlink_to(victim)
+            self.assertIn(str(link), install_host.files_refusal(home, ROOT) or str(link))
+            install_host.write(link, "ours\n")
+            self.assertEqual(victim.read_text(), "precious\n")
+            self.assertFalse(link.is_symlink())
+
+
+class OutdatedPamTests(unittest.TestCase):
+    def test_a_pam_entry_from_before_release_9_is_reported_not_installed_over(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            conf = Path(scratch) / "pam.conf"
+            self.assertFalse(install_host.pam_outdated(str(conf)))
+            conf.write_text("owner=u\nsocket=/run/omodachi/1000/omodachid.sock\nservices=sudo\n")
+            self.assertTrue(install_host.pam_outdated(str(conf)))
+            conf.write_text(conf.read_text() + "keys=/etc/omodachi/pam/keys.json\nprotocol=2\n")
+            self.assertFalse(install_host.pam_outdated(str(conf)))
+
+    def test_install_exits_partial_while_the_old_helper_is_there(self):
+        import contextlib
+        import io
+        from unittest import mock
+        out = io.StringIO()
+        with mock.patch.object(install_host.sys, "platform", "linux"), \
+                mock.patch.object(install_host, "install_local", return_value=0), \
+                mock.patch.object(install_host, "pam_outdated", return_value=True), \
+                contextlib.redirect_stdout(out):
+            code = install_host.main(["--local"])
+        self.assertEqual(code, install_host.PARTIAL)
+        self.assertIn("only PARTLY installed", out.getvalue())
+        self.assertIn("--local --pam", out.getvalue())
+
+
+class SunshineBuildCacheTests(unittest.TestCase):
+    def test_a_directory_at_the_build_cache_path_that_is_not_ours_is_left_alone(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch) / "sunshine-src"
+            root.mkdir()
+            (root / "mine.txt").write_text("mine")
+            with mock.patch.object(install_host, "run") as run:
+                ok, detail = install_host.fetch_sunshine_commit("https://x/y.git", "a" * 40, root)
+            self.assertFalse(ok)
+            self.assertIn("not this installer's build cache", detail)
+            run.assert_not_called()
+            self.assertEqual((root / "mine.txt").read_text(), "mine")
 
 
 class SunshineAppsTests(unittest.TestCase):
@@ -386,13 +551,23 @@ class SunshineAppRemovalTests(unittest.TestCase):
 
     def test_a_second_removal_changes_nothing(self):
         with tempfile.TemporaryDirectory() as scratch:
-            home, path = self._home(scratch, {"apps": [{"name": self.NAME}]})
+            home, path = self._home(scratch, {"apps": [{"name": self.NAME}, {"name": "Desktop"}]})
             install_host.remove_sunshine_app(home, self.NAME)
             body = path.read_text()
             result = install_host.remove_sunshine_app(home, self.NAME)
             self.assertFalse(result["changed"])
             self.assertEqual(result["reason"], "not_published")
             self.assertEqual(path.read_text(), body)
+
+    def test_a_file_that_held_only_our_entry_and_no_original_goes(self):
+        # RELEASE-9: ensure_sunshine_app created it (it keeps no backup then).
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            install_host.ensure_sunshine_app(home, self.NAME)
+            path = home / install_host.SUNSHINE_APPS
+            self.assertEqual(install_host.remove_sunshine_app(home, self.NAME)["reason"],
+                             "removed_file_we_created")
+            self.assertFalse(path.exists())
 
     def test_the_backup_goes_only_when_it_says_the_same_thing(self):
         with tempfile.TemporaryDirectory() as scratch:
@@ -700,92 +875,115 @@ class PamSudoTests(unittest.TestCase):
         self.assertEqual([argv for argv, _ in calls], [["sudo", "-v"]])
         self.assertIn("sudo -v failed", err)
 
-    def test_the_remove_advice_is_unchanged(self):
+    def test_the_remove_advice_names_the_isolated_command(self):
         source = Path(install_host.__file__).read_text()
-        self.assertIn("f\"  python3 {share / 'src/scripts/install_host.py'} --local --remove-pam\\n\"", source)
+        self.assertIn('str(share / "src/scripts/install_host.py") + " --local --remove-pam', source)
+        self.assertIn('python3 -I -B "', source)
 
 
 class PinnedSunshineTests(unittest.TestCase):
-    """CORE-2 §4: a host already running a fork that satisfies the pin is not touched."""
+    """CORE-2 §4 + RELEASE-9: a fork already on disk is trusted as the pinned
+    build only when it is byte for byte the pinned archive's contents and the
+    unit that starts it is ours; then nothing is downloaded."""
 
-    def run_install(self, present, **options):
+    def run_install(self, present, *, pristine="", **options):
         import contextlib
         import io
         from unittest import mock
         from omodachi_core import sunshine_package
         out, err = io.StringIO(), io.StringIO()
+        unit = {"restarted": False, "enabled": True, "active": "active", "changed": False,
+                "web_locked": True, "strangers": []}
         with mock.patch.object(sunshine_package, "installed_fork", return_value=present), \
+                mock.patch.object(sunshine_package, "pristine", return_value=pristine) as check, \
+                mock.patch.object(sunshine_package, "ensure_unit", return_value=unit) as ensure, \
                 mock.patch.object(sunshine_package, "install",
                                   side_effect=sunshine_package.SunshinePackageError(
                                       "sunshine_package_unreachable", "would have downloaded")) as install, \
-                mock.patch.object(sunshine_package, "_systemctl") as systemctl, \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             result = install_host.install_sunshine(ROOT, **options)
-        return result, out.getvalue(), err.getvalue(), install, systemctl
+        self.check, self.ensure = check, ensure
+        return result, out.getvalue(), err.getvalue(), install
 
-    def test_leos_drop_in_fork_is_left_alone_and_nothing_is_downloaded(self):
-        # STREAM-1b: what omarchy runs after the 328d231 install - the release
-        # archive's SOURCE carries the full commit.
-        present = {"version": "328d2313c92dc4db675a8eafe96a7e32460c2758",
-                   "binary": "/home/u/.local/share/omodachi/sunshine/328d231/sunshine",
-                   "directory": "/home/u/.local/share/omodachi/sunshine/328d231",
-                   "written_by_installer": True, "enabled": "enabled", "active": "active"}
-        result, out, err, install, systemctl = self.run_install(present)
+    OURS = {"version": "328d2313c92dc4db675a8eafe96a7e32460c2758",
+            "binary": "/home/u/.local/share/omodachi/sunshine/328d231/sunshine",
+            "directory": "/home/u/.local/share/omodachi/sunshine/328d231",
+            "arguments": ["capture=wlr", "origin_web_ui_allowed=pc"],
+            "written_by_installer": True, "enabled": "enabled", "active": "active"}
+
+    def test_the_pinned_tree_under_our_unit_is_kept_and_nothing_is_downloaded(self):
+        result, out, err, install = self.run_install(self.OURS)
         self.assertEqual((result["installed"], result["reason"], result["pinned"]),
                          (False, "already_installed", "328d231"))
         install.assert_not_called()
-        systemctl.assert_not_called()
-        self.assertIn("328d2313c92d", out)
-        self.assertIn("it is the pinned build", out)
+        # The manifest checked is the one versions.json pins, not the tree's own word.
+        self.assertEqual(self.check.call_args.args[1],
+                         "701043786fea2a92f66c7a4ac9e419072c80bb530c7e026157d3d88934cdee68")
+        # The unit is still brought to what this core writes, without a restart
+        # unless that changed it, and keeping the encoder arguments it had.
+        self.assertEqual(self.ensure.call_args.kwargs["restart"], False)
+        self.assertEqual(self.ensure.call_args.kwargs["arguments"], self.OURS["arguments"])
         self.assertIn("nothing was downloaded", out)
         self.assertEqual(err, "")
 
-    def test_a_listed_stand_in_is_left_alone_and_says_so(self):
+    def test_a_tree_that_only_names_the_pin_is_replaced_by_the_pinned_archive(self):
+        # RELEASE-9: a SOURCE file or a directory name is not a checksum.
+        result, out, _, install = self.run_install(
+            self.OURS, pristine="its MANIFEST.sha256 is not the one the pinned archive carries")
+        self.assertEqual(install.call_args.args[0].rsplit("/", 1)[-1],
+                         "omodachi-sunshine-328d231-x86_64.tar.zst")
+        self.assertRegex(install.call_args.kwargs["sha256"], "^0f5a8f0b")
+        self.assertIn("is not trusted as the pinned build", out)
+        self.ensure.assert_not_called()
+
+    def test_a_drop_in_this_installer_did_not_write_is_never_trusted(self):
+        present = dict(self.OURS, written_by_installer=False)
+        result, out, _, install = self.run_install(present)
+        install.assert_called_once()
+        self.assertIn("was not written by this installer", out)
+
+    def test_a_listed_stand_in_is_not_the_pinned_archive_and_is_replaced(self):
         from unittest import mock
         from omodachi_core import sunshine_package
-        present = {"version": "17c6043", "binary": "/home/u/.local/share/omodachi/sunshine/17c6043/sunshine",
-                   "directory": "/home/u/.local/share/omodachi/sunshine/17c6043",
-                   "written_by_installer": False, "enabled": "enabled", "active": "active"}
+        present = dict(self.OURS, version="17c6043")
         pin = dict(sunshine_package.pinned(), satisfied_by=["17c6043"])
         with mock.patch.object(sunshine_package, "pinned", return_value=pin):
-            result, out, err, install, systemctl = self.run_install(present)
-        self.assertEqual((result["installed"], result["reason"]), (False, "already_installed"))
-        install.assert_not_called()
-        systemctl.assert_not_called()
-        self.assertIn("satisfies the pinned 328d231", out)
+            result, out, _, install = self.run_install(
+                present, pristine="its MANIFEST.sha256 is not the one the pinned archive carries")
+        install.assert_called_once()
 
     def test_a_fork_from_before_hevc_is_replaced_by_the_pin(self):
-        # 17c6043 and e58627a are what omarchy ran before STREAM-1b: H.264-only
-        # forks. With the pin at 328d231 neither may be skipped for.
         for version in ("17c6043", "e58627aa73d9bc42d95f121415b96a9a0b3aa0be"):
-            present = {"version": version, "binary": "/x/sunshine", "directory": "/x",
-                       "written_by_installer": False, "enabled": "enabled", "active": "active"}
-            result, out, err, install, _ = self.run_install(present)
+            present = dict(self.OURS, version=version)
+            result, out, err, install = self.run_install(present)
             self.assertEqual(install.call_args.args[0].rsplit("/", 1)[-1],
                              "omodachi-sunshine-328d231-x86_64.tar.zst", version)
             self.assertRegex(install.call_args.kwargs["sha256"], "^0f5a8f0b")
 
-    def test_a_fork_that_is_not_enabled_is_enabled_but_not_restarted(self):
-        present = {"version": "328d231", "binary": "/x/sunshine", "directory": "/x",
-                   "written_by_installer": True, "enabled": "disabled", "active": "active"}
-        result, out, _, install, systemctl = self.run_install(present)
-        install.assert_not_called()
-        self.assertEqual([call.args[0] for call in systemctl.call_args_list],
-                         [["enable", "app-dev.lizardbyte.app.Sunshine.service"]])
-        self.assertIn("it is the pinned build", out)
-
     def test_an_older_fork_or_an_explicit_archive_is_installed(self):
-        older = {"version": "a2fd635", "binary": "/x/sunshine", "directory": "/x",
-                 "written_by_installer": False, "enabled": "enabled", "active": "active"}
-        result, out, err, install, _ = self.run_install(older)
+        older = dict(self.OURS, version="a2fd635")
+        result, out, err, install = self.run_install(older)
         self.assertEqual(install.call_args.args[0].rsplit("/", 1)[-1], "omodachi-sunshine-328d231-x86_64.tar.zst")
-        self.assertRegex(install.call_args.kwargs["sha256"], "^0f5a8f0b")
         self.assertIn("pinned 328d231", out)
         self.assertNotIn("/releases/latest/", out)
-        current = dict(older, version="328d231")
-        result, out, err, install, _ = self.run_install(current, spec="latest", sha256="e" * 64)
+        result, out, err, install = self.run_install(self.OURS, spec="latest", sha256="e" * 64)
         self.assertIn("/releases/latest/", install.call_args.args[0])
         self.assertEqual(install.call_args.kwargs["sha256"], "e" * 64)
+
+    def test_a_sunshine_somebody_else_set_up_is_reported_and_left_alone(self):
+        import contextlib
+        import io
+        from unittest import mock
+        from omodachi_core import sunshine_package
+        err = io.StringIO()
+        with mock.patch.object(sunshine_package, "installed_fork", return_value=None), \
+                mock.patch.object(sunshine_package, "install", side_effect=sunshine_package.SunshinePackageError(
+                    "sunshine_not_ours", "Sunshine is already installed on this computer")), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            result = install_host.install_sunshine(ROOT)
+        self.assertEqual(result["reason"], "sunshine_not_ours")
+        self.assertIn("Remote's VNC mode still works.", err.getvalue())
+        self.assertNotIn("--sunshine-build", err.getvalue())
 
 
 class SunshineOverrideTests(unittest.TestCase):
@@ -966,12 +1164,14 @@ class RemoveKeepsTheUsersFilesTests(unittest.TestCase):
         import contextlib
         import io
         from unittest import mock
+        self.mock = mock
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
         for target, value in ((Path, "home"), (install_host, "run"), (install_host, "remove_firewall")):
             patcher = mock.patch.object(target, value, **(
                 {"return_value": self.home} if value == "home" else
+                {"new": (lambda *a, **k: 0)} if value == "remove_firewall" else
                 {"new": (lambda *a, **k: _Completed())}))
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -993,7 +1193,7 @@ class RemoveKeepsTheUsersFilesTests(unittest.TestCase):
             "token": h / ".config/omodachi/plugin.token",
             "preferences": h / ".config/omodachi/preferences/state.json",
             "cache": h / ".cache/omodachi/install-status.json",
-            "state": h / ".local/state/omodachi/remote/journal.json",
+            "state": h / ".local/state/omodachi/remote/OMODACHI-0123456789abcdef.json",
             "venv": self.share / "venv/bin/python",
             "previous": self.share / "venv.previous/bin/python",
             "src": self.share / "src/pyproject.toml",
@@ -1006,6 +1206,17 @@ class RemoveKeepsTheUsersFilesTests(unittest.TestCase):
             master.parent.mkdir(parents=True, exist_ok=True)
             master.write_text(install_host.hook_script(hook))
         (self.share / "src/.git").mkdir()
+        # RELEASE-9: both venvs are this installer's (id inside, record outside).
+        ids = []
+        for name, identifier in (("venv", "1" * 32), ("venv.previous", "2" * 32)):
+            (self.share / name / install_host.VENV_ID_FILE).write_text(identifier + "\n")
+            ids.append(identifier)
+        install_host._write_venv_ids(h, ids)
+        # And no PAM entry on this pretend host, whatever the machine running
+        # the tests has in /etc.
+        patcher = mock.patch.object(install_host, "pam_present", return_value=[])
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def own_source(self, identifier="0123456789abcdef" * 2):
         (self.share / "src/.git/omodachi-install-id").write_text(identifier + "\n")
@@ -1075,16 +1286,197 @@ class RemoveKeepsTheUsersFilesTests(unittest.TestCase):
     def test_the_record_survives_a_purge_while_the_checkout_it_names_is_kept(self):
         from unittest import mock
         record = self.own_source()
-        real_exists = Path.exists
-
-        def pam_installed(path, *args, **kwargs):
-            return str(path) == "/etc/omodachi/pam.conf" or real_exists(path, *args, **kwargs)
-
-        with mock.patch.object(Path, "exists", pam_installed):
-            self.remove(purge=True)
+        with mock.patch.object(install_host, "pam_present", return_value=["/etc/omodachi/pam.conf"]), \
+                mock.patch.object(install_host, "remove_pam", return_value=1):
+            with self.redirect:
+                code = install_host.remove_local(sunshine=False, purge=True)
+        self.assertEqual(code, install_host.PARTIAL)
         self.assertTrue(self.files["src"].exists(), "the PAM entry keeps the sources")
         self.assertTrue(record.exists())
         self.assertFalse(self.files["state"].exists())
+        self.assertNotIn(str(record), self.out.getvalue().split("kept, because")[-1])
+
+    # RELEASE-9 (marketplace #8330, 2026-09-26): --purge deletes only the
+    # files the program creates, in every directory it touches.
+    def plant(self, relative):
+        path = self.home / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("the user's own\n")
+        return path
+
+    def test_purge_keeps_a_file_the_user_put_in_each_directory(self):
+        self.own_source()
+        made = {relative: self.plant(relative) for relative in (
+            ".config/omodachi/pairing.json", ".config/omodachi/tls/.server-abcd1234.pem",
+            ".config/omodachi/agent/ws-token", ".cache/omodachi/voice/transcript-0123456789abcdef.txt",
+            ".cache/omodachi/sunshine/omodachi-sunshine-328d231-x86_64.tar.zst",
+            ".local/state/omodachi/sunshine-unit.json",
+            ".local/state/omodachi/remote/vnc/rs_" + "a" * 32 + "/instance.json",
+            ".local/state/omodachi/remote/vnc/rs_" + "a" * 32 + "/rfb.sock")}
+        planted = [self.plant(relative) for relative in (
+            ".config/omodachi/notes.txt", ".config/omodachi/tls/my-ca.pem",
+            ".config/omodachi/agent/my-agent.toml", ".config/omodachi/pairing.json.bak",
+            ".cache/omodachi/my-cache.bin", ".cache/omodachi/voice/memo.txt",
+            ".cache/omodachi/sunshine/my-build.tar.zst",
+            ".local/state/omodachi/notes.md", ".local/state/omodachi/remote/my.log")]
+        out = self.remove(purge=True)
+        for path in planted:
+            self.assertEqual(path.read_text(), "the user's own\n", path)
+            self.assertIn(str(path), out)
+        for relative, path in made.items():
+            self.assertFalse(path.exists(), relative)
+        # A directory of ours with a stranger in it stays, holding only that.
+        self.assertEqual(sorted(p.name for p in (self.home / ".config/omodachi/tls").iterdir()),
+                         ["my-ca.pem"])
+        self.assertFalse((self.home / ".local/state/omodachi/remote/vnc").exists())
+
+    def test_every_file_a_vnc_session_makes_is_on_the_purge_list(self):
+        # RELEASE-9 integration: B3 moved the RFB listener to rfb.sock in the
+        # session directory; a daemon that dies mid-session leaves it there.
+        from omodachi_core.remote.vnc import ManagedWayVNC
+        session = self.home / ".local/state/omodachi/remote/vnc" / ("rs_" + "b" * 32)
+        vnc = ManagedWayVNC(session, environment={})
+        rules = install_host.PURGE_RULES[".local/state/omodachi"]["remote"]["vnc"]
+        known, inner = install_host._rule_for(session.name, rules)
+        self.assertTrue(known)
+        for path in (vnc.control, vnc.listener, vnc.state_path):
+            self.assertTrue(install_host._rule_for(path.name, inner)[0], path.name)
+
+    def test_purge_with_nothing_of_the_users_leaves_no_directory_behind(self):
+        self.own_source()
+        import shutil
+        for name in ("workspace", "menu", "menu_backup", "runtime", "stranger", "foreign_hook"):
+            self.files[name].unlink()
+        shutil.rmtree(self.share / "agent-workspace")
+        shutil.rmtree(self.share / "my-scratch")
+        self.remove(purge=True)
+        for relative in (".config/omodachi", ".cache/omodachi", ".local/state/omodachi",
+                         ".local/share/omodachi"):
+            self.assertFalse((self.home / relative).exists(), relative)
+
+    def test_a_link_in_place_of_a_directory_is_not_followed(self):
+        self.own_source()
+        elsewhere = self.home / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "server.pem").write_text("not ours\n")
+        import shutil
+        shutil.rmtree(self.home / ".config/omodachi/tls")
+        (self.home / ".config/omodachi/tls").symlink_to(elsewhere)
+        self.remove(purge=True)
+        self.assertEqual((elsewhere / "server.pem").read_text(), "not ours\n")
+
+    # RELEASE-9: the venvs are this installer's only when it can show it.
+    def test_a_venv_this_installer_did_not_make_is_kept(self):
+        self.own_source()
+        (self.share / "venv" / install_host.VENV_ID_FILE).unlink()
+        (self.share / "venv.previous" / install_host.VENV_ID_FILE).write_text("f" * 32 + "\n")
+        out = self.remove(purge=True)
+        self.assertTrue(self.files["venv"].exists())
+        self.assertTrue(self.files["previous"].exists())
+        self.assertIn("is not a virtualenv this installer made", out)
+
+    # RELEASE-9: --remove takes back the authorized_keys lines it wrote.
+    def test_remove_takes_back_our_authorized_keys_lines_and_nothing_else(self):
+        import base64
+        self.own_source()
+        body = base64.b64encode(b"\0\0\0\x0bssh-ed25519" + b"k" * 36).decode()
+        other = base64.b64encode(b"\0\0\0\x0bssh-ed25519" + b"u" * 36).decode()
+        keys = self.home / ".ssh/authorized_keys"
+        keys.parent.mkdir(mode=0o700)
+        keys.write_text(f"ssh-ed25519 {other} me@laptop\n"
+                        f"ssh-ed25519 {body} # omodachi:ipad-1\n"
+                        f'restrict,pty ssh-ed25519 {body[:-4]}AAAA # omodachi:iphone\n'
+                        f"# ssh-ed25519 {body} # omodachi:commented-out\n")
+        out = self.remove()
+        self.assertEqual(keys.read_text(), f"ssh-ed25519 {other} me@laptop\n"
+                                           f"# ssh-ed25519 {body} # omodachi:commented-out\n")
+        self.assertIn("removed 2 Omodachi line(s)", out)
+        self.assertIn(" ipad-1", out)
+
+    def test_an_authorized_keys_that_cannot_be_read_safely_makes_the_removal_partial(self):
+        self.own_source()
+        (self.home / ".ssh").mkdir(mode=0o700)
+        (self.home / ".ssh/authorized_keys").symlink_to(self.home / "elsewhere-keys")
+        with self.redirect:
+            code = install_host.remove_local(sunshine=False)
+        self.assertEqual(code, install_host.PARTIAL)
+        self.assertIn("only PARTLY removed", self.out.getvalue())
+
+    def test_remove_puts_voxtype_back_when_dictation_was_cut_off(self):
+        from omodachi_core import voice
+        self.assertTrue(install_host.VOXTYPE_BACKUP.endswith(voice.BACKUP_SUFFIX))
+        self.own_source()
+        config = self.home / install_host.VOXTYPE_CONFIG
+        config.parent.mkdir(parents=True)
+        config.write_text('[audio]\ndevice = "omodachi_mic"\n')
+        (self.home / install_host.VOXTYPE_BACKUP).write_text('[audio]\ndevice = "default"\n')
+        self.remove()
+        self.assertEqual(config.read_text(), '[audio]\ndevice = "default"\n')
+        self.assertFalse((self.home / install_host.VOXTYPE_BACKUP).exists())
+
+    def test_a_voxtype_config_edited_since_dictation_is_kept(self):
+        self.own_source()
+        config = self.home / install_host.VOXTYPE_CONFIG
+        config.parent.mkdir(parents=True)
+        config.write_text('[audio]\ndevice = "omodachi_mic"\n[model]\nname = "large"\n')
+        backup = self.home / install_host.VOXTYPE_BACKUP
+        backup.write_text('[audio]\ndevice = "default"\n')
+        out = self.remove()
+        self.assertEqual(config.read_text(), '[audio]\ndevice = "omodachi_mic"\n[model]\nname = "large"\n')
+        self.assertTrue(backup.exists())
+        self.assertIn("it was changed after dictation", out)
+
+    def test_a_unit_file_of_that_name_the_installer_did_not_write_is_kept(self):
+        self.own_source()
+        unit = self.home / ".config/systemd/user/omodachid.service"
+        unit.parent.mkdir(parents=True)
+        unit.write_text("[Service]\nExecStart=/opt/mine\n")
+        out = self.remove()
+        self.assertEqual(unit.read_text(), "[Service]\nExecStart=/opt/mine\n")
+        self.assertIn("it is not a unit this installer wrote", out)
+
+    def test_a_template_somebody_edited_is_kept(self):
+        self.own_source()
+        template = self.home / install_host.THEMED_DIR / install_host.THEME_TEMPLATE
+        template.parent.mkdir(parents=True)
+        template.write_text('{"mine": true}\n')
+        self.remove()
+        self.assertEqual(template.read_text(), '{"mine": true}\n')
+
+    def test_firewall_rules_that_could_not_be_deleted_make_the_removal_partial(self):
+        mock = self.mock
+        self.own_source()
+        with mock.patch.object(install_host, "remove_firewall", return_value=1):
+            with self.redirect:
+                code = install_host.remove_local(sunshine=False)
+        self.assertEqual(code, install_host.PARTIAL)
+        self.assertIn("sudo ufw delete", self.out.getvalue())
+
+    # RELEASE-9: an installed PAM entry is removed as part of --remove.
+    def test_remove_runs_the_pam_root_step_and_finishes_when_it_worked(self):
+        mock = self.mock
+        self.own_source()
+        answers = [["/etc/omodachi/pam.conf"], []]
+        with mock.patch.object(install_host, "pam_present", side_effect=lambda: answers.pop(0)), \
+                mock.patch.object(install_host, "remove_pam", return_value=0) as step:
+            out = self.remove()
+        step.assert_called_once_with(install_host.ROOT)
+        self.assertFalse(self.files["src"].exists())
+        self.assertNotIn("PARTLY", out)
+
+    def test_remove_says_partial_and_fails_when_the_pam_entry_stays(self):
+        mock = self.mock
+        self.own_source()
+        with mock.patch.object(install_host, "pam_present", return_value=["/etc/pam.d/sudo"]), \
+                mock.patch.object(install_host, "remove_pam", return_value=1):
+            with self.redirect:
+                code = install_host.remove_local(sunshine=False)
+        out = self.out.getvalue()
+        self.assertEqual(code, install_host.PARTIAL)
+        self.assertIn("only PARTLY removed", out)
+        self.assertIn("--local --remove-pam", out)
+        self.assertTrue(self.files["src"].exists(), "the PAM step runs out of the sources")
+
 
 class Release7bIsolationTests(unittest.TestCase):
     """RELEASE-7b: every Python core starts - the root PAM step, the venv and pip,
@@ -1165,7 +1557,7 @@ class Release7bIsolationTests(unittest.TestCase):
         argv, kwargs = calls[0]
         self.assertEqual(argv, install_host.pam_command(["remove"]))
         files = json.loads(kwargs["input"])
-        self.assertEqual(sorted(files), ["pam_helper.py", "pam_install.py"])
+        self.assertEqual(sorted(files), ["pam_enroll.py", "pam_helper.py", "pam_install.py"])
         for name, text in files.items():
             self.assertEqual(text.encode(), (ROOT / "src/omodachi_core" / name).read_bytes())
 

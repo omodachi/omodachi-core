@@ -9,13 +9,15 @@ cannot tell the difference is worth nothing).
 
 The shape of an approval:
 
-  PAM helper -> `local.auth.approve` -> broker.request()
-      mints `approval_id` + 32-byte `nonce`, publishes `auth.approval.requested`
-      to every enrolled device that has a live event subscription right now,
-      and waits.
+  PAM helper (root) mints `approval_id` + 32-byte `nonce`
+      -> `local.auth.approve` -> broker.request() publishes
+      `auth.approval.requested` to every enrolled device that has a live event
+      subscription right now (and whose key is the one root enrolled), and waits.
   device -> `POST /v1/auth/approvals/{id}` with a signature over the nonce
-      broker.resolve() verifies it against the key that device enrolled,
-      burns the nonce, and wakes the waiter.
+      broker.resolve() checks it against the key that device registered here,
+      burns the nonce, and wakes the waiter; the signature goes back to the
+      helper, which verifies it again against root's own copy of the key
+      (RELEASE-9: that second check is the one PAM's answer rests on).
   nobody -> the wait expires
       `auth.approval.resolved` says `timeout`, the helper exits non-zero, PAM
       falls through to the password.
@@ -65,106 +67,14 @@ from .service import ServiceError
 # ---------------------------------------------------------------------------
 # NIST P-256 (secp256r1) signature verification, verification only.
 #
-# Core has no crypto dependency and is not about to grow one for a single
-# `verify`. This is ~40 lines of textbook arithmetic over a fixed curve; it
-# handles no secrets, so there is nothing here for a timing side channel to
-# leak, and every input is range-checked before it is used.
+# RELEASE-9: the one implementation lives in pam_helper.py, because the root
+# helper has to run it as a single standard-library file. The daemon's own
+# check (below) is a courtesy to the device - it learns at once that a
+# signature is wrong - and decides nothing: the root helper verifies again,
+# against root's keys, before PAM hears a yes.
 # ---------------------------------------------------------------------------
-_P = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF
-_A = _P - 3
-_B = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
-_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
-_G = (0x6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296,
-      0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5)
-
-
-def _add(first, second):
-    if first is None:
-        return second
-    if second is None:
-        return first
-    (x1, y1), (x2, y2) = first, second
-    if x1 == x2:
-        if (y1 + y2) % _P == 0:
-            return None
-        slope = (3 * x1 * x1 + _A) * pow(2 * y1 % _P, _P - 2, _P) % _P
-    else:
-        slope = (y2 - y1) * pow((x2 - x1) % _P, _P - 2, _P) % _P
-    x3 = (slope * slope - x1 - x2) % _P
-    return (x3, (slope * (x1 - x3) - y1) % _P)
-
-
-def _multiply(scalar, point):
-    result, addend = None, point
-    while scalar:
-        if scalar & 1:
-            result = _add(result, addend)
-        addend = _add(addend, addend)
-        scalar >>= 1
-    return result
-
-
-def _on_curve(x, y):
-    return 0 <= x < _P and 0 <= y < _P and (y * y - (x * x * x + _A * x + _B)) % _P == 0
-
-
-def public_point(raw: bytes):
-    """A P-256 public key from either the X9.63 point iOS hands out or SPKI DER.
-
-    `SecKeyCopyExternalRepresentation` gives `04 || X || Y`, 65 bytes. Anything
-    longer is accepted only if it is a DER SubjectPublicKeyInfo that ends in
-    exactly that point with the standard 26-byte prefix; there is no general
-    DER parser here on purpose.
-    """
-    if len(raw) == 91:
-        prefix = bytes.fromhex("3059301306072a8648ce3d020106082a8648ce3d030107034200")
-        if not raw.startswith(prefix):
-            raise ValueError("unsupported public key encoding")
-        raw = raw[len(prefix):]
-    if len(raw) != 65 or raw[0] != 0x04:
-        raise ValueError("public key must be an uncompressed P-256 point")
-    x, y = int.from_bytes(raw[1:33], "big"), int.from_bytes(raw[33:], "big")
-    if not _on_curve(x, y) or (x, y) == (0, 0):
-        raise ValueError("public key is not on the curve")
-    return (x, y)
-
-
-def _der_signature(raw: bytes):
-    """r, s out of a DER `SEQUENCE { INTEGER r, INTEGER s }`, strictly."""
-    if len(raw) < 8 or raw[0] != 0x30 or raw[1] != len(raw) - 2:
-        raise ValueError("malformed signature")
-    body, values = raw[2:], []
-    for _ in range(2):
-        if len(body) < 2 or body[0] != 0x02:
-            raise ValueError("malformed signature")
-        size = body[1]
-        if size == 0 or size > 33 or len(body) < 2 + size:
-            raise ValueError("malformed signature")
-        chunk = body[2:2 + size]
-        if chunk[0] & 0x80 or (chunk[0] == 0 and (len(chunk) == 1 or not chunk[1] & 0x80)):
-            raise ValueError("signature integer is not minimally encoded")
-        values.append(int.from_bytes(chunk, "big"))
-        body = body[2 + size:]
-    if body:
-        raise ValueError("trailing signature bytes")
-    return values[0], values[1]
-
-
-def verify_signature(public_key: bytes, message: bytes, signature: bytes) -> bool:
-    """True only for a well-formed ECDSA-P256-SHA256 signature over `message`."""
-    try:
-        point = public_point(public_key)
-        r, s = _der_signature(signature)
-    except ValueError:
-        return False
-    if not (1 <= r < _N and 1 <= s < _N):
-        return False
-    digest = int.from_bytes(hashlib.sha256(message).digest(), "big")
-    inverse = pow(s, _N - 2, _N)
-    combined = _add(_multiply(digest * inverse % _N, _G), _multiply(r * inverse % _N, point))
-    if combined is None:
-        return False
-    return combined[0] % _N == r
+from .pam_helper import (_G, _N, _add, _multiply, _on_curve, _der_signature, key_fingerprint,  # noqa: E402,F401
+                         public_point, verify_signature)
 
 
 # How many other credentials a rejected signature is checked against before the
@@ -224,7 +134,16 @@ def _b64(value, *, limit=512):
 # Enrolled keys
 # ---------------------------------------------------------------------------
 _LABEL_LIMIT = 64
-SERVICES = ("sudo", "polkit-1", "hyprlock", "omarchy-lock-password", "su", "login")
+# RELEASE-9: no `su` and no `login` - the root installer cannot put the entry
+# there, so a request naming them is not one a real helper makes.
+SERVICES = ("sudo", "polkit-1", "hyprlock", "omarchy-lock-password")
+# RELEASE-9. Readable by the owner: which devices root has enrolled, by key
+# fingerprint (pam_enroll.py writes it next to the 0600 store it summarises).
+PAM_INDEX = "/etc/omodachi/pam/enrolled.json"
+_APPROVAL_ID = re.compile(r"appr_[0-9a-f]{32}\Z")
+_NONCE = re.compile(r"[A-Za-z0-9_-]{43}\Z")
+_HOST_ID = re.compile(r"[0-9a-f]{32}\Z")
+_FINGERPRINT = re.compile(r"sha256:[0-9a-f]{64}\Z")
 # What each service is called on the card. The device shows the host's words,
 # not a PAM service name, because "polkit-1" means nothing to the person
 # holding the iPad.
@@ -344,9 +263,10 @@ class ApprovalBroker:
     CHALLENGE_TTL = 300
 
     def __init__(self, hub, keys: BiometricKeyStore, *, preferences=None, host_identity=None,
-                 journal=None, clock=time.time):
+                 journal=None, clock=time.time, pam_index=PAM_INDEX):
         self.hub = hub
         self.keys = keys
+        self.pam_index = Path(pam_index)
         self.preferences = preferences
         self.host_identity = host_identity
         self._journal = journal if journal is not None else _print_journal
@@ -381,11 +301,51 @@ class ApprovalBroker:
                 if row.get("enabled") and row["device_id"] in connected
                 and row["device_id"] in authorized]
 
+    def pam_enrolled(self) -> dict:
+        """`{device_id: fingerprint}` root has enrolled, from the readable index.
+
+        RELEASE-9. Only what is on the owner-readable summary; the store itself
+        is root's. An absent or unreadable index is "nothing enrolled", which is
+        also what the root helper will act on.
+        """
+        try:
+            data = json.loads(self.pam_index.read_text(encoding="utf-8"))
+            devices = data["devices"]
+            if data.get("host_id") != self.host_id or not isinstance(devices, dict):
+                return {}
+            return {device_id: row["fingerprint"] for device_id, row in devices.items()
+                    if isinstance(row, dict) and isinstance(row.get("fingerprint"), str)}
+        except (OSError, ValueError, KeyError, TypeError):
+            return {}
+
+    def _fingerprint(self, device_id):
+        row = self.keys.get(device_id)
+        try:
+            return key_fingerprint(base64.b64decode(row["public_key"], validate=True)) if row else None
+        except (binascii.Error, ValueError, KeyError, TypeError):
+            return None
+
+    def key_rows(self) -> list:
+        """The enrolled keys, each saying whether root holds that same key.
+
+        `pam_enrolled` is what decides whether this device can answer a real
+        password prompt: registered here is the device's half, enrolled by root
+        is the host's, and a key that changed since (a new Face ID set) is no
+        longer the one root holds until the owner enrols it again.
+        """
+        enrolled = self.pam_enrolled()
+        rows = self.keys.list()
+        for row in rows:
+            known = enrolled.get(row["device_id"])
+            row["pam_enrolled"] = known is not None and known == self._fingerprint(row["device_id"])
+        return rows
+
     def status(self) -> dict:
         """Both switches, side by side. `enabled` is the host's; each key carries its own."""
         return {"enabled": self.enabled(), "host_id": self.host_id, "host_name": self.host_name,
-                "keys": self.keys.list(), "eligible_devices": [row["device_id"] for row in self._eligible()],
-                "pending": len(self._pending), "services": list(SERVICES)}
+                "keys": self.key_rows(), "eligible_devices": [row["device_id"] for row in self._eligible()],
+                "pending": len(self._pending), "services": list(SERVICES),
+                "pam_enrolled_devices": sorted(self.pam_enrolled())}
 
     # -- enrollment -------------------------------------------------------
     def challenge(self, device_id) -> str:
@@ -450,12 +410,43 @@ class ApprovalBroker:
         return f"{title}{where}"
 
     async def request(self, payload) -> dict:
+        """Relay one PAM prompt to the devices that can answer it.
+
+        RELEASE-9 (B1). The approval id and nonce are the root helper's, minted
+        for this one prompt; this daemon publishes them, collects the device's
+        signature and hands it back, and the helper verifies it against the key
+        root enrolled. Nothing this method returns can approve a prompt on its
+        own - which is the point: a process that impersonates this daemon has
+        nothing to hand back that the helper would accept.
+        """
         if not isinstance(payload, dict) or set(payload) - {"service", "user", "requester", "tty",
-                                                            "rhost", "timeout"}:
+                                                            "rhost", "timeout", "protocol", "approval_id",
+                                                            "nonce", "host_id", "devices"}:
             raise ServiceError("invalid_request")
         service = _field(payload.get("service"), "service")
         if service not in SERVICES:
             return self._refuse(None, "unsupported_service", service=service)
+        if payload.get("protocol") != 2 or "nonce" not in payload or "approval_id" not in payload:
+            # A helper from before RELEASE-9 trusts this daemon's yes. It is
+            # refused rather than answered, so the prompt stays on the password
+            # until `install_host.py --pam` installs the helper that verifies.
+            return self._refuse(None, "helper_outdated", service=service,
+                                hint="run install_host.py --local --pam to install the verifying helper")
+        approval_id, nonce = payload.get("approval_id"), payload.get("nonce")
+        if not isinstance(approval_id, str) or not _APPROVAL_ID.fullmatch(approval_id) \
+                or not isinstance(nonce, str) or not _NONCE.fullmatch(nonce):
+            raise ServiceError("invalid_request")
+        host_id = payload.get("host_id", self.host_id)
+        if not isinstance(host_id, str) or not _HOST_ID.fullmatch(host_id):
+            raise ServiceError("invalid_request")
+        if host_id != self.host_id:
+            return self._refuse(None, "host_id_mismatch", service=service,
+                                hint="this host's identity changed; enrol the device keys again")
+        wanted = payload.get("devices")
+        if wanted is not None and (not isinstance(wanted, dict) or len(wanted) > BiometricKeyStore.MAX_KEYS
+                                   or not all(isinstance(k, str) and isinstance(v, str)
+                                              and _FINGERPRINT.fullmatch(v) for k, v in wanted.items())):
+            raise ServiceError("invalid_request")
         # PAM names the target user and the person driving the prompt
         # separately, and either one can be missing depending on the service.
         # Whatever is known stands in for whatever is not; with neither there
@@ -476,18 +467,27 @@ class ApprovalBroker:
             return self._refuse(None, "disabled", service=service)
         if len(self._pending) >= self.MAX_PENDING:
             return self._refuse(None, "too_many_pending", service=service)
+        if approval_id in self._pending:
+            return self._refuse(None, "duplicate_approval", service=service)
         devices = self._eligible()
+        if wanted is not None:
+            # Ask only a device whose key here is the key root holds: anyone
+            # else would be shown a Face ID prompt the helper must refuse.
+            stale = [row["device_id"] for row in devices
+                     if row["device_id"] in wanted and wanted[row["device_id"]] != self._fingerprint(row["device_id"])]
+            if stale:
+                self._journal({"event": "auth.approval.key_not_enrolled", "devices": stale,
+                               "hint": "the device's key changed; run install_host.py --local --pam-enroll"})
+            devices = [row for row in devices if row["device_id"] in wanted and row["device_id"] not in stale]
         if not devices:
             return self._refuse(None, "no_connected_device", service=service)
 
-        approval_id = "appr_" + secrets.token_hex(16)
-        nonce = secrets.token_urlsafe(32)
         now = self._clock()
         record = {"approval_id": approval_id, "nonce": nonce, "service": service, "user": user,
                   "requester": requester, "tty": tty, "rhost": rhost,
                   "devices": [row["device_id"] for row in devices],
                   "created_at": now, "expires_at": now + timeout,
-                  "event": asyncio.Event(), "outcome": None, "device_id": None}
+                  "event": asyncio.Event(), "outcome": None, "device_id": None, "signature": None}
         self._pending[approval_id] = record
         payload_out = {"approval_id": approval_id, "nonce": nonce, "service": service,
                        "service_title": SERVICE_TITLES.get(service, service), "user": user,
@@ -525,7 +525,9 @@ class ApprovalBroker:
         if approved and record.get("device_id"):
             name = self.hub.auth.device_name(record["device_id"])
         return {"approved": approved, "approval_id": approval_id, "outcome": outcome,
-                "device_id": record.get("device_id"), "device_name": name}
+                "device_id": record.get("device_id"), "device_name": name,
+                # What the root helper actually decides on.
+                "signature": record.get("signature") if approved else None}
 
     def _announce(self, record, outcome):
         for device_id in record["devices"]:
@@ -536,7 +538,7 @@ class ApprovalBroker:
     def _refuse(self, approval_id, reason, **extra):
         self._journal({"event": "auth.approval.refused", "reason": reason, **extra})
         return {"approved": False, "approval_id": approval_id, "outcome": reason,
-                "device_id": None, "device_name": None}
+                "device_id": None, "device_name": None, "signature": None}
 
     def resolve(self, approval_id, device_id, payload) -> dict:
         if not isinstance(payload, dict) or set(payload) - {"decision", "signature"}:
@@ -572,6 +574,7 @@ class ApprovalBroker:
                            **self._diagnose(public_key, raw_signature, record, device_id)})
             raise ServiceError("biometric_signature_invalid", status=403)
         record["outcome"], record["device_id"] = "approved", device_id
+        record["signature"] = signature
         record["event"].set()
         return {"approval_id": approval_id, "outcome": "approved"}
 

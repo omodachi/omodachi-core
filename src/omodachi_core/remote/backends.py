@@ -226,12 +226,12 @@ class SunshineBackend:
 
 
 class VncBackend:
-    """One owned WayVNC instance on a pre-bound loopback fd."""
+    """One owned WayVNC instance on a pre-bound private Unix socket (RELEASE-9)."""
 
     name = "vnc"
 
     def __init__(self, factory):
-        self.factory, self._instances, self._ports = factory, {}, {}
+        self.factory, self._instances, self._sockets = factory, {}, {}
 
     def _instance(self, session):
         if session.id not in self._instances:
@@ -250,7 +250,7 @@ class VncBackend:
         instance = self._instance(session)
         value = instance.start(session.output_name, profile.output_mode_pixels.to_dict(),
                                profile.logical_size.to_dict())
-        self._ports[session.id] = value["port"]
+        self._sockets[session.id] = value["socket"]
         # REMOTE-6: take WayVNC's one mid-stream resize here, so the session's
         # real client is served the settled size from its own ServerInit. It is
         # best effort: a prime that did not finish is not a failed session, and
@@ -268,13 +268,13 @@ class VncBackend:
                 "initial_framebuffer_pixels": settled or opening_pixels(profile),
                 "framebuffer_pixels": served_pixels(profile)}
 
-    def loopback_port(self, session):
+    def local_socket(self, session):
         """The owned WayVNC listener the authenticated WSS bridge connects to.
 
-        It is never sent to a client: nothing outside this process learns the
-        port, and nothing outside the host can reach it.
+        A Unix socket in the session's 0700 directory. It is never sent to a
+        client, and nobody but the owner can connect to it.
         """
-        return self._ports.get(session.id)
+        return self._sockets.get(session.id)
 
     def stop(self, session):
         if not self._instance(session).stop():
@@ -284,4 +284,4 @@ class VncBackend:
     def release(self, session):
         self.stop(session)
         self._instances.pop(session.id, None)
-        self._ports.pop(session.id, None)
+        self._sockets.pop(session.id, None)

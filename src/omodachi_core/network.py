@@ -185,6 +185,11 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
         print(json.dumps({"omodachi": "pairing", "event": "credential_renewed",
                           "device_id": renewed.device_id, "issued_at": renewed.issued_at,
                           "expires_at": renewed.expires_at}), flush=True)
+        # RELEASE-9 (B2): the terminal line ends with the credential, so it is
+        # extended by the same renewal.
+        renewed_ssh = getattr(service, "ssh_key_renewed", None)
+        if callable(renewed_ssh) and renewed.expires_at is not None:
+            renewed_ssh(renewed.device_id, renewed.expires_at)
         return web.json_response(service.resource(renewal_document(service.hub.auth, renewed)))
 
     async def root(request):
@@ -499,7 +504,8 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
         The frames are RFB bytes and nothing else: a WebSocket BINARY message is
         a run of TCP bytes, with no framing, length prefix or envelope added in
         either direction. Authorization is the ordinary Bearer middleware plus
-        the session owner check; the loopback port stays inside this process.
+        the session owner check; WayVNC's socket path stays inside this process
+        (RELEASE-9: a Unix socket in a 0700 directory, not a loopback port).
         """
         if request.query or request.can_read_body:
             raise ServiceError("invalid_request")
@@ -510,12 +516,11 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
                 if service.hub.authenticate(token) != device: raise ValueError()
             except ValueError as error:
                 raise credential_refused(error) from None
-        port = remote.vnc_endpoint(device, session_id)
+        path = remote.vnc_endpoint(device, session_id)
         channel = "vnc-" + uuid.uuid4().hex
         remote.claim_vnc_bridge(session_id, channel)  # 409 before the upgrade
         try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection("127.0.0.1", port), 5)
+            reader, writer = await asyncio.wait_for(asyncio.open_unix_connection(path), 5)
         except (OSError, asyncio.TimeoutError):
             remote.release_vnc_bridge(session_id, channel)
             raise ServiceError("vnc_bridge_unavailable", "the VNC backend is not accepting connections", 503)
@@ -1037,7 +1042,7 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
         if request.method == "GET":
             if set(request.query):
                 raise ServiceError("invalid_request")
-            enrolled = keys.keys.list()
+            enrolled = keys.key_rows()
             return web.json_response(service.resource({
                 "enabled": keys.enabled(), "host_id": keys.host_id, "host_name": keys.host_name,
                 "device_id": device, "challenge": keys.challenge(device),

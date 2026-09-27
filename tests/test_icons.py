@@ -355,6 +355,56 @@ Type=Scalable
             self.icons().lookup(str(link))
 
 
+class Release9IconPathTests(unittest.TestCase):
+    """B5: an absolute path is an icon directory's, or an `Icon=` the host declares."""
+
+    setUp = IconLookupTests.setUp
+    icons = IconLookupTests.icons
+
+    def test_arbitrary_images_under_the_data_home_or_opt_are_not_served(self):
+        for path in (self.home / ".local/share/TelegramDesktop/tdata/photo.png",
+                     self.home / ".local/share/omodachi/screenshot.png",
+                     self.root / "usr/share/some-app/private.svg"):
+            write(path, PNG)
+            with self.subTest(path=path), self.assertRaises(IconsUnavailable):
+                self.icons().lookup(str(path))
+            with self.subTest(url=path), self.assertRaises(IconsUnavailable):
+                self.icons().lookup("file://" + str(path))
+
+    def test_icon_directories_and_web_app_icons_are_served(self):
+        for path in (self.home / ".local/share/icons/custom.png",
+                     self.home / ".local/share/applications/icons/ChatGPT.png",
+                     self.root / "usr/share/pixmaps/vendor.xpm"):
+            write(path, PNG)
+            with self.subTest(path=path):
+                self.assertEqual(self.icons().lookup(str(path))["path"], path.resolve())
+
+    def test_an_icon_the_host_declares_is_served_from_wherever_it_lives(self):
+        logo = write(self.root / "opt/vendor/resources/logo.png", PNG)
+        other = write(self.root / "opt/vendor/resources/other.png", PNG)
+        icons = self.icons()
+        with self.assertRaises(IconsUnavailable):
+            icons.lookup(str(logo))
+        icons.declared = lambda: {str(logo)}
+        self.assertEqual(icons.lookup(str(logo))["path"], logo.resolve())
+        with self.assertRaises(IconsUnavailable):
+            icons.lookup(str(other))
+        # A declared value still has to be an image.
+        key = write(self.root / "opt/vendor/resources/key.pem", b"secret")
+        icons.declared = lambda: {str(key)}
+        with self.assertRaises(IconsUnavailable):
+            icons.lookup(str(key))
+
+    def test_the_service_declares_only_absolute_icons_from_its_published_catalog(self):
+        from omodachi_core.bootstrap import create_service
+        from omodachi_core.hub import Hub
+        service = create_service(Hub(), demo=True)
+        service._catalog = {"entries": [
+            {"id": "a", "icon": "/opt/vendor/logo.png"}, {"id": "b", "icon": "firefox"},
+            {"id": "c", "icon": "file:///opt/x/y.svg"}, {"id": "d", "icon": ""}]}
+        self.assertEqual(service.declared_icon_paths(), {"/opt/vendor/logo.png", "file:///opt/x/y.svg"})
+
+
 class HostIndexParityTests(unittest.TestCase):
     """UX-2 §5. The menu's picture and core's picture are the same file.
 

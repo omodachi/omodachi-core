@@ -145,6 +145,71 @@ class AdapterTests(unittest.TestCase):
         return service.invoke({"entry_id": entry_id, "request_id": request_id, "catalog_revision": revision,
                                **extra}, "ios-phone")
 
+    def confirmed(self, service, entry_id):
+        """RELEASE-9 (B4): the refused first call, then the one that runs."""
+        from omodachi_core.service import ServiceError
+        with self.assertRaises(ServiceError) as caught:
+            self.invoke(service, entry_id, request_id="first")
+        return self.invoke(service, entry_id, request_id="second",
+                           confirm_token=caught.exception.detail["confirm_token"])
+
+    # -- RELEASE-9 B4: `confirm` is the host's rule, not only the client's ----
+    def test_a_confirm_row_does_not_run_on_one_request(self):
+        from omodachi_core.service import ServiceError
+        service = self.service()
+        with self.assertRaises(ServiceError) as caught:
+            self.invoke(service, "system.shutdown")
+        self.assertEqual((caught.exception.code, caught.exception.status), ("confirmation_required", 409))
+        self.assertRegex(caught.exception.detail["confirm_token"], r"^[A-Za-z0-9_-]{43}$")
+        self.assertEqual(self.host.spawned, [])
+        self.assertEqual(self.host.journal, [])
+
+    def test_the_second_call_runs_it_with_the_token_or_as_the_second_call(self):
+        service = self.service()
+        self.confirmed(service, "system.shutdown")
+        self.assertEqual(len(self.host.spawned), 1)
+        from omodachi_core.service import ServiceError
+        with self.assertRaises(ServiceError):
+            self.invoke(service, "remove.webapp", request_id="a")
+        # A client from before RELEASE-9 sends no token; its second tap is the
+        # second call, inside the window, and that is the confirmation.
+        self.invoke(service, "remove.webapp", request_id="b")
+        self.assertEqual(len(self.host.spawned), 2)
+
+    def test_a_token_is_one_use_per_device_and_row(self):
+        from omodachi_core.service import ServiceError
+        service = self.service()
+        with self.assertRaises(ServiceError) as caught:
+            self.invoke(service, "system.shutdown", request_id="a")
+        token = caught.exception.detail["confirm_token"]
+        # Another row, or a wrong token, does not spend it and does not run.
+        with self.assertRaises(ServiceError):
+            self.invoke(service, "remove.webapp", request_id="b", confirm_token=token)
+        with self.assertRaises(ServiceError):
+            self.invoke(service, "system.shutdown", request_id="c", confirm_token="x" * 43)
+        self.assertEqual(self.host.spawned, [])
+        # Another device holding the token is not this device.
+        revision = service.refresh_catalog()["revision"]
+        with self.assertRaises(ServiceError):
+            service.invoke({"entry_id": "system.shutdown", "request_id": "d", "catalog_revision": revision,
+                            "confirm_token": token}, "ios-other")
+        self.assertEqual(self.host.spawned, [])
+
+    def test_the_arm_expires(self):
+        from omodachi_core.service import ServiceError
+        service = self.service()
+        service.CONFIRM_WINDOW = 0.0
+        with self.assertRaises(ServiceError):
+            self.invoke(service, "system.shutdown", request_id="a")
+        with self.assertRaises(ServiceError):
+            self.invoke(service, "system.shutdown", request_id="b")
+        self.assertEqual(self.host.spawned, [])
+
+    def test_an_ordinary_row_still_runs_on_one_request(self):
+        service = self.service()
+        self.invoke(service, "about")
+        self.assertEqual(len(self.host.spawned), 1)
+
     def test_menu_rows_become_ready_host_routes(self):
         rows = self.rows(self.service())
         about = rows["about"]["route"]
@@ -179,7 +244,7 @@ class AdapterTests(unittest.TestCase):
 
     def test_the_journal_says_who_and_when_but_never_the_command(self):
         service = self.service()
-        self.invoke(service, "system.shutdown")
+        self.confirmed(service, "system.shutdown")
         self.assertEqual(len(self.host.journal), 1)
         line = self.host.journal[0]
         self.assertEqual(line["entry_id"], "system.shutdown")

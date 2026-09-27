@@ -90,10 +90,24 @@ start_device() {
     >/tmp/device-$id.log 2>&1 &
   DEVICE_PID=$!
   for _ in $(seq 1 80); do
-    grep -q '"step": "subscribed"' /tmp/device-$id.log && return 0
+    if grep -q '"step": "subscribed"' /tmp/device-$id.log; then
+      [ "${4:-}" = "noenroll" ] && return 0
+      enroll_devices; return $?
+    fi
     sleep 0.5
   done
   echo "device did not subscribe"; cat /tmp/device-$id.log; return 1
+}
+
+# RELEASE-9 B1: a device can only answer once root holds its key. This is what
+# `install_host.py --pam-enroll` does after the owner types the password: read
+# the keys the devices registered with the daemon, and have root store them.
+enroll_devices() {
+  local request
+  request=$(python -c "import json; from omodachi_core.pam_enroll import collect_request; \
+print(json.dumps(collect_request('$HOME_DIR/.config/omodachi', '$OWNER')))")
+  python -m omodachi_core.pam_install enroll --keys-json "$request" >/tmp/enroll.log 2>&1 \
+    || { echo "enrolment failed"; cat /tmp/enroll.log; return 1; }
 }
 
 stop_device() { [ -n "$DEVICE_PID" ] && kill "$DEVICE_PID" 2>/dev/null; wait "$DEVICE_PID" 2>/dev/null; DEVICE_PID=; }
@@ -218,8 +232,17 @@ else pass "the device was never asked"; fi
 stop_device
 
 # ---------------------------------------------------------------------------
+say "RELEASE-9 · a registered key root has not enrolled cannot answer"
+start_device approve ipad-approve true noenroll || exit 1
+attempt "sudo, device approves but root holds no key for it" /tmp/case1-unenrolled.log
+rc=$?
+check "$rc" "1" "sudo failed"
+prompted /tmp/case1-unenrolled.log && pass "the password prompt came back" || fail "no password prompt"
+stop_device
+
 say "CASE 1 · both switches on, the device approves -> sudo with no password"
 start_device approve ipad-approve || exit 1
+ls -l /etc/omodachi/pam/ | sed 's/^/    | /'
 attempt "sudo, device approves" /tmp/case1.log
 rc=$?
 check "$rc" "0" "sudo succeeded"
@@ -275,6 +298,21 @@ then pass "the second, identical submission was refused"; else fail "a replay wa
 stop_device
 
 stop_daemon
+
+say "RELEASE-9 · the owner fakes the daemon: bind its socket, answer yes, sign with a planted key"
+runuser -u "$OWNER" -- python /opt/harness/fake_daemon_attack.py --socket "$SOCKET" \
+    --device-id ipad-approve --plant-key "$HOME_DIR/.config/omodachi" >/tmp/attack.log 2>&1 &
+ATTACK_PID=$!
+for _ in $(seq 1 40); do grep -q listening /tmp/attack.log && break; sleep 0.25; done
+attempt "sudo, answered by a same-user fake daemon" /tmp/case-attack.log
+rc=$?
+check "$rc" "1" "sudo failed"
+prompted /tmp/case-attack.log && pass "the fake daemon's yes was not believed" || fail "no password prompt"
+grep -q '"answered_as"' /tmp/attack.log && pass "the fake daemon was asked and answered" \
+  || fail "the attack never ran"
+sed 's/^/    | /' /tmp/attack.log
+kill "$ATTACK_PID" 2>/dev/null; wait "$ATTACK_PID" 2>/dev/null
+rm -f "$SOCKET"
 
 say "AUTH-2 · the compatibility symlink lives exactly as long as the daemon"
 if [ -e "$LEGACY_SOCKET" ] || [ -L "$LEGACY_SOCKET" ]; then

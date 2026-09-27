@@ -33,9 +33,10 @@ import re
 import secrets
 import tempfile
 import time
+import unicodedata
 
 from .auth import DeviceAuthenticator, _private_open, _registry_lock, _DEVICE_ID
-from .protocol import PAIRING_MODES
+from .protocol import PAIRING_MODES, PLUGIN_DEVICE_ID
 from .service import ServiceError
 from .ssh_keys import SshKeyError, fingerprint, parse_public_key
 
@@ -50,6 +51,29 @@ def digest(value):
 # store issues itself; `media` and `ssh` are landed by the local approver and
 # recorded here so the claim can tell the client which of the three it has.
 EMPTY_GRANTS = {"companion": False, "media": False, "ssh": False}
+
+# RELEASE-9 (B4). The longest name a request may put on the approval card and
+# in the notification title.
+DEVICE_NAME_LIMIT = 48
+
+
+def clean_device_name(value):
+    """The requester's name, fit for a notification title, or None.
+
+    The name is the one thing an unauthenticated peer chooses that a person
+    reads before approving, so it may not carry anything that changes how the
+    rest of the card reads: control characters, newlines, bidi overrides and
+    other invisible formatting are removed, runs of whitespace become one
+    space, and it is cut to DEVICE_NAME_LIMIT characters. Emoji, accents and
+    the curly apostrophe in "Leo’s iPad" stay.
+    """
+    if not isinstance(value, str) or len(value) > 256:
+        return None
+    kept = "".join(" " if c.isspace() else c for c in value
+                   if c.isspace() or unicodedata.category(c) not in {"Cc", "Cf", "Cs", "Co", "Cn"})
+    kept = " ".join(kept.split())[:DEVICE_NAME_LIMIT].strip()
+    return kept or None
+
 
 def address(value):
     """The peer address, bounded and printable, or None. Never authorization."""
@@ -144,8 +168,11 @@ class PairingStore:
             raise ServiceError("invalid_request")
         if not isinstance(device_id, str) or not _DEVICE_ID.fullmatch(device_id):
             raise ServiceError("invalid_request")
-        if (not isinstance(device_name, str) or not 1 <= len(device_name) <= 80
-                or any(ord(c) < 32 or ord(c) == 127 for c in device_name)):
+        # The panel's own credential is not a name the network may ask for.
+        if device_id == PLUGIN_DEVICE_ID:
+            raise ServiceError("invalid_request")
+        device_name = clean_device_name(device_name)
+        if device_name is None:
             raise ServiceError("invalid_request")
         key_type = key_body = None
         if ssh_public_key is not None:
@@ -225,6 +252,20 @@ class PairingStore:
             if not rows:
                 return None
             return max(rows, key=lambda row: row.get("claimed_at", row["expires_at"]))["request_id"]
+
+    def grants_for(self, device_id):
+        """What the device's latest local Approve actually granted, or None.
+
+        RELEASE-9 (B2): this is what `PUT /v1/ssh/key` asks before it writes a
+        key - `ssh` is true only when a local Approve landed one.
+        """
+        with self.transaction() as state:
+            rows = [row for row in state["requests"].values()
+                    if row["device_id"] == device_id and row["status"] in {"approved", "claimed"}]
+            if not rows:
+                return None
+            row = max(rows, key=lambda row: row.get("claimed_at", row["expires_at"]))
+            return {"request_id": row["request_id"], **dict(row.get("grants") or EMPTY_GRANTS)}
 
     def forget_device(self, device_id):
         """Drop a revoked device's durable approvals; a revoke keeps nothing."""

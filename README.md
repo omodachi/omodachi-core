@@ -44,7 +44,8 @@ pairing succeeds. The Omarchy plugin reaches it over a user-owned Unix socket.
 
 ## Install
 
-The normal way is the plugin:
+The normal way is the plugin, which is listed on the
+[Omarchy plugin marketplace](https://plugins.omarchy.org/plugin.html?id=com.omodachi.host):
 
 ```sh
 omarchy plugin add https://github.com/omodachi/omodachi-plugin.git --enable
@@ -227,6 +228,74 @@ installs it.
 
 `omodachid --demo` serves bundled synthetic menu and agent data and performs no
 host mutations, for a local daemon with no real Omarchy host behind it.
+
+## Security model
+
+Who can do what to this computer, and which code decides it. What Install
+writes, and what `--remove` and `--remove --purge` take back, is above under
+[What Install changes on this computer](#what-install-changes-on-this-computer)
+and [Removing it](#removing-it). How the plugin fetches and checks this
+repository before running it is in the plugin's README,
+[What Install does](https://github.com/omodachi/omodachi-plugin#what-install-does).
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+- **The network can only ask.** Over HTTPS every path except `/`, `/health`
+  and the two pairing calls needs a device credential
+  (`src/omodachi_core/network.py`). A pairing request becomes a card on the
+  plugin's Devices page and an Omarchy notification; one per device and two
+  per source address wait at a time.
+- **Approve happens on the computer.** Approve and Reject are operations on
+  the daemon's Unix socket, which serves only the user the daemon runs as, so
+  no request from the network can approve itself (`pairing.py`, `ipc.py`).
+  `omodachi-host preferences set --revision <n> --pairing-mode invite` (the
+  current `<n>` is in `omodachi-host preferences get`) makes a request need a
+  one-time invitation as well.
+- **One Approve, three grants.** It issues the device credential, the managed
+  Sunshine's certificate for that device and, when the request carried an SSH
+  key, one line in `~/.ssh/authorized_keys`. A credential lasts 30 days; in
+  its last 7 the device may trade it for a new one, and the old one keeps
+  working 24 hours after that. The daemon stores a hash of each credential,
+  not the credential (`auth.py`).
+- **Remove takes it all back in one call:** the credential, the Sunshine
+  certificate, the `authorized_keys` line and, if the device had one, its
+  password-approval key (`omodachi-host devices revoke <device>`, or Remove on
+  the Devices page; `service.py`).
+- **Rows that change the computer run on the second request.** Which rows
+  those are is decided in `menu_actions.py`: the session and power rows, the
+  factory reset, everything under Remove and Update except two that change
+  nothing by themselves, and any row whose command powers off or ends the
+  session, removes packages or deletes recursively, updates, sets a password,
+  changes boot or security settings, is one of Omarchy's `remove` or `refresh`
+  scripts, runs through `sudo`, `pkexec` or `doas`, or restarts audio, Wi-Fi,
+  Bluetooth, the trackpad or the shell. The first request for such a row is
+  refused with a one-use `confirm_token`; only a second one for the same row
+  from the same device within 30 seconds runs it (`service.py`). The plugin's
+  panel is the person at the computer and is not asked twice.
+- **The SSH lines are narrow.** Each one is
+  `restrict,pty,expiry-time="…" <key> # omodachi:<device>`: no port, agent or
+  X11 forwarding and no `~/.ssh/rc`, a terminal only, lapsing one day after the
+  credential. Your own lines are copied through byte for byte. A device
+  approved without SSH that offers a key later is answered
+  `409 ssh_approval_required`, and its key waits ten minutes for
+  `omodachi-host ssh approve <device>` on the computer (`ssh_keys.py`,
+  `service.py`).
+- **VNC has no port.** WayVNC listens only on a Unix socket in a 0700
+  directory of its own, and the daemon's authenticated WSS connection is what
+  dials it (`remote/vnc.py`).
+- **Sunshine's web page is closed.** The managed fork starts with
+  `origin_web_ui_allowed=pc`, so its admin page on 47990 answers this computer
+  only, and with a 0600 credentials file of ours holding a random user name
+  and a password hash no password is known to match, so nobody can claim the
+  page by setting the first password (`sunshine_package.py`).
+- **Password prompts stay yours unless you opt in.** Only
+  `install_host.py --pam` installs the PAM entry, for `sudo` and `polkit-1`,
+  and the `biometric_auth` preference that the daemon also checks ships off
+  (`biometric.py`). With both on, the helper PAM runs as root makes a fresh
+  nonce for each prompt and accepts only an approval signed with
+  a P-256 device key from the root-owned `/etc/omodachi/pam/keys.json`, which
+  only a root step you type your password for can fill. Every other outcome,
+  a timeout included, falls through to the password prompt (`pam_helper.py`,
+  `pam_enroll.py`).
 
 ## Screenshots
 

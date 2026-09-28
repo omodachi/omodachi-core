@@ -1150,9 +1150,294 @@ class SunshineOverrideTests(unittest.TestCase):
             return function(*args)
 
 
+def _git_in(tree, *arguments):
+    import os
+    import subprocess
+    environment = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
+                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid",
+                       GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    return subprocess.run(["git", "-C", str(tree), *arguments], env=environment, check=True,
+                          capture_output=True, text=True).stdout.strip()
+
+
+def _commit_all(tree) -> str:
+    """Make `tree` a git repository whose one commit is everything in it."""
+    _git_in(tree, "init", "--quiet")
+    _git_in(tree, "add", "-A")
+    _git_in(tree, "commit", "--quiet", "--allow-empty", "-m", "fixture")
+    return _git_in(tree, "rev-parse", "HEAD")
+
+
 def mock_home(home):
     from unittest import mock
     return mock.patch.object(Path, "home", return_value=home)
+
+
+class BuildCacheIsDeletedOnlyWhenPristineTests(unittest.TestCase):
+    """RELEASE-10 (marketplace #8330 finding 6): ~/.cache/omodachi/sunshine-src
+    is replaced (a build) or deleted (--purge) only when it is this
+    installer's (the marker) AND exactly the commit the marker records. A
+    changed one is moved to ~/.local/share/omodachi-kept on a build and kept
+    and listed on a purge; one that is not ours is not touched at all. Every
+    repository here is a real one."""
+
+    def setUp(self):
+        import contextlib
+        import io
+        from unittest import mock
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.home = self.base / "home"
+        self.home.mkdir()
+        self.cache = self.home / install_host.SUNSHINE_BUILD_CACHE
+        self.kept = self.home / install_host.KEPT_DIR
+        patcher = mock.patch.object(Path, "home", return_value=self.home)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.out = io.StringIO()
+        redirect = contextlib.redirect_stdout(self.out)
+        redirect.__enter__()
+        self.addCleanup(redirect.__exit__, None, None, None)
+        self.upstream, self.first, self.second = self.fork()
+
+    def repository(self, name, files):
+        tree = self.base / name
+        tree.mkdir(parents=True)
+        for relative, text in files.items():
+            (tree / relative).parent.mkdir(parents=True, exist_ok=True)
+            (tree / relative).write_text(text)
+        return tree, _commit_all(tree)
+
+    def fork(self):
+        upstream, first = self.repository("fork", {
+            "scripts/package_release.sh": "exit 0\n", "README.md": "fork\n",
+            # the fork's .gitignore names its build output
+            ".gitignore": "build/\nnode_modules/\n"})
+        (upstream / "README.md").write_text("fork, second commit\n")
+        _git_in(upstream, "commit", "--quiet", "-am", "second")
+        return upstream, first, _git_in(upstream, "rev-parse", "HEAD")
+
+    def fetch(self, commit=None, url=None):
+        return install_host.fetch_sunshine_commit(url or self.upstream.as_uri(),
+                                                  commit or self.first, self.cache)
+
+    def cached(self):
+        ok, detail = self.fetch()
+        self.assertTrue(ok, detail)
+        return self.cache
+
+    def purge(self):
+        kept = []
+        install_host.purge_directory(self.home / ".cache/omodachi",
+                                     install_host.PURGE_RULES[".cache/omodachi"], kept)
+        return kept
+
+    def kept_trees(self):
+        return sorted(self.kept.iterdir()) if self.kept.is_dir() else []
+
+    def assert_rebuilt_and_kept(self, check):
+        """A build moves the changed cache aside, whole, and starts over."""
+        ok, detail = self.fetch(self.second)
+        self.assertTrue(ok, detail)
+        self.assertEqual(_git_in(self.cache, "rev-parse", "HEAD"), self.second)
+        [kept] = self.kept_trees()
+        self.assertTrue(kept.name.startswith("sunshine-src-"), kept)
+        self.assertEqual(kept.parent.stat().st_mode & 0o777, 0o700)
+        check(kept)
+        self.assertIn(f"It was moved to {kept}, not deleted.", self.out.getvalue())
+
+    def assert_purge_keeps(self, check):
+        kept = self.purge()
+        self.assertEqual(kept, [self.cache])
+        check(self.cache)
+        self.assertIn(f"kept {self.cache}: ", self.out.getvalue())
+
+    # --- the four cases the finding names, on a build and on a purge ---
+
+    def test_a_pristine_cache_of_ours_is_replaced_on_a_build_and_deleted_on_a_purge(self):
+        self.cached()
+        # the marker records the commit it was made for
+        self.assertIn(f"commit {self.first}\n", (self.cache / install_host.SUNSHINE_BUILD_MARKER).read_text())
+        # build output the fork's own .gitignore names does not make it "changed"
+        (self.cache / "build/obj").mkdir(parents=True)
+        (self.cache / "build/obj/a.o").write_text("object\n")
+        (self.cache / "node_modules/x").mkdir(parents=True)
+        (self.cache / "node_modules/x/index.js").write_text("\n")
+        self.assertEqual(install_host.owned_checkout_state(self.cache), ("pristine", ""))
+        ok, detail = self.fetch(self.second)
+        self.assertTrue(ok, detail)
+        self.assertEqual(self.kept_trees(), [])
+        self.assertFalse((self.cache / "build").exists())
+        self.assertEqual(self.purge(), [])
+        self.assertFalse(self.cache.exists())
+
+    def test_a_tracked_edit_is_moved_aside_on_a_build(self):
+        (self.cached() / "README.md").write_text("my edit\n")
+        self.assert_rebuilt_and_kept(lambda kept: self.assertEqual(
+            (kept / "README.md").read_text(), "my edit\n"))
+
+    def test_a_tracked_edit_is_kept_on_a_purge(self):
+        (self.cached() / "scripts/package_release.sh").write_text("my change\n")
+        self.assert_purge_keeps(lambda tree: self.assertEqual(
+            (tree / "scripts/package_release.sh").read_text(), "my change\n"))
+        self.assertIn("has changed files", self.out.getvalue())
+
+    def test_an_untracked_user_file_is_moved_aside_on_a_build_and_kept_on_a_purge(self):
+        for action in ("build", "purge"):
+            with self.subTest(action=action):
+                import shutil
+                shutil.rmtree(self.home, ignore_errors=True)
+                self.home.mkdir()
+                (self.cached() / "notes").mkdir()
+                (self.cache / "notes/todo.md").write_text("mine\n")
+                def check(tree):
+                    self.assertEqual((tree / "notes/todo.md").read_text(), "mine\n")
+                if action == "build":
+                    self.assert_rebuilt_and_kept(check)
+                else:
+                    self.assert_purge_keeps(check)
+                    self.assertIn("notes/todo.md", self.out.getvalue())
+
+    def test_a_directory_that_is_not_ours_is_not_touched(self):
+        from unittest import mock
+        import os
+        # a user's own clone of the fork, and one whose .git is a link to a
+        # directory that does carry the marker
+        clone = self.base / "clone"
+        _git_in(self.base, "clone", "--quiet", self.upstream.as_uri(), str(clone))
+        linked = self.cached()
+        (linked / "mine.txt").write_text("mine\n")
+        os.rename(linked / ".git", self.base / "elsewhere.git")
+        (linked / ".git").symlink_to(self.base / "elsewhere.git")
+        for tree in (linked, clone):
+            with self.subTest(tree=tree.name):
+                if tree is clone:
+                    import shutil
+                    shutil.rmtree(self.cache)
+                    os.rename(clone, self.cache)
+                before = _tree_digest(self.cache)
+                with mock.patch.object(install_host, "run", side_effect=AssertionError("ran git")):
+                    ok, detail = self.fetch(self.second)
+                self.assertFalse(ok)
+                self.assertIn("not this installer's build cache", detail)
+                self.assertEqual(self.purge(), [self.cache])
+                self.assertEqual(_tree_digest(self.cache), before)
+                self.assertEqual(self.kept_trees(), [])
+
+    # --- what else a person can have in a checkout of ours ---
+
+    def test_a_commit_of_the_users_is_kept_even_with_head_back_at_ours(self):
+        self.cached()
+        _git_in(self.cache, "switch", "--quiet", "-c", "mine")
+        (self.cache / "README.md").write_text("committed work\n")
+        _git_in(self.cache, "commit", "--quiet", "-am", "my work")
+        _git_in(self.cache, "checkout", "--quiet", "--detach", self.first)
+        self.assertIn("commits of its own: refs/heads/mine",
+                      install_host.owned_checkout_state(self.cache)[1])
+        self.assert_purge_keeps(lambda tree: self.assertEqual(
+            _git_in(tree, "show", "mine:README.md"), "committed work"))
+        _git_in(self.cache, "branch", "--quiet", "-D", "mine")
+        (self.cache / "README.md").write_text("stashed work\n")
+        _git_in(self.cache, "stash", "--quiet")
+        self.assertIn("refs/stash", install_host.owned_checkout_state(self.cache)[1])
+
+    def test_tags_a_shallow_fetch_brought_are_the_remotes_not_the_users(self):
+        self.cached()
+        _git_in(self.upstream, "tag", "v1", self.second)
+        _git_in(self.upstream, "tag", "-a", "v0", "-m", "v0", self.first)
+        _git_in(self.cache, "fetch", "--quiet", "--depth", "1", "--tags", self.upstream.as_uri())
+        self.assertEqual(install_host.owned_checkout_state(self.cache), ("pristine", ""))
+        # a tag of the user's on a commit of their own is theirs
+        _git_in(self.cache, "switch", "--quiet", "-c", "work")
+        (self.cache / "README.md").write_text("mine\n")
+        _git_in(self.cache, "commit", "--quiet", "-am", "mine")
+        _git_in(self.cache, "tag", "mine")
+        _git_in(self.cache, "checkout", "--quiet", "--detach", self.first)
+        _git_in(self.cache, "branch", "--quiet", "-D", "work")
+        self.assertIn("refs/tags/mine", install_host.owned_checkout_state(self.cache)[1])
+
+    def test_the_checkouts_own_config_and_excludes_cannot_hide_a_file(self):
+        self.cached()
+        (self.cache / "secret-notes.txt").write_text("mine\n")
+        (self.cache / ".git/info").mkdir(exist_ok=True)
+        (self.cache / ".git/info/exclude").write_text("secret-notes.txt\n")
+        hook = self.base / "ran"
+        with open(self.cache / ".git/config", "a") as config:
+            config.write(f"[core]\n\texcludesFile = {self.cache / '.git/info/exclude'}\n"
+                         f"\tfsmonitor = touch {hook}\n[status]\n\tshowUntrackedFiles = no\n")
+        # and a .gitignore of the user's own, beside their file
+        (self.cache / "private").mkdir()
+        (self.cache / "private/.gitignore").write_text("*\n")
+        (self.cache / "private/diary.txt").write_text("mine\n")
+        state, why = install_host.owned_checkout_state(self.cache)
+        self.assertEqual(state, "changed")
+        self.assertIn("files that are not part of", why)
+        self.assertIn("secret-notes.txt", why)
+        self.assertIn("private/diary.txt", why)
+        self.assertFalse(hook.exists())
+
+    def test_a_changed_submodule_is_kept(self):
+        library, _ = self.repository("library", {"lib.c": "int x;\n"})
+        _git_in(self.upstream, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet",
+                library.as_uri(), "third-party/lib")
+        _git_in(self.upstream, "commit", "--quiet", "-m", "submodule")
+        commit = _git_in(self.upstream, "rev-parse", "HEAD")
+        ok, detail = self.fetch(commit)
+        self.assertTrue(ok, detail)
+        _git_in(self.cache, "-c", "protocol.file.allow=always", "submodule", "update", "--init",
+                "--quiet")
+        self.assertTrue((self.cache / "third-party/lib/lib.c").is_file())
+        self.assertEqual(install_host.owned_checkout_state(self.cache), ("pristine", ""))
+        (self.cache / "third-party/lib/lib.c").write_text("int mine;\n")
+        state, why = install_host.owned_checkout_state(self.cache)
+        self.assertEqual(state, "changed")
+        self.assertIn("third-party/lib", why)
+        self.assert_purge_keeps(lambda tree: self.assertEqual(
+            (tree / "third-party/lib/lib.c").read_text(), "int mine;\n"))
+
+    def test_a_cache_from_before_the_marker_recorded_its_commit_is_kept(self):
+        self.cached()
+        (self.cache / install_host.SUNSHINE_BUILD_MARKER).write_text(
+            "omodachi-core install_host.py --sunshine-build cache\n")   # v0.1.4's marker
+        self.assertEqual(install_host.owned_checkout_state(self.cache)[0], "changed")
+        self.assert_rebuilt_and_kept(lambda kept: self.assertTrue((kept / "README.md").is_file()))
+
+    def test_what_a_failed_fetch_left_is_ours_and_empty_so_it_goes(self):
+        ok, _ = self.fetch("b" * 40)
+        self.assertFalse(ok)
+        self.assertEqual(install_host.owned_checkout_state(self.cache), ("pristine", ""))
+        (self.cache / "mine.txt").write_text("mine\n")
+        self.assertEqual(install_host.owned_checkout_state(self.cache)[0], "changed")
+
+    def test_a_changed_cache_that_cannot_be_moved_is_left_and_nothing_is_built(self):
+        from unittest import mock
+        (self.cached() / "README.md").write_text("my edit\n")
+        with mock.patch.object(install_host.os, "rename", side_effect=OSError(18, "cross-device")):
+            ok, detail = self.fetch(self.second)
+        self.assertFalse(ok)
+        self.assertIn("could not be moved aside", detail)
+        self.assertEqual((self.cache / "README.md").read_text(), "my edit\n")
+        self.assertEqual(_git_in(self.cache, "rev-parse", "HEAD"), self.first)
+
+
+def _tree_digest(root: Path) -> str:
+    """Everything under `root` - names, modes, link targets, contents - hashed."""
+    import hashlib
+    import os
+    digest = hashlib.sha256()
+    for base, directories, files in sorted(os.walk(root)):
+        directories.sort()
+        for name in sorted(directories + files):
+            path = os.path.join(base, name)
+            info = os.lstat(path)
+            digest.update(f"{os.path.relpath(path, root)} {info.st_mode}\n".encode())
+            if os.path.islink(path):
+                digest.update(os.readlink(path).encode())
+            elif os.path.isfile(path):
+                with open(path, "rb") as handle:
+                    digest.update(handle.read())
+    return digest.hexdigest()
 
 
 class RemoveKeepsTheUsersFilesTests(unittest.TestCase):
@@ -1219,11 +1504,17 @@ class RemoveKeepsTheUsersFilesTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def own_source(self, identifier="0123456789abcdef" * 2):
-        (self.share / "src/.git/omodachi-install-id").write_text(identifier + "\n")
+        # What the bootstrap leaves: a real checkout of one commit (RELEASE-10:
+        # src goes only while it is exactly the commit the record names).
+        import shutil
+        source = self.share / "src"
+        shutil.rmtree(source / ".git")
+        commit = _commit_all(source)
+        (source / ".git/omodachi-install-id").write_text(identifier + "\n")
         record = self.home / ".local/state/omodachi/core-source.json"
         record.parent.mkdir(parents=True, exist_ok=True)
-        record.write_text(json.dumps({"schema": 1, "path": str(self.share / "src"),
-                                      "id": identifier, "pending": []}))
+        record.write_text(json.dumps({"schema": 1, "path": str(source), "id": identifier,
+                                      "commit": commit, "pending": []}))
         return record
 
     def remove(self, **kwargs):
@@ -1261,6 +1552,38 @@ class RemoveKeepsTheUsersFilesTests(unittest.TestCase):
         out = self.remove(purge=True)
         self.assertIn("nothing shows the Omodachi plugin's installer made it", out)
         self.assertTrue(self.files["src"].exists())
+
+    # RELEASE-10 (#8330 finding 6): the bootstrap's src goes only while it is
+    # exactly the commit the record names - also when this file is run by hand.
+    def test_a_src_of_the_bootstraps_with_the_users_changes_in_it_is_kept(self):
+        for change in ("edit", "new file", "commit"):
+            with self.subTest(change=change):
+                self.setUp()
+                self.own_source()
+                source = self.share / "src"
+                if change == "edit":
+                    (source / "pyproject.toml").write_text("mine\n")
+                elif change == "new file":
+                    (source / "notes.md").write_text("mine\n")
+                else:
+                    _git_in(source, "switch", "--quiet", "-c", "mine")
+                    (source / "notes.md").write_text("mine\n")
+                    _git_in(source, "add", "notes.md")
+                    _git_in(source, "commit", "--quiet", "-m", "mine")
+                    _git_in(source, "checkout", "--quiet", "--detach", "HEAD~1")
+                before = _tree_digest(source)
+                out = self.remove(purge=True)
+                self.assertIn(f"kept {source}: ", out)
+                self.assertEqual(_tree_digest(source), before)
+                self.assertTrue((self.home / ".local/state/omodachi/core-source.json").exists())
+
+    def test_a_src_with_only_build_output_besides_its_commit_goes(self):
+        (self.share / "src/.gitignore").write_text("build/\n*.egg-info/\n")
+        self.own_source()
+        (self.share / "src/build/lib").mkdir(parents=True)
+        (self.share / "src/build/lib/x.py").write_text("\n")
+        self.remove()
+        self.assertFalse((self.share / "src").exists())
 
     def test_a_src_without_a_record_is_kept(self):
         self.assert_src_kept()

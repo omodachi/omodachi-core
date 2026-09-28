@@ -107,7 +107,9 @@ Pairings, the certificate and the device secret stay, so a reinstall does not
 have to pair again. `--remove --purge` deletes those too, but only the files
 Omodachi itself creates; anything else you put in `~/.config/omodachi`,
 `~/.cache/omodachi` or `~/.local/state/omodachi`, and `agent-workspace`, is
-kept and listed.
+kept and listed. A checkout it made (`src`, the Sunshine build cache) that you
+changed is kept and listed as well: it is deleted only while it is exactly the
+commit it was made to hold.
 
 A venv, a Sunshine unit or install directory, a `src` checkout, or a unit file,
 command, theme template or hook of Omodachi's name that the installer cannot
@@ -209,7 +211,12 @@ https://github.com/omodachi/omodachi-sunshine/releases/download/sunshine-328d231
 asks for the newest release by name; either one needs `--sunshine-sha256 <hex>`
 (a `.sha256` published beside the archive is not accepted). `--sunshine-build
 <git-url> --sunshine-build-commit <sha>` builds the fork at exactly that commit;
-`--sunshine-build <path>` builds your own local tree as it stands.
+`--sunshine-build <path>` builds your own local tree as it stands. The git-URL
+checkout lives in `~/.cache/omodachi/sunshine-src`; the next build or `--purge`
+deletes it only while it is still exactly that commit (plus the build output
+the fork's `.gitignore` names). If you changed it - an edit, a new file, a
+commit of your own - a build moves it to `~/.local/share/omodachi-kept/` and
+says so, and `--purge` keeps it and lists it.
 
 The fork is GPL-3.0-only, inherited from upstream, and stays a separate
 repository for that reason: it is somebody else's program with our patches on

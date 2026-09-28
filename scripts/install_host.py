@@ -67,7 +67,10 @@ terminal), and src when the plugin's bootstrap made it. `--purge` also deletes
 the device secret, certificate, pairings and the daemon's other state - only
 the files it creates (PURGE_RULES); anything else in ~/.config/omodachi,
 ~/.cache/omodachi or ~/.local/state/omodachi, and agent-workspace, is kept and
-listed. If the PAM entry or an authorized_keys line cannot be removed, it
+listed. RELEASE-10: a git checkout it made (src, the --sunshine-build cache)
+goes only while it is exactly the commit it was made to hold
+(checkout_differs); one somebody changed is kept, or on a build moved to
+~/.local/share/omodachi-kept, and never deleted. If the PAM entry or an authorized_keys line cannot be removed, it
 says the host was only partly removed and exits 3.
 """
 from __future__ import annotations
@@ -80,8 +83,11 @@ import re
 import secrets
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 REMOTE_SOURCE = ".local/share/omodachi/src"
@@ -564,10 +570,225 @@ def install_sunshine(source: Path, *, spec=None, sha256=None, adapter=None,
 
 
 SUNSHINE_BUILD_CACHE = ".cache/omodachi/sunshine-src"
+# The file fetch_sunshine_commit writes into the cache's .git first thing: what
+# makes the directory this installer's (RELEASE-9), and - RELEASE-10 - the
+# commit it was made to hold, which is what "unchanged" is measured against.
+SUNSHINE_BUILD_MARKER = ".git/omodachi-sunshine-build-cache"
+_BUILD_MARKER_HEADER = "omodachi-core install_host.py --sunshine-build cache"
+# RELEASE-10. Where a build cache (or src) of ours that holds something besides
+# its commit goes instead of being deleted: the plugin bootstrap's KEPT_DIR,
+# outside every directory --remove and --purge go through.
+KEPT_DIR = ".local/share/omodachi-kept"
 # The same guard the plugin bootstrap uses (RELEASE-5): a checkout's own hooks,
-# fsmonitor and replace refs get no say in what this installer asks git.
-GIT_SAFE = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "--no-replace-objects")
+# fsmonitor and replace refs get no say in what this installer asks git, and
+# neither do an attributes file or the ext:: transport.
+GIT_SAFE = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+            "-c", "core.attributesFile=/dev/null", "-c", "protocol.ext.allow=never",
+            "--no-replace-objects")
+# Environment variables that would point git at another repository, work tree,
+# index or object store than the ones on its command line, or inject config
+# (the plugin bootstrap's GIT_REDIRECTS).
+GIT_REDIRECTS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                 "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+                 "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+                 "GIT_REPLACE_REF_BASE", "GIT_GRAFT_FILE", "GIT_SHALLOW_FILE", "GIT_ATTR_SOURCE",
+                 "GIT_TEMPLATE_DIR", "GIT_EXEC_PATH", "GIT_QUARANTINE_PATH", "GIT_CONFIG",
+                 "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT")
 _FULL_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+
+
+def git_environment(*, hermetic: bool = False) -> dict:
+    environment = {key: value for key, value in os.environ.items()
+                   if key not in GIT_REDIRECTS
+                   and not key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"))}
+    if hermetic:
+        # Inspecting a tree reads no config at all: not the system's, not the
+        # user's, and (checkout_differs never runs git *in* the tree) not the
+        # tree's own.
+        environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+    return environment
+
+
+def _read_small(path: Path, size: int = 4096) -> str | None:
+    """A regular file's first `size` bytes, never through a link; None otherwise."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError:
+        return None
+    with os.fdopen(descriptor, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            return None
+        return handle.read(size).decode("utf-8", "replace")
+
+
+def _listed(names) -> str:
+    names = list(names)
+    return "; ".join(names[:5]) + (f" (and {len(names) - 5} more)" if len(names) > 5 else "")
+
+
+def checkout_differs(tree: Path, commit: str, *, git_dir: Path | None = None,
+                     _top: Path | None = None, _depth: int = 0) -> str:
+    """"" when deleting the checkout `tree` loses nothing but `commit`, else what it would lose.
+
+    RELEASE-10 (marketplace #8330 finding 6). Nothing - not even an owned
+    directory - is deleted with a person's work in it. `tree` is unchanged
+    when: HEAD is `commit`; no tracked file differs from it; the only files
+    outside it are ones `commit`'s own top-level .gitignore names (build
+    output - judged by that one file, so a .gitignore added to the tree, the
+    user's excludes or the tree's info/exclude cannot hide anything); no
+    branch, tag or stash holds a commit that is not `commit` or one a
+    remote has (refs/remotes, .git/shallow); no linked worktree hangs off
+    it; and every initialised submodule is, by the same rule, the commit
+    `commit` records for it. A checkout with no commit at all (a fetch that failed) is
+    unchanged only while its work tree is empty.
+
+    git never runs *in* `tree`: the refs are read by `git ls-remote`
+    (upload-pack, which git runs safely in repositories it does not trust),
+    and the comparison happens in a scratch repository that borrows the
+    tree's objects (objects/info/alternates) and uses `tree` as its work
+    tree - so the tree's config, hooks, fsmonitor, attributes, excludes and
+    index are never read, and no config from anywhere else either
+    (GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM). This guards against
+    accidents: the same user could forge any of it, and could as well delete
+    the directory directly.
+    """
+    git_dir = git_dir or tree / ".git"
+    top = _top or git_dir
+    if _depth > 8:
+        return f"{tree} nests submodules deeper than this installer checks"
+    if not _FULL_COMMIT.fullmatch(commit or ""):
+        return f"there is no recorded commit to compare {tree} with"
+    if tree.is_symlink() or not tree.is_dir() or git_dir.is_symlink() or not git_dir.is_dir():
+        return f"{tree} is not a plain git checkout"
+    worktrees = git_dir / "worktrees"
+    if worktrees.is_symlink() or (worktrees.is_dir() and any(worktrees.iterdir())):
+        return f"{tree} has linked worktrees (git worktree add)"
+    environment = git_environment(hermetic=True)
+    with tempfile.TemporaryDirectory(prefix="omodachi-inspect-") as scratch:
+        repository = Path(scratch) / "git"
+
+        def git(*arguments, work=True):
+            return subprocess.run(["git", *GIT_SAFE, f"--git-dir={repository}",
+                                   *([f"--work-tree={tree}"] if work else []), *arguments],
+                                  capture_output=True, text=True, env=environment, cwd=scratch)
+
+        listing = subprocess.run(["git", *GIT_SAFE, "ls-remote", str(git_dir)], capture_output=True,
+                                 text=True, env=environment, cwd=scratch)
+        if listing.returncode != 0:
+            return f"{tree}: git could not read it ({(listing.stderr or '').strip()[:200]})"
+        refs, peeled = {}, {}
+        for line in (listing.stdout or "").splitlines():
+            sha, _, name = line.partition("\t")
+            if name.endswith("^{}"):
+                peeled[name[:-3]] = sha
+            elif name:
+                refs[name] = sha
+        head = refs.pop("HEAD", None)
+        if head is None:
+            others = [entry.name for entry in tree.iterdir() if entry.name != ".git"]
+            if others or refs:
+                return f"{tree} has no commit checked out, but holds {_listed(sorted(others) or refs)}"
+            return ""
+        if head != commit:
+            return f"{tree} is at {head[:12]}, not {commit[:12]}"
+        # A commit a remote has is not the user's: what a remote-tracking ref
+        # names, and what git fetched shallow (--depth 1: .git/shallow lists
+        # it) - the tags a `fetch --tags --depth 1` brings, a submodule's
+        # branch tip. A commit made here has its parent, so it is never listed.
+        allowed = ({commit} | {sha for name, sha in refs.items() if name.startswith("refs/remotes/")}
+                   | set(re.findall(r"^[0-9a-f]{40}$", _read_small(git_dir / "shallow", 1 << 20) or "", re.MULTILINE)))
+        extra = sorted(name for name, sha in refs.items()
+                       if not name.startswith("refs/remotes/") and peeled.get(name, sha) not in allowed)
+        if extra:
+            return f"{tree} has commits of its own: {_listed(extra)}"
+        created = subprocess.run(["git", "init", "--quiet", "--bare", "--template=", str(repository)],
+                                 capture_output=True, text=True, env=environment, cwd=scratch)
+        if created.returncode != 0:
+            return f"could not make a scratch repository to check {tree} with"
+        (repository / "objects/info").mkdir(parents=True, exist_ok=True)
+        (repository / "objects/info/alternates").write_text(
+            os.path.realpath(git_dir / "objects") + "\n")
+        for step in (("update-ref", "--no-deref", "HEAD", commit), ("read-tree", commit)):
+            if git(*step).returncode != 0:
+                return f"{tree}: could not load {commit[:12]} to compare it with"
+        tracked = git("status", "--porcelain", "--untracked-files=no", "--ignore-submodules=all")
+        lines = [line.strip() for line in (tracked.stdout or "").splitlines()]
+        if tracked.returncode != 0 or lines:
+            return f"{tree} has changed files: {_listed(lines) or 'git failed'}"
+        ignore = Path(scratch) / "pinned-gitignore"
+        pinned = git("cat-file", "blob", f"{commit}:.gitignore", work=False)
+        ignore.write_text(pinned.stdout if pinned.returncode == 0 else "")
+        others = git("ls-files", "--others", "-z", f"--exclude-from={ignore}")
+        names = [name for name in (others.stdout or "").split("\0") if name]
+        if others.returncode != 0 or names:
+            return f"{tree} has files that are not part of {commit[:12]}: {_listed(names) or 'git failed'}"
+        entries = git("ls-tree", "-r", "-z", "--full-tree", commit, work=False)
+        if entries.returncode != 0:
+            return f"{tree}: could not list {commit[:12]}"
+        modules = []
+        for entry in (entries.stdout or "").split("\0"):
+            info, _, path = entry.partition("\t")
+            if info.startswith("160000 commit "):
+                modules.append((path, info.split()[2]))
+    for path, sub_commit in modules:
+        sub = tree / path
+        if os.path.realpath(sub) != os.path.join(os.path.realpath(tree), path):
+            return f"{sub} (a submodule) is not where {commit[:12]} puts it"
+        if not sub.is_dir():
+            return f"{sub} (a submodule) is missing"
+        if not any(sub.iterdir()):
+            continue   # never initialised: git leaves the directory empty
+        dot_git = sub / ".git"
+        if dot_git.is_dir() and not dot_git.is_symlink():
+            sub_git = dot_git
+        else:
+            text = _read_small(dot_git) or ""
+            if not text.startswith("gitdir: "):
+                return f"{sub} (a submodule) has no git directory this installer can read"
+            sub_git = Path(os.path.realpath(sub / text[len("gitdir: "):].strip()))
+            if os.path.commonpath([sub_git, os.path.realpath(top)]) != os.path.realpath(top):
+                return f"{sub} (a submodule) keeps its git directory outside {top}"
+        why = checkout_differs(sub, sub_commit, git_dir=sub_git, _top=top, _depth=_depth + 1)
+        if why:
+            return why
+    return ""
+
+
+def owned_checkout_state(root: Path, marker: str = SUNSHINE_BUILD_MARKER) -> tuple[str, str]:
+    """("absent" | "foreign" | "pristine" | "changed", why) for a build cache.
+
+    RELEASE-9: without `marker` in its .git, a directory is somebody else's.
+    RELEASE-10: with it, it is ours - and still deleted or replaced only when
+    it is exactly the commit the marker records (checkout_differs). A marker
+    from before RELEASE-10 records no commit, so such a cache is "changed".
+    """
+    if not os.path.lexists(root):
+        return "absent", ""
+    dot_git = root / ".git"
+    text = None
+    if not (root.is_symlink() or not root.is_dir() or dot_git.is_symlink() or not dot_git.is_dir()):
+        text = _read_small(root / marker)
+    if text is None:
+        return "foreign", f"{root} is there and is not this installer's build cache"
+    found = re.search(r"^commit ([0-9a-f]{40})$", text, re.MULTILINE)
+    if not found:
+        return "changed", (f"{root} is this installer's build cache, but from before it recorded "
+                           f"the commit it holds, so nothing shows it is unchanged")
+    why = checkout_differs(root, found.group(1))
+    return ("changed", why) if why else ("pristine", "")
+
+
+def move_aside(path: Path, home: Path | None = None) -> tuple[Path | None, str]:
+    """Rename `path` into KEPT_DIR under a timestamped name; never delete it.
+    (None, why) when it cannot be moved (for one, onto another filesystem)."""
+    kept = (home or Path.home()) / KEPT_DIR
+    target = kept / f"{path.name}-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}-{secrets.token_hex(4)}"
+    try:
+        kept.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.rename(path, target)
+    except OSError as error:
+        return None, str(error)
+    return target, ""
 
 
 def is_git_url(checkout: str) -> bool:
@@ -594,7 +815,7 @@ def sunshine_build_refusal(checkout, commit) -> str:
 
 def _git(root: Path, *arguments, check=False):
     return run(["git", *GIT_SAFE, "-C", str(root), *arguments], check=check,
-               capture_output=True, text=True)
+               capture_output=True, text=True, env=git_environment())
 
 
 def fetch_sunshine_commit(url: str, commit: str, root: Path) -> tuple[bool, str]:
@@ -603,19 +824,29 @@ def fetch_sunshine_commit(url: str, commit: str, root: Path) -> tuple[bool, str]
     `root` is this installer's own cache, so what it made there before is
     thrown away rather than trusted - and only that: RELEASE-9, a directory
     without the marker this function writes into its .git is somebody else's
-    and is left alone. Returns (ok, detail); ok only when HEAD is the commit,
-    its tree is the commit's tree and there is nothing else in the work tree.
+    and is left alone. RELEASE-10: and only while it is exactly the commit
+    that marker records; a cache of ours that somebody changed (an edit, a new
+    file, a commit of their own) is moved to KEPT_DIR and said so, never
+    deleted. Returns (ok, detail); ok only when HEAD is the commit, its tree
+    is the commit's tree and there is nothing else in the work tree.
     """
-    marker = root / SUNSHINE_BUILD_MARKER
-    if os.path.lexists(root):
-        if root.is_symlink() or not root.is_dir() or marker.is_symlink() or not marker.is_file():
-            return False, (f"{root} is there and is not this installer's build cache; it was "
-                           f"left as it is - move it aside and try again")
+    state, why = owned_checkout_state(root)
+    if state == "foreign":
+        return False, f"{why}; it was left as it is - move it aside and try again"
+    if state == "pristine":
         shutil.rmtree(root)
+    elif state == "changed":
+        kept, error = move_aside(root)
+        if kept is None:
+            return False, (f"{why}; it could not be moved aside ({error}), so it was left as it "
+                           f"is and nothing was built - move it away yourself and try again")
+        print(f"{why}. It was moved to {kept}, not deleted.", flush=True)
     root.mkdir(parents=True)
-    if run(["git", "init", "--quiet", "--template=", str(root)], check=False).returncode != 0:
+    if run(["git", "init", "--quiet", "--template=", str(root)], check=False,
+           env=git_environment()).returncode != 0:
         return False, "git init failed"
-    marker.write_text("omodachi-core install_host.py --sunshine-build cache\n")
+    marker = root / SUNSHINE_BUILD_MARKER
+    marker.write_text(f"{_BUILD_MARKER_HEADER}\ncommit {commit}\n")
     fetched = _git(root, "fetch", "--depth", "1", url, commit)
     if fetched.returncode != 0:
         return False, (fetched.stderr or "").strip()[:300] or f"could not fetch {commit} from {url}"
@@ -1038,8 +1269,6 @@ CONFIG_DIR = ".config/omodachi"
 SHARE_DIR = ".local/share/omodachi"
 SOURCE_RECORD = ".local/state/omodachi/core-source.json"
 SOURCE_ID_FILE = "omodachi-install-id"
-SUNSHINE_BUILD_MARKER = ".git/omodachi-sunshine-build-cache"
-
 # RELEASE-9. `--purge` deletes, in the three directories below, exactly the
 # files and directories Omodachi's installer and daemon create - each listed
 # here by its name, or by the exact pattern of a name they generate (tempfile's
@@ -1096,6 +1325,7 @@ PURGE_RULES = {
         r"sunshine": {r"omodachi-sunshine-[0-9a-f]{7,40}(-dirty)?-x86_64\.tar\.zst": None,
                       r"omodachi-sunshine-x86_64\.tar\.zst": None, r"sunshine\.tar\.zst": None},
         # --sunshine-build <git-url>'s checkout: whole, but only with our marker.
+        # (RELEASE-10: and only while it is exactly the commit it was made for.)
         r"sunshine-src": SUNSHINE_BUILD_MARKER,
     },
     ".local/state/omodachi": {
@@ -1142,10 +1372,15 @@ def purge_directory(directory: Path, rules: dict, kept: list, *, spare=()) -> No
             else:
                 child.unlink(missing_ok=True)
         elif isinstance(rule, str):
-            marker = child / rule
-            if real_dir and not marker.is_symlink() and marker.is_file():
+            # RELEASE-10: a checkout of ours (the marker) goes only while it
+            # is exactly the commit it was made to hold; one somebody changed
+            # is kept and listed with what is in it.
+            state, why = owned_checkout_state(child, rule)
+            if state == "pristine":
                 shutil.rmtree(child, ignore_errors=True)
             else:
+                if state == "changed":
+                    print(f"kept {child}: {why}", flush=True)
                 kept.append(child)
         elif real_dir:
             purge_directory(child, rule, kept, spare=spare)
@@ -1221,11 +1456,14 @@ def source_is_the_bootstraps(home: Path) -> bool:
     return found == record.get("id") or found in (record.get("pending") or [])
 
 
-def _delete(path: Path) -> None:
-    if path.is_symlink() or not path.is_dir():
-        path.unlink(missing_ok=True)
-    else:
-        shutil.rmtree(path, ignore_errors=True)
+def _bootstrap_commit(home: Path) -> str:
+    """The commit the plugin bootstrap's record says src holds, or ""."""
+    try:
+        record = json.loads((home / SOURCE_RECORD).read_text())
+    except (OSError, ValueError):
+        return ""
+    commit = record.get("commit") if isinstance(record, dict) else None
+    return commit if isinstance(commit, str) else ""
 
 
 VOXTYPE_CONFIG = ".config/voxtype/config.toml"
@@ -1381,8 +1619,18 @@ def remove_local(*, purge=False, sunshine=True) -> int:
     source = share / "src"
     if os.path.lexists(source) and not pam:
         if source_is_the_bootstraps(home):
-            shutil.rmtree(source, ignore_errors=True)
-            removed["sources"] = True
+            # RELEASE-10: ours, and deleted only while it is exactly the
+            # commit the bootstrap's record names (checkout_differs) - the
+            # bootstrap has just checked that before it ran this, but this
+            # file can be run by hand as well.
+            why = checkout_differs(source, _bootstrap_commit(home))
+            if why:
+                removed["sources_kept"] = str(source)
+                print(f"kept {source}: {why}. It is not deleted with anything in it that is "
+                      f"not the commit the Omodachi plugin fetched.", flush=True)
+            else:
+                shutil.rmtree(source, ignore_errors=True)
+                removed["sources"] = True
         else:
             removed["sources_kept"] = str(source)
             print(f"kept {source}: nothing shows the Omodachi plugin's installer made it, "

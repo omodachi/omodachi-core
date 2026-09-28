@@ -882,6 +882,19 @@ def install(spec: str, home: Path, *, sha256=None, cache=None, runner=None,
 _TRANSIENT = re.compile(r"\.(unpack|replaced)-[a-z0-9_]{8}\Z")
 
 
+def _transient_pristine(directory: Path) -> bool:
+    """RELEASE-10: one of those goes only when everything in it is exactly a
+    release archive's contents (unpack()'s extracted tree, or the `old` tree
+    it had checked before moving it aside) - or it is empty. A half-extracted
+    tree, or anything somebody put there, is kept and listed."""
+    try:
+        return (directory.is_dir() and not directory.is_symlink()
+                and all(entry.is_dir() and not entry.is_symlink() and not pristine(entry)
+                        for entry in directory.iterdir()))
+    except OSError:
+        return False
+
+
 def remove(home: Path, *, runner=None) -> dict:
     """Take back what install() made, and only that.
 
@@ -921,7 +934,7 @@ def remove(home: Path, *, runner=None) -> dict:
     root = home / INSTALL_ROOT
     if root.is_dir() and not root.is_symlink():
         for child in sorted(root.iterdir()):
-            if (_TRANSIENT.fullmatch(child.name) and child.is_dir() and not child.is_symlink()) \
+            if (_TRANSIENT.fullmatch(child.name) and _transient_pristine(child)) \
                     or (ARCHIVE_NAME.match("omodachi-sunshine-" + child.name + "-x86_64")
                         and not pristine(child)):
                 shutil.rmtree(child, ignore_errors=True)

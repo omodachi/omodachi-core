@@ -340,6 +340,31 @@ class RemovalTests(unittest.TestCase):
             self.assertFalse((home / package.UNIT_RECORD).exists())
             self.assertFalse((home / package.WEB_CREDENTIALS).exists())
 
+    def test_a_transient_directory_goes_only_with_nothing_but_archive_contents_in_it(self):
+        # RELEASE-10 (#8330 finding 6): .unpack-*/.replaced-* are unpack()'s
+        # own names, but the name alone deletes nothing.
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            archive = build_archive(home / "p.tar.gz")
+            root = home / package.INSTALL_ROOT
+            package.unpack(archive, home)
+            leftover = root / ".replaced-abcd1234"      # killed after the move aside
+            leftover.mkdir()
+            (root / "abc1234").rename(leftover / "old")
+            empty = root / ".unpack-empty123"
+            empty.mkdir()
+            partial = root / ".unpack-part1234"         # killed half-way through extracting
+            (partial / "omodachi-sunshine-abc1234-x86_64").mkdir(parents=True)
+            (partial / "omodachi-sunshine-abc1234-x86_64/sunshine").write_text("half\n")
+            mine = root / ".replaced-mine1234"
+            mine.mkdir()
+            (mine / "notes.txt").write_text("mine\n")
+            removed = package.remove(home, runner=Recorder())
+            self.assertEqual(sorted(removed["installs"]), [".replaced-abcd1234", ".unpack-empty123"])
+            self.assertEqual(sorted(removed["kept"]), [str(mine), str(partial)])
+            self.assertEqual((mine / "notes.txt").read_text(), "mine\n")
+            self.assertTrue((partial / "omodachi-sunshine-abc1234-x86_64/sunshine").is_file())
+
     def test_a_unit_somebody_else_wrote_is_not_ours_to_delete_stop_or_disable(self):
         with tempfile.TemporaryDirectory() as scratch:
             home = Path(scratch)

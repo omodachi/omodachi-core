@@ -1,0 +1,8 @@
+{
+  "subscription_id": "sub_000000000000000000000000",
+  "device_id": "odomo-fixture-redacted",
+  "created_at": 1789430400,
+  "endpoint_host": "web.push.apple.com",
+  "vapid_public_key": "BFFcPW6545a5BNP-yn9U_c0MwemXvzddylFa0KbDtANfRTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q",
+  "contract_revision": "omodachi.v1"
+}

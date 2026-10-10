@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-mode.schema.json",
+  "title": "Default-agent collaboration mode",
+  "description": "AGENT-PLAN-1: the reply to `POST /v1/agent/default/chat/mode {\"mode\": \"plan\" | \"default\"}` - the Agent header's Plan chip. Core changes the codex thread's own collaboration mode with `thread/settings/update {threadId, collaborationMode: {mode, settings: {model, reasoning_effort, developer_instructions: null}}}`: the conversation's current model and effort, codex's built-in instructions for the mode, and no approval or sandbox setting. The mode stays with the thread (codex keeps it across restarts) and every client sees it as `usage.mode` (snapshot, `agent.usage.updated`, state `agent.usage`). `changed` is false when the thread was already in that mode. Refusals: `400 invalid_agent_mode`, `409 agent_busy` (a turn is running - codex's TUI refuses `/plan` then too), `409 agent_mode_unavailable` (codex refused the change or no model is known), `409 agent_chat_not_ready`. Native and web credentials.",
+  "type": "object",
+  "required": ["contract_revision", "agent_id", "mode", "changed", "usage"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "agent_id": {"const": "default"},
+    "mode": {"enum": ["default", "plan"]},
+    "changed": {"type": "boolean"},
+    "usage": {"$ref": "agent-chat-usage.schema.json#/properties/usage"}
+  }
+}

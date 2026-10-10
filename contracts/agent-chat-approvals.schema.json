@@ -32,6 +32,11 @@
           "details": {
             "type": "object"
           },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$",
+            "description": "NOTIFY-1: 16 hex characters that change whenever what this approval shows changes. A decision sent from an alert carries it, and core sends nothing when it no longer matches (409 agent_approval_changed)."
+          },
           "decisions": {
             "type": "array",
             "items": {

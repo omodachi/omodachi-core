@@ -1,0 +1,314 @@
+{
+  "contract_revision": "omodachi.v1",
+  "revision": 11,
+  "host": {
+    "name": "omarchy-fixture",
+    "connected": true,
+    "source": "fixture",
+    "graphical_state": "fixture"
+  },
+  "workspace": {
+    "active": 2,
+    "layout_binding": null,
+    "items": [
+      {
+        "id": 1,
+        "label": "Workspace 1",
+        "active": false,
+        "window_count": 1,
+        "occupied": true,
+        "persistent": true,
+        "select_entry_id": "omodachi.workspace.select.1",
+        "move_entry_id": "omodachi.workspace.move.1"
+      },
+      {
+        "id": 2,
+        "label": "Workspace 2",
+        "active": true,
+        "window_count": 1,
+        "occupied": true,
+        "persistent": true,
+        "select_entry_id": "omodachi.workspace.select.2",
+        "move_entry_id": "omodachi.workspace.move.2"
+      },
+      {
+        "id": 3,
+        "label": "Workspace 3",
+        "active": false,
+        "window_count": 1,
+        "occupied": true,
+        "persistent": true,
+        "select_entry_id": "omodachi.workspace.select.3",
+        "move_entry_id": "omodachi.workspace.move.3"
+      },
+      {
+        "id": 4,
+        "label": "Workspace 4",
+        "active": false,
+        "window_count": 0,
+        "occupied": false,
+        "persistent": true,
+        "select_entry_id": "omodachi.workspace.select.4",
+        "move_entry_id": "omodachi.workspace.move.4"
+      },
+      {
+        "id": 5,
+        "label": "Workspace 5",
+        "active": false,
+        "window_count": 0,
+        "occupied": false,
+        "persistent": true,
+        "select_entry_id": "omodachi.workspace.select.5",
+        "move_entry_id": "omodachi.workspace.move.5"
+      },
+      {
+        "id": 6,
+        "label": "Workspace 6",
+        "active": false,
+        "window_count": 0,
+        "occupied": false,
+        "persistent": false,
+        "select_entry_id": "omodachi.workspace.select.6",
+        "move_entry_id": "omodachi.workspace.move.6"
+      },
+      {
+        "id": 7,
+        "label": "Workspace 7",
+        "active": false,
+        "window_count": 0,
+        "occupied": false,
+        "persistent": false,
+        "select_entry_id": "omodachi.workspace.select.7",
+        "move_entry_id": "omodachi.workspace.move.7"
+      },
+      {
+        "id": 8,
+        "label": "Workspace 8",
+        "active": false,
+        "window_count": 0,
+        "occupied": false,
+        "persistent": false,
+        "select_entry_id": "omodachi.workspace.select.8",
+        "move_entry_id": "omodachi.workspace.move.8"
+      },
+      {
+        "id": 9,
+        "label": "Workspace 9",
+        "active": false,
+        "window_count": 0,
+        "occupied": false,
+        "persistent": false,
+        "select_entry_id": "omodachi.workspace.select.9",
+        "move_entry_id": "omodachi.workspace.move.9"
+      },
+      {
+        "id": 10,
+        "label": "Workspace 10",
+        "active": false,
+        "window_count": 0,
+        "occupied": false,
+        "persistent": false,
+        "select_entry_id": "omodachi.workspace.select.10",
+        "move_entry_id": "omodachi.workspace.move.10"
+      }
+    ]
+  },
+  "focus": {
+    "window": null,
+    "app_id": "fixture.editor",
+    "app_name": "Editor",
+    "target_token": "window-token-fixture-01",
+    "icon": "",
+    "icon_kind": "none"
+  },
+  "agent": {
+    "kind": "codex",
+    "exists": true,
+    "pane_available": true,
+    "status": "working",
+    "default_agent": {
+      "omarchy_default_agent": "codex",
+      "omarchy_probe": "available",
+      "herdr_supported_kinds": [
+        "claude",
+        "codex",
+        "grok",
+        "hermes",
+        "opencode"
+      ],
+      "herdr_probe": "available",
+      "default_agent_exists": true,
+      "default_agent_probe": "available",
+      "pane_probe": "available",
+      "agent_id": "default",
+      "pane_id": "pane-fixture-01",
+      "pane_available": true,
+      "agent_status": "working",
+      "configured_kind": "codex",
+      "actual_kind": "codex",
+      "kind_mismatch": false,
+      "herdr_available": true,
+      "checked_at": "2026-09-15T00:00:00Z",
+      "diagnostics": [],
+      "configured": true,
+      "kind_supported": true,
+      "ready_to_attach": true,
+      "ready_to_start": false
+    },
+    "last_confirmed": null
+  },
+  "herdr": {
+    "available": true,
+    "agent_count": 1,
+    "agent_count_scope": "default_agent_only",
+    "snapshot": {
+      "server_installed": true,
+      "server_running": true,
+      "socket_available": true,
+      "schema_probe": "available",
+      "supported_kinds": [
+        "claude",
+        "codex",
+        "grok",
+        "hermes",
+        "opencode"
+      ],
+      "agents": [
+        {
+          "agent_id": "default",
+          "kind": "codex",
+          "status": "working",
+          "pane_id": "pane-fixture-01",
+          "pane_available": true,
+          "target": {
+            "agent_id": "default",
+            "pane_id": "pane-fixture-01"
+          }
+        }
+      ],
+      "pane_count": 2,
+      "checked_at": "2026-09-15T00:00:00Z",
+      "diagnostics": []
+    }
+  },
+  "remote": {
+    "session_id": null,
+    "state": "offline",
+    "mode": null,
+    "backend": null,
+    "revision": 0
+  },
+  "capabilities": {
+    "sunshine": false,
+    "terminal": true,
+    "desktop": false,
+    "native": [
+      "shortcuts"
+    ],
+    "contract_revision": "omodachi.v1",
+    "demo": true
+  },
+  "catalog": {
+    "contract_revision": "omodachi.v1",
+    "revision": "3f0af054c4448610",
+    "source_revision": "fcc7fbd06ce6a008",
+    "entries": [],
+    "unchanged": true
+  },
+  "notifications": {
+    "dnd": null
+  },
+  "remote_bar": {
+    "active": false,
+    "session_id": null,
+    "output_name": null,
+    "viewport": null,
+    "orientation": null,
+    "logical_size": null,
+    "workspaces": [],
+    "revision": null,
+    "bar_insets": null
+  },
+  "bar": {
+    "source": "shell.json",
+    "source_status": "fixture",
+    "position": "top",
+    "modules": [
+      {
+        "id": "omarchy.network",
+        "role": "network",
+        "status": null
+      },
+      {
+        "id": "omarchy.audio",
+        "role": "audio",
+        "status": null
+      },
+      {
+        "id": "omarchy.power",
+        "role": "power",
+        "status": null
+      }
+    ],
+    "geometry": null,
+    "left": [
+      {
+        "id": "omarchy.menu",
+        "role": "logo"
+      },
+      {
+        "id": "omarchy.workspaces",
+        "role": "workspaces"
+      },
+      {
+        "id": "omarchy.active-window",
+        "role": "focused_window"
+      }
+    ],
+    "center": [
+      {
+        "id": "omarchy.clock",
+        "role": "clock"
+      }
+    ],
+    "right": [
+      {
+        "id": "omarchy.tray",
+        "role": "system_tray"
+      },
+      {
+        "id": "omarchy.agents",
+        "role": "agent_usage"
+      },
+      {
+        "id": "omarchy.network",
+        "role": "network"
+      },
+      {
+        "id": "omarchy.audio",
+        "role": "audio"
+      },
+      {
+        "id": "omarchy.power",
+        "role": "power"
+      },
+      {
+        "id": "omodachi.stream",
+        "role": "stream"
+      }
+    ],
+    "revision": "69dfcb4cb4753d4b"
+  },
+  "device_id": "device-fixture-redacted",
+  "event_cursor": 11,
+  "instance_id": "daemon-instance-fixture",
+  "overview": {
+    "rows": [],
+    "counts": {
+      "needs_you": 0,
+      "working": 0,
+      "done": 0
+    },
+    "sessions": []
+  }
+}

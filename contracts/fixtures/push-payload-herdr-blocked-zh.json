@@ -1,0 +1,11 @@
+{
+  "web_push": 8030,
+  "notification": {
+    "title": "codex 在等你",
+    "body": "omarchy-fixture 上 Herdr 里有个 pane 在等你回答。",
+    "navigate": "https://omarchy-fixture.tail0000.ts.net/odomo/?open=herdr&session=omodachi&pane=w1%3Ap2&agent=codex&host=00000000000000000000000000000000",
+    "tag": "herdr-w1-p2",
+    "lang": "zh-Hans",
+    "dir": "ltr"
+  }
+}

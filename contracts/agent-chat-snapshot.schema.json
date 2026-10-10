@@ -32,7 +32,10 @@
       "additionalProperties": false
     },
     "rows": {
-      "type": "array"
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/row"
+      }
     },
     "activeTurn": {
       "type": [
@@ -71,6 +74,11 @@
           },
           "details": {
             "type": "object"
+          },
+          "fingerprint": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$",
+            "description": "NOTIFY-1: 16 hex characters that change whenever what this approval shows changes. A decision sent from an alert carries it, and core sends nothing when it no longer matches (409 agent_approval_changed)."
           },
           "decisions": {
             "type": "array",
@@ -153,6 +161,14 @@
             "string",
             "null"
           ]
+        },
+        "mode": {
+          "description": "AGENT-PLAN-1: the thread's codex collaboration mode (`thread/resume` and `thread/settings/updated`), null until codex has said. Changed with `POST /v1/agent/default/chat/mode` or `/plan`; an older client ignores it.",
+          "enum": [
+            "default",
+            "plan",
+            null
+          ]
         }
       },
       "required": [
@@ -162,6 +178,36 @@
         "effort"
       ],
       "additionalProperties": false
+    },
+    "earlier": {
+      "type": "boolean",
+      "description": "AGENT-QUEUE-1: there are rows before the first one here. A snapshot carries the newest 150 rows; `GET /v1/agent/default/chat/history?before=<row id>` brings earlier ones (core reads codex's record a page at a time, `thread/turns/list`). An older client ignores it."
+    },
+    "queue": {
+      "description": "AGENT-QUEUE-1: codex's own durable queue for this thread (0.160 `thread/queue/*`): messages that start, in order, when the running turn ends (after a Stop they wait for Send now). `null` when this codex has no queue - a client then steers while a turn runs, as before. Approvals are never in it.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/queued"
+          }
+        }
+      ]
+    },
+    "checklist": {
+      "description": "AGENT-QUEUE-1: the newest plan checklist codex sent (`turn/plan/updated`, the model's `update_plan` tool - off unless `[tools.update_plan] enabled` in codex's config), or null. core keeps it across its own restart; codex's record does not hold it.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/checklist"
+        }
+      ]
     }
   },
   "required": [
@@ -174,5 +220,305 @@
     "status",
     "usage"
   ],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "row": {
+      "description": "One transcript row. Only these two kinds exist; a client that meets another kind cannot read the transcript, so core never adds one. LINKS-1: a tool row may carry `paths` - the files a fileChange touched or an imageView looked at - which a client offers to open on the computer (`host-open.schema.json`). Whitespace-only assistant messages never appear (AGENT-NEW-1). AGENT-FIX-2: a tool row's `detail` is at most its newest 65536 characters, and a snapshot spends at most 524288 characters on tool output, newest rows first (older rows keep their newest 4096); `detail_truncated` counts what was left out. AGENT-COLLIE-1: a tool row may carry `command`, `actions`, `exit_code` and `duration_ms` (a command) or `changes` (a fileChange); a client that does not know them ignores them. AGENT-PLAN-1: an assistant message may carry `plan: true` (the plan codex proposed in Plan mode) - still a message, never a new kind. AGENT-QUEUE-1: a message may carry `text_truncated` (its text is the first 65536 characters).",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "id",
+            "turnID",
+            "role",
+            "text"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "message"
+            },
+            "id": {
+              "type": "string"
+            },
+            "turnID": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "role": {
+              "enum": [
+                "user",
+                "assistant"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "images": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "plan": {
+              "description": "AGENT-PLAN-1: this assistant message is the plan codex proposed in Plan mode (its `plan` item, the model's <proposed_plan> block without the tags), streamed by `item/plan/delta`. Always true when present. A client that does not know it shows the plan as a reply.",
+              "const": true
+            },
+            "text_truncated": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "AGENT-QUEUE-1: a message longer than 65536 characters travels as its first 65536; this counts the rest (core keeps the whole)."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "id",
+            "turnID",
+            "name",
+            "status",
+            "detail"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "tool"
+            },
+            "id": {
+              "type": "string"
+            },
+            "turnID": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "running",
+                "succeeded",
+                "failed",
+                "cancelled",
+                "interrupted",
+                "unknown"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            },
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            },
+            "detail_truncated": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "AGENT-FIX-2: how many characters of earlier output this row no longer carries; `detail` is the newest part."
+            },
+            "command": {
+              "type": "string",
+              "maxLength": 400,
+              "description": "AGENT-COLLIE-1: a commandExecution's words without the shell codex wraps them in (`/bin/zsh -lc 'git status'` -> `git status`)."
+            },
+            "actions": {
+              "type": "array",
+              "maxItems": 4,
+              "description": "AGENT-COLLIE-1: codex's own reading of a command (`commandActions`): `read` names the file, `listFiles` and `search` the path and query; anything else is `unknown`.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "read",
+                      "listFiles",
+                      "search",
+                      "unknown"
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "path": {
+                    "type": "string",
+                    "maxLength": 1024
+                  },
+                  "query": {
+                    "type": "string",
+                    "maxLength": 256
+                  }
+                }
+              }
+            },
+            "exit_code": {
+              "type": "integer",
+              "description": "AGENT-COLLIE-1: a finished command's exit code."
+            },
+            "duration_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "AGENT-COLLIE-1: how long a finished command ran."
+            },
+            "changes": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "description": "AGENT-COLLIE-1: a fileChange's change, per file, as codex put it in its item: `diff` is unified-diff lines (`@@` hunk headers, `+`, `-`, ` `), at most 120 per file and 400 per row, each cut at 400 characters; an added or deleted file's whole text arrives signed. `added` / `removed` count the whole change; `diff_omitted` is how many lines are not here (a snapshot spends at most 262144 characters on diffs, newest rows first, and an older row keeps its counts with an empty `diff`).",
+              "items": {
+                "type": "object",
+                "required": [
+                  "path",
+                  "kind",
+                  "added",
+                  "removed",
+                  "diff"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "kind": {
+                    "enum": [
+                      "add",
+                      "delete",
+                      "update"
+                    ]
+                  },
+                  "move_path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "added": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "removed": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "diff": {
+                    "type": "string"
+                  },
+                  "diff_omitted": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                }
+              }
+            },
+            "changes_omitted": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "AGENT-COLLIE-1: files of this change past the first 16."
+            }
+          }
+        }
+      ]
+    },
+    "queued": {
+      "type": "object",
+      "required": [
+        "id",
+        "request_id",
+        "text"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "codex's own id for the waiting message (`QueuedSubmission.id`); what Send now / Edit / Delete name."
+        },
+        "request_id": {
+          "type": "string",
+          "maxLength": 128,
+          "description": "The client's request id it was queued with (`clientUserMessageId`); the user message of the turn it becomes carries it."
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 16000
+        },
+        "images": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "text_clipped": {
+          "const": true,
+          "description": "The words are longer than the 16000 characters carried; a client offers no Edit for it."
+        },
+        "more": {
+          "const": true,
+          "description": "On the last item only: codex holds more waiting messages than the 20 carried."
+        }
+      }
+    },
+    "checklist": {
+      "type": "object",
+      "required": [
+        "turnID",
+        "steps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "turnID": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "explanation": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": [
+              "step",
+              "status"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "step": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 400
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "inProgress",
+                  "completed"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/upload-removed.schema.json",
+  "title": "Upload removed",
+  "description": "ATTACH-1: the reply to `DELETE /v1/uploads/{id}` - a chip taken off before Send; its file is gone from the host now rather than in seven days. `404 upload_unknown` when there is no such upload (already swept or removed). A send that names a removed or swept upload is refused with `409 attachment_gone`.",
+  "type": "object",
+  "required": ["contract_revision", "id", "removed"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "removed": {"const": true}
+  }
+}

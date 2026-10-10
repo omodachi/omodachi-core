@@ -73,6 +73,26 @@ class Hub:
         self._seq = 0
         self._subscribers: set[_Subscriber] = set()
         self._handlers: dict[str, Callable[[str, dict[str, Any]], Any]] = {}
+        # REMOTE-STOP-1. Operations whose handler is also told whether the
+        # caller is the verified same-UID Unix peer (`local=True`). Only the
+        # IPC server can say so; HTTPS never does.
+        self._local_aware: set[str] = set()
+        # LITE-1b: callables told about every published event, after the
+        # subscribers are. `push.PushSender` is the one the daemon installs.
+        # Called on whichever thread published (the notification mirror
+        # publishes from its own), so an observer that touches the event loop
+        # hands over with `call_soon_threadsafe`; one that raises is skipped.
+        self._observers: list[Callable[[DeviceEvent], Any]] = []
+
+    def add_observer(self, observer: Callable[[DeviceEvent], Any]) -> None:
+        if not callable(observer):
+            raise ValueError("observer must be callable")
+        if observer not in self._observers:
+            self._observers.append(observer)
+
+    def remove_observer(self, observer) -> None:
+        if observer in self._observers:
+            self._observers.remove(observer)
 
     @property
     def event_cursor(self) -> int:
@@ -186,6 +206,11 @@ class Hub:
                                                              since=event.seq, reason="queue_overflow"))
             else:
                 subscriber.queue.put_nowait(copy.deepcopy(event))
+        for observer in tuple(self._observers):
+            try:
+                observer(copy.deepcopy(event))
+            except Exception:
+                pass
         return copy.deepcopy(event)
 
     def events_since(self, seq=0, limit=100, *, device_id=None, instance_id=None):
@@ -240,18 +265,32 @@ class Hub:
         finally:
             self._subscribers.discard(subscriber)
 
-    def register_handler(self, op: str, handler: Callable[[str, dict[str, Any]], Any]) -> None:
-        """Register an allowlisted service operation; it receives (device_id, params)."""
+    def register_handler(self, op: str, handler: Callable[[str, dict[str, Any]], Any], *,
+                         local_aware: bool = False) -> None:
+        """Register an allowlisted service operation; it receives (device_id, params).
+
+        A `local_aware` handler is additionally called with `local=True` when
+        the transport has proven the caller is this host's own user (the
+        same-UID Unix socket). It is never told anything on HTTPS/WSS.
+        """
         if not isinstance(op, str) or not op or op in self._handlers or op in self._BUILTIN_OPS:
             raise ValueError("operation is empty or already registered")
         if not callable(handler):
             raise ValueError("operation handler must be callable")
         self._handlers[op] = handler
+        if local_aware:
+            self._local_aware.add(op)
 
     _BUILTIN_OPS = frozenset({"health", "state", "capabilities", "herdr", "catalog", "events"})
 
-    def dispatch(self, op: str, params: Mapping[str, Any], device_id: str | None = None) -> Any:
-        """Transport-neutral dispatch. Adapter supplies its authenticated device id."""
+    def dispatch(self, op: str, params: Mapping[str, Any], device_id: str | None = None, *,
+                 local: bool = False) -> Any:
+        """Transport-neutral dispatch. Adapter supplies its authenticated device id.
+
+        `local` is the adapter's statement that the peer is this host's own
+        user, verified by the transport itself (IPC's peer credentials). Only
+        handlers registered `local_aware` ever see it.
+        """
         if not isinstance(params, Mapping):
             raise ValueError("operation parameters must be an object")
         if op == "health":
@@ -272,6 +311,8 @@ class Hub:
             return {"events": [asdict(e) for e in events], "cursor": events[-1].seq if events else self._seq,
                     "instance_id": self.instance_id}
         if op in self._handlers:
+            if local is True and op in self._local_aware:
+                return self._handlers[op](device_id, copy.deepcopy(dict(params)), local=True)
             return self._handlers[op](device_id, copy.deepcopy(dict(params)))
         raise ValueError(f"unknown op: {op}")
 

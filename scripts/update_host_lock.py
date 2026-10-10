@@ -41,6 +41,14 @@ HEADER = """\
 """
 
 
+def _abi3(python: str, abi: str) -> bool:
+    """LITE-1b: a stable-ABI wheel (`cp39-abi3`, `cp311-abi3`) any CPython at
+    or above its tag loads - so one built for 3.11 or earlier serves every
+    host interpreter. `abi3.abi3t` (3.15+, free-threaded too) does not."""
+    match = re.fullmatch(r"cp3(\d+)", python)
+    return abi == "abi3" and match is not None and 3 <= int(match[1]) <= 11
+
+
 def usable(filename: str) -> bool:
     if not filename.endswith(".whl"):
         return False
@@ -48,9 +56,8 @@ def usable(filename: str) -> bool:
     if platform == "any":
         return abi == "none" and all(tag.startswith("py3") or tag == "py2"
                                      for tag in python.split("."))
-    return (python in PYTHONS and abi == python
-            and all(tag.startswith("manylinux") and tag.endswith("_x86_64")
-                    for tag in platform.split(".")))
+    return ((python in PYTHONS and abi == python) or _abi3(python, abi)) and all(
+        tag.startswith("manylinux") and tag.endswith("_x86_64") for tag in platform.split("."))
 
 
 def files(name: str, version: str) -> list[tuple[str, str]]:

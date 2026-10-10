@@ -10,3 +10,6 @@ dist/
 .runtime/
 .DS_Store
 ._*
+
+# LITE-1a: the Odomo toolchain, installed by `npm ci` inside odomo/ only
+node_modules/

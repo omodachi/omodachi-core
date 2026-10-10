@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/push-vapid-key.schema.json",
+  "title": "LITE-1b this host's VAPID public key",
+  "description": "GET /v1/push/vapid-public-key, web credential only. The P-256 public key (uncompressed point, base64url) a browser passes to PushManager.subscribe as applicationServerKey. The key pair is created on first use and kept in ~/.config/omodachi/vapid.json (0600).",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "vapid_public_key"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "vapid_public_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{87}$"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "session": "h11-test",
+  "pane": "w2:p1",
+  "available": true,
+  "reason": null,
+  "agent": "claude",
+  "text": "I read the two files.\n\nBoth look right; nothing to change.",
+  "at": "2026-10-07T10:02:00.000Z",
+  "complete": true,
+  "phase": null,
+  "truncated": false,
+  "contract_revision": "omodachi.v1"
+}

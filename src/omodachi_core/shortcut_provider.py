@@ -23,6 +23,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import secrets
+import shutil
 import subprocess
 import time
 from .graphical import (bounded_hyprctl,focus_workspace_on_output,graphical_environment,
@@ -93,6 +95,16 @@ def _window_view(value):
             'floating':value['floating'] if type(value.get('floating')) is bool else None,
             'workspace_id':workspace['id'] if type(workspace.get('id')) is int else None}
 
+
+
+def exec_scoped(argv,env):
+    """POLISH-U: `argv` under `systemd-run --user --scope`, so the program
+    and everything it starts live outside `omodachid.service`'s cgroup; the
+    program itself when `systemd-run` is not on PATH."""
+    runner=shutil.which('systemd-run',path=(env or {}).get('PATH'))
+    if not runner:return list(argv)
+    return [runner,'--user','--scope','--quiet','--collect',
+            '--unit','omodachi-keybinding-'+secrets.token_hex(6),'--',*argv]
 
 class ShortcutProvider:
     def __init__(self,service,*,reader=None,runner=bounded_hyprctl,environment=graphical_environment,
@@ -264,11 +276,14 @@ class ShortcutProvider:
         """Run one `exec` record's command line the way Hyprland's exec does.
 
         Same shell, same graphical session, same user; detached so the row's
-        window outlives this request. The pid and an early exit are the only
+        window outlives this request - and (POLISH-U) outlives the daemon: it
+        runs in a transient scope of its own (`exec_scoped`), as a menu row
+        does, because a plain child stays in `omodachid.service`'s cgroup and
+        `KillMode=control-group` closes it on every core restart. The pid and an early exit are the only
         thing the compositor cannot tell us, which is exactly why core runs
         this one kind itself.
         """
-        process=subprocess.Popen(('/bin/bash','-c',command),env=env,stdin=subprocess.DEVNULL,
+        process=subprocess.Popen(exec_scoped(('/bin/bash','-c',command),env),env=env,stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
         deadline=time.monotonic()+EXEC_SETTLE
         while time.monotonic()<deadline and process.poll() is None:self.sleeper(0.02)

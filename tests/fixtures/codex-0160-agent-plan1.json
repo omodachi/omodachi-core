@@ -1,0 +1,2594 @@
+{
+ "_about": "AGENT-PLAN-1: what a real codex-cli 0.160.0 app-server sent (private CODEX_HOME, scripted fake Responses model on the Mac; paths, model name and the built-in mode prompts redacted). `plan`: a Default turn, then thread/settings/update to Plan, a Plan turn (request_user_input, then a <proposed_plan> answer), a Plan turn with an effort override. `leave`: after an app-server restart, thread/settings/update to Default and 'Implement the plan.'. `gate`: the same calls on a connection initialized without experimentalApi. `review`: a Default turn, then review/start (uncommittedChanges, then custom) - note turn/started carries another id than the review's items and turn/completed. `compact`: a turn, then thread/compact/start (a contextCompaction turn).",
+ "plan": [
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791299632211
+  },
+  {
+   "method": "turn/started",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turn": {
+     "id": "01a111c7-3c34-7b31-8f19-5acdd1b81487",
+     "items": [],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": 1791299632,
+     "completedAt": null,
+     "durationMs": null
+    }
+   },
+   "emittedAtMs": 1791299632211
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111c7-3c82-7133-bf25-95b38e8ac58a",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "hello",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3c34-7b31-8f19-5acdd1b81487",
+    "startedAtMs": 1791299632260
+   },
+   "emittedAtMs": 1791299632261
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111c7-3c82-7133-bf25-95b38e8ac58a",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "hello",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3c34-7b31-8f19-5acdd1b81487",
+    "completedAtMs": 1791299632260
+   },
+   "emittedAtMs": 1791299632263
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-d1",
+     "text": "",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3c34-7b31-8f19-5acdd1b81487",
+    "startedAtMs": 1791299632278
+   },
+   "emittedAtMs": 1791299632278
+  },
+  {
+   "method": "item/agentMessage/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3c34-7b31-8f19-5acdd1b81487",
+    "itemId": "m-d1",
+    "delta": "Done in none mode, turn 1."
+   },
+   "emittedAtMs": 1791299632278
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-d1",
+     "text": "Done in none mode, turn 1.",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3c34-7b31-8f19-5acdd1b81487",
+    "completedAtMs": 1791299632278
+   },
+   "emittedAtMs": 1791299632279
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3c34-7b31-8f19-5acdd1b81487",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791299632283
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791299632283
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "idle"
+    }
+   },
+   "emittedAtMs": 1791299632285
+  },
+  {
+   "method": "turn/completed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turn": {
+     "id": "01a111c7-3c34-7b31-8f19-5acdd1b81487",
+     "items": [
+      {
+       "type": "agentMessage",
+       "id": "m-d1",
+       "text": "Done in none mode, turn 1.",
+       "phase": null,
+       "memoryCitation": null,
+       "delivery": null,
+       "questions": null
+      }
+     ],
+     "itemsView": "summary",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791299632,
+     "completedAt": 1791299632,
+     "durationMs": 99
+    }
+   },
+   "emittedAtMs": 1791299632285
+  },
+  {
+   "method": "thread/settings/updated",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "threadSettings": {
+     "cwd": "/home/user/ws",
+     "sandboxPolicy": {
+      "type": "workspaceWrite",
+      "writableRoots": [],
+      "networkAccess": false,
+      "excludeTmpdirEnvVar": false,
+      "excludeSlashTmp": false
+     },
+     "model": "gpt-fixture",
+     "modelProvider": "fake",
+     "serviceTier": null,
+     "effort": "high",
+     "summary": null,
+     "collaborationMode": {
+      "mode": "plan",
+      "settings": {
+       "model": "gpt-fixture",
+       "reasoning_effort": "high",
+       "developer_instructions": "# Plan Mode (Conversational)\n\n(codex 0.160's built-in Plan mode instructions; cut here)"
+      }
+     },
+     "multiAgentMode": "explicitRequestOnly",
+     "personality": null
+    }
+   },
+   "emittedAtMs": 1791299632288
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791299632292
+  },
+  {
+   "method": "turn/started",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turn": {
+     "id": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+     "items": [],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": 1791299632,
+     "completedAt": null,
+     "durationMs": null
+    }
+   },
+   "emittedAtMs": 1791299632292
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111c7-3cca-76a3-943d-a1280a0ecc89",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "plan the port change",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "startedAtMs": 1791299632331
+   },
+   "emittedAtMs": 1791299632331
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111c7-3cca-76a3-943d-a1280a0ecc89",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "plan the port change",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "completedAtMs": 1791299632331
+   },
+   "emittedAtMs": 1791299632333
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "active",
+     "activeFlags": [
+      "waitingOnUserInput"
+     ]
+    }
+   },
+   "emittedAtMs": 1791299632344
+  },
+  {
+   "method": "item/tool/requestUserInput",
+   "id": 0,
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "itemId": "call-q-2",
+    "questions": [
+     {
+      "id": "db",
+      "header": "Database",
+      "question": "Which database should the tests use?",
+      "isOther": true,
+      "isSecret": false,
+      "options": [
+       {
+        "label": "SQLite (Recommended)",
+        "description": "Fast and needs no server."
+       },
+       {
+        "label": "Postgres",
+        "description": "Same as production."
+       }
+      ]
+     }
+    ],
+    "isBlocking": true,
+    "autoResolutionMs": null
+   }
+  },
+  {
+   "method": "serverRequest/resolved",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "requestId": 0
+   },
+   "emittedAtMs": 1791299632346
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791299632347
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 30,
+      "inputTokens": 20,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 10,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791299632351
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791299632351
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-p3",
+     "text": "",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "startedAtMs": 1791299632357
+   },
+   "emittedAtMs": 1791299632357
+  },
+  {
+   "method": "item/agentMessage/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "itemId": "m-p3",
+    "delta": "Here is what I would do.\n\n"
+   },
+   "emittedAtMs": 1791299632357
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "plan",
+     "id": "01a111c7-3ca1-7352-91f4-d9a9fd25c744-plan",
+     "text": ""
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "startedAtMs": 1791299632357
+   },
+   "emittedAtMs": 1791299632357
+  },
+  {
+   "method": "item/plan/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "itemId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744-plan",
+    "delta": "# Read the port from the environment\n\n"
+   },
+   "emittedAtMs": 1791299632357
+  },
+  {
+   "method": "item/plan/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "itemId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744-plan",
+    "delta": "1. Add a `PORT` setting with 9090 as the default.\n"
+   },
+   "emittedAtMs": 1791299632357
+  },
+  {
+   "method": "item/plan/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "itemId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744-plan",
+    "delta": "2. Use it in `main()` instead of 8080.\n"
+   },
+   "emittedAtMs": 1791299632357
+  },
+  {
+   "method": "item/plan/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "itemId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744-plan",
+    "delta": "3. Run the tests on SQLite.\n"
+   },
+   "emittedAtMs": 1791299632357
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "plan",
+     "id": "01a111c7-3ca1-7352-91f4-d9a9fd25c744-plan",
+     "text": "# Read the port from the environment\n\n1. Add a `PORT` setting with 9090 as the default.\n2. Use it in `main()` instead of 8080.\n3. Run the tests on SQLite.\n"
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "completedAtMs": 1791299632357
+   },
+   "emittedAtMs": 1791299632358
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-p3",
+     "text": "Here is what I would do.\n\n",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "completedAtMs": 1791299632358
+   },
+   "emittedAtMs": 1791299632359
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 45,
+      "inputTokens": 30,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 15,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791299632361
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791299632361
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "idle"
+    }
+   },
+   "emittedAtMs": 1791299632363
+  },
+  {
+   "method": "turn/completed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turn": {
+     "id": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+     "items": [
+      {
+       "type": "agentMessage",
+       "id": "m-p3",
+       "text": "Here is what I would do.\n\n",
+       "phase": null,
+       "memoryCitation": null,
+       "delivery": null,
+       "questions": null
+      }
+     ],
+     "itemsView": "summary",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791299632,
+     "completedAt": 1791299632,
+     "durationMs": 72
+    }
+   },
+   "emittedAtMs": 1791299632363
+  },
+  {
+   "method": "thread/settings/updated",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "threadSettings": {
+     "cwd": "/home/user/ws",
+     "sandboxPolicy": {
+      "type": "workspaceWrite",
+      "writableRoots": [],
+      "networkAccess": false,
+      "excludeTmpdirEnvVar": false,
+      "excludeSlashTmp": false
+     },
+     "model": "gpt-fixture",
+     "modelProvider": "fake",
+     "serviceTier": null,
+     "effort": "low",
+     "summary": null,
+     "collaborationMode": {
+      "mode": "plan",
+      "settings": {
+       "model": "gpt-fixture",
+       "reasoning_effort": "low",
+       "developer_instructions": "# Plan Mode (Conversational)\n\n(codex 0.160's built-in Plan mode instructions; cut here)"
+      }
+     },
+     "multiAgentMode": "explicitRequestOnly",
+     "personality": null
+    }
+   },
+   "emittedAtMs": 1791299632367
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791299632369
+  },
+  {
+   "method": "turn/started",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turn": {
+     "id": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+     "items": [],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": 1791299632,
+     "completedAt": null,
+     "durationMs": null
+    }
+   },
+   "emittedAtMs": 1791299632369
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111c7-3d14-77a3-a583-fd353f513264",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "and with low effort",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "startedAtMs": 1791299632404
+   },
+   "emittedAtMs": 1791299632405
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111c7-3d14-77a3-a583-fd353f513264",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "and with low effort",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "completedAtMs": 1791299632404
+   },
+   "emittedAtMs": 1791299632406
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "active",
+     "activeFlags": [
+      "waitingOnUserInput"
+     ]
+    }
+   },
+   "emittedAtMs": 1791299632414
+  },
+  {
+   "method": "item/tool/requestUserInput",
+   "id": 1,
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "itemId": "call-q-4",
+    "questions": [
+     {
+      "id": "db",
+      "header": "Database",
+      "question": "Which database should the tests use?",
+      "isOther": true,
+      "isSecret": false,
+      "options": [
+       {
+        "label": "SQLite (Recommended)",
+        "description": "Fast and needs no server."
+       },
+       {
+        "label": "Postgres",
+        "description": "Same as production."
+       }
+      ]
+     }
+    ],
+    "isBlocking": true,
+    "autoResolutionMs": null
+   }
+  },
+  {
+   "method": "serverRequest/resolved",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "requestId": 1
+   },
+   "emittedAtMs": 1791299632415
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791299632415
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 60,
+      "inputTokens": 40,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 20,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791299632419
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791299632419
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-p5",
+     "text": "",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "startedAtMs": 1791299632424
+   },
+   "emittedAtMs": 1791299632424
+  },
+  {
+   "method": "item/agentMessage/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "itemId": "m-p5",
+    "delta": "Here is what I would do.\n\n"
+   },
+   "emittedAtMs": 1791299632424
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "plan",
+     "id": "01a111c7-3cec-7272-8f01-06736d78cbe7-plan",
+     "text": ""
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "startedAtMs": 1791299632424
+   },
+   "emittedAtMs": 1791299632424
+  },
+  {
+   "method": "item/plan/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "itemId": "01a111c7-3cec-7272-8f01-06736d78cbe7-plan",
+    "delta": "# Read the port from the environment\n\n"
+   },
+   "emittedAtMs": 1791299632425
+  },
+  {
+   "method": "item/plan/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "itemId": "01a111c7-3cec-7272-8f01-06736d78cbe7-plan",
+    "delta": "1. Add a `PORT` setting with 9090 as the default.\n"
+   },
+   "emittedAtMs": 1791299632425
+  },
+  {
+   "method": "item/plan/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "itemId": "01a111c7-3cec-7272-8f01-06736d78cbe7-plan",
+    "delta": "2. Use it in `main()` instead of 8080.\n"
+   },
+   "emittedAtMs": 1791299632425
+  },
+  {
+   "method": "item/plan/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "itemId": "01a111c7-3cec-7272-8f01-06736d78cbe7-plan",
+    "delta": "3. Run the tests on SQLite.\n"
+   },
+   "emittedAtMs": 1791299632425
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "plan",
+     "id": "01a111c7-3cec-7272-8f01-06736d78cbe7-plan",
+     "text": "# Read the port from the environment\n\n1. Add a `PORT` setting with 9090 as the default.\n2. Use it in `main()` instead of 8080.\n3. Run the tests on SQLite.\n"
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "completedAtMs": 1791299632424
+   },
+   "emittedAtMs": 1791299632425
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-p5",
+     "text": "Here is what I would do.\n\n",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "completedAtMs": 1791299632425
+   },
+   "emittedAtMs": 1791299632426
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 75,
+      "inputTokens": 50,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 25,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791299632429
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791299632429
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "idle"
+    }
+   },
+   "emittedAtMs": 1791299632431
+  },
+  {
+   "method": "turn/completed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turn": {
+     "id": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+     "items": [
+      {
+       "type": "agentMessage",
+       "id": "m-p5",
+       "text": "Here is what I would do.\n\n",
+       "phase": null,
+       "memoryCitation": null,
+       "delivery": null,
+       "questions": null
+      }
+     ],
+     "itemsView": "summary",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791299632,
+     "completedAt": 1791299632,
+     "durationMs": 63
+    }
+   },
+   "emittedAtMs": 1791299632431
+  }
+ ],
+ "leave": [
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "idle"
+    }
+   },
+   "emittedAtMs": 1791299659843
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 75,
+      "inputTokens": 50,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 25,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791299659846
+  },
+  {
+   "method": "thread/settings/updated",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "threadSettings": {
+     "cwd": "/home/user/ws",
+     "sandboxPolicy": {
+      "type": "workspaceWrite",
+      "writableRoots": [],
+      "networkAccess": false,
+      "excludeTmpdirEnvVar": false,
+      "excludeSlashTmp": false
+     },
+     "model": "gpt-fixture",
+     "modelProvider": "fake",
+     "serviceTier": null,
+     "effort": "high",
+     "summary": null,
+     "collaborationMode": {
+      "mode": "default",
+      "settings": {
+       "model": "gpt-fixture",
+       "reasoning_effort": "high",
+       "developer_instructions": "# Collaboration Mode: Default\n\n(codex 0.160's built-in Default mode instructions; cut here)"
+      }
+     },
+     "multiAgentMode": "explicitRequestOnly",
+     "personality": null
+    }
+   },
+   "emittedAtMs": 1791299659857
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791299659863
+  },
+  {
+   "method": "turn/started",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turn": {
+     "id": "01a111c7-a852-7472-9744-55ae22985426",
+     "items": [],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": 1791299659,
+     "completedAt": null,
+     "durationMs": null
+    }
+   },
+   "emittedAtMs": 1791299659863
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111c7-a87d-7340-86f2-9a9a944bf4bd",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "Implement the plan.",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-a852-7472-9744-55ae22985426",
+    "startedAtMs": 1791299659901
+   },
+   "emittedAtMs": 1791299659902
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111c7-a87d-7340-86f2-9a9a944bf4bd",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "Implement the plan.",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-a852-7472-9744-55ae22985426",
+    "completedAtMs": 1791299659902
+   },
+   "emittedAtMs": 1791299659903
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-d6",
+     "text": "",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-a852-7472-9744-55ae22985426",
+    "startedAtMs": 1791299659910
+   },
+   "emittedAtMs": 1791299659910
+  },
+  {
+   "method": "item/agentMessage/delta",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-a852-7472-9744-55ae22985426",
+    "itemId": "m-d6",
+    "delta": "Done in default mode, turn 6."
+   },
+   "emittedAtMs": 1791299659911
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-d6",
+     "text": "Done in default mode, turn 6.",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-a852-7472-9744-55ae22985426",
+    "completedAtMs": 1791299659910
+   },
+   "emittedAtMs": 1791299659912
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turnId": "01a111c7-a852-7472-9744-55ae22985426",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 90,
+      "inputTokens": 60,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 30,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791299659915
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791299659915
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "status": {
+     "type": "idle"
+    }
+   },
+   "emittedAtMs": 1791299659917
+  },
+  {
+   "method": "turn/completed",
+   "params": {
+    "threadId": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "turn": {
+     "id": "01a111c7-a852-7472-9744-55ae22985426",
+     "items": [
+      {
+       "type": "agentMessage",
+       "id": "m-d6",
+       "text": "Done in default mode, turn 6.",
+       "phase": null,
+       "memoryCitation": null,
+       "delivery": null,
+       "questions": null
+      }
+     ],
+     "itemsView": "summary",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791299659,
+     "completedAt": 1791299659,
+     "durationMs": 57
+    }
+   },
+   "emittedAtMs": 1791299659917
+  }
+ ],
+ "responses": {
+  "collaborationMode/list": {
+   "data": [
+    {
+     "name": "Plan",
+     "mode": "plan",
+     "model": null,
+     "reasoning_effort": "medium"
+    },
+    {
+     "name": "Default",
+     "mode": "default",
+     "model": null,
+     "reasoning_effort": null
+    }
+   ]
+  },
+  "thread/settings/update": {},
+  "thread/resume": {
+   "thread": {
+    "id": "01a111c7-37fd-7c51-b91e-e01c6068075d",
+    "extra": null,
+    "forkedFromId": null,
+    "parentThreadId": null,
+    "preview": "hello",
+    "ephemeral": false,
+    "section": null,
+    "sectionEnteredAt": null,
+    "projectId": null,
+    "historyMode": "paginated",
+    "modelProvider": "fake",
+    "model": "gpt-fixture",
+    "reasoningEffort": "low",
+    "createdAt": 1791299631,
+    "updatedAt": 1791299657,
+    "recencyAt": 1791299632,
+    "status": {
+     "type": "idle"
+    },
+    "cwd": "/home/user/ws",
+    "canAcceptDirectInput": true,
+    "agentNickname": null,
+    "agentRole": null,
+    "name": null,
+    "daybreakEnabled": null,
+    "turns": [
+     {
+      "id": "01a111c7-3c34-7b31-8f19-5acdd1b81487",
+      "items": [
+       {
+        "type": "userMessage",
+        "id": "01a111c7-3c82-7133-bf25-95b38e8ac58a",
+        "clientId": null,
+        "content": [
+         {
+          "type": "text",
+          "text": "hello",
+          "text_elements": []
+         }
+        ]
+       },
+       {
+        "type": "agentMessage",
+        "id": "m-d1",
+        "text": "Done in none mode, turn 1.",
+        "phase": null,
+        "memoryCitation": null,
+        "delivery": null,
+        "questions": null
+       }
+      ],
+      "itemsView": "full",
+      "status": "completed",
+      "error": null,
+      "startedAt": 1791299632,
+      "completedAt": 1791299632,
+      "durationMs": 99
+     },
+     {
+      "id": "01a111c7-3ca1-7352-91f4-d9a9fd25c744",
+      "items": [
+       {
+        "type": "userMessage",
+        "id": "01a111c7-3cca-76a3-943d-a1280a0ecc89",
+        "clientId": null,
+        "content": [
+         {
+          "type": "text",
+          "text": "plan the port change",
+          "text_elements": []
+         }
+        ]
+       },
+       {
+        "type": "plan",
+        "id": "01a111c7-3ca1-7352-91f4-d9a9fd25c744-plan",
+        "text": "# Read the port from the environment\n\n1. Add a `PORT` setting with 9090 as the default.\n2. Use it in `main()` instead of 8080.\n3. Run the tests on SQLite.\n"
+       },
+       {
+        "type": "agentMessage",
+        "id": "m-p3",
+        "text": "Here is what I would do.\n\n",
+        "phase": null,
+        "memoryCitation": null,
+        "delivery": null,
+        "questions": null
+       }
+      ],
+      "itemsView": "full",
+      "status": "completed",
+      "error": null,
+      "startedAt": 1791299632,
+      "completedAt": 1791299632,
+      "durationMs": 72
+     },
+     {
+      "id": "01a111c7-3cec-7272-8f01-06736d78cbe7",
+      "items": [
+       {
+        "type": "userMessage",
+        "id": "01a111c7-3d14-77a3-a583-fd353f513264",
+        "clientId": null,
+        "content": [
+         {
+          "type": "text",
+          "text": "and with low effort",
+          "text_elements": []
+         }
+        ]
+       },
+       {
+        "type": "plan",
+        "id": "01a111c7-3cec-7272-8f01-06736d78cbe7-plan",
+        "text": "# Read the port from the environment\n\n1. Add a `PORT` setting with 9090 as the default.\n2. Use it in `main()` instead of 8080.\n3. Run the tests on SQLite.\n"
+       },
+       {
+        "type": "agentMessage",
+        "id": "m-p5",
+        "text": "Here is what I would do.\n\n",
+        "phase": null,
+        "memoryCitation": null,
+        "delivery": null,
+        "questions": null
+       }
+      ],
+      "itemsView": "full",
+      "status": "completed",
+      "error": null,
+      "startedAt": 1791299632,
+      "completedAt": 1791299632,
+      "durationMs": 63
+     }
+    ]
+   },
+   "model": "gpt-fixture",
+   "modelProvider": "fake",
+   "serviceTier": null,
+   "cwd": "/home/user/ws",
+   "reasoningEffort": "low",
+   "collaborationMode": {
+    "mode": "plan",
+    "settings": {
+     "model": "gpt-fixture",
+     "reasoning_effort": "low",
+     "developer_instructions": "# Plan Mode (Conversational)\n\n(codex 0.160's built-in Plan mode instructions; cut here)"
+    }
+   },
+   "multiAgentMode": "explicitRequestOnly",
+   "initialTurnsPage": null,
+   "turnsBackwardsCursor": "{\"requestedThreadId\":\"01a111c7-37fd-7c51-b91e-e01c6068075d\",\"rolloutOrdinal\":32,\"includeAnchor\":true,\"scope\":{\"kind\":\"turns\"}}",
+   "itemsBackwardsCursor": "{\"requestedThreadId\":\"01a111c7-37fd-7c51-b91e-e01c6068075d\",\"rolloutOrdinal\":42,\"includeAnchor\":true,\"scope\":{\"kind\":\"itemsByCreatedAtOrdinal\"}}"
+  },
+  "thread/resume (stable connection)": {
+   "model": "gpt-fixture",
+   "reasoningEffort": "low",
+   "collaborationMode": {
+    "mode": "plan",
+    "settings": {
+     "model": "gpt-fixture",
+     "reasoning_effort": "low",
+     "developer_instructions": "# Plan Mode (Conversational)\n\n(codex 0.160's built-in Plan mode instructions; cut here)"
+    }
+   }
+  },
+  "review/start": [
+   {
+    "turn": {
+     "id": "01a111e7-469f-79c0-a807-dc06c429b464",
+     "items": [
+      {
+       "type": "userMessage",
+       "id": "01a111e7-469f-79c0-a807-dc06c429b464",
+       "clientId": null,
+       "content": [
+        {
+         "type": "text",
+         "text": "current changes",
+         "text_elements": []
+        }
+       ]
+      }
+     ],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": null,
+     "completedAt": null,
+     "durationMs": null
+    },
+    "reviewThreadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788"
+   },
+   {
+    "turn": {
+     "id": "01a111e7-4a2f-76c2-800b-901d1801d433",
+     "items": [
+      {
+       "type": "userMessage",
+       "id": "01a111e7-4a2f-76c2-800b-901d1801d433",
+       "clientId": null,
+       "content": [
+        {
+         "type": "text",
+         "text": "check the port handling",
+         "text_elements": []
+        }
+       ]
+      }
+     ],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": null,
+     "completedAt": null,
+     "durationMs": null
+    },
+    "reviewThreadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788"
+   }
+  ],
+  "thread/compact/start": {}
+ },
+ "gate": {
+  "collaborationMode/list": {
+   "code": -32600,
+   "message": "collaborationMode/list requires experimentalApi capability"
+  },
+  "thread/settings/update": {
+   "code": -32600,
+   "message": "thread/settings/update requires experimentalApi capability"
+  },
+  "turn/start": {
+   "code": -32600,
+   "message": "turn/start.collaborationMode requires experimentalApi capability"
+  }
+ },
+ "review": [
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791301731334
+  },
+  {
+   "method": "turn/started",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turn": {
+     "id": "01a111e7-4280-7813-9e0e-984d0bae3c62",
+     "items": [],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": 1791301730,
+     "completedAt": null,
+     "durationMs": null
+    }
+   },
+   "emittedAtMs": 1791301731334
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111e7-453d-7332-a9c8-de17f09ae6c5",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "hello",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4280-7813-9e0e-984d0bae3c62",
+    "startedAtMs": 1791301731665
+   },
+   "emittedAtMs": 1791301731666
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111e7-453d-7332-a9c8-de17f09ae6c5",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "hello",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4280-7813-9e0e-984d0bae3c62",
+    "completedAtMs": 1791301731665
+   },
+   "emittedAtMs": 1791301731724
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-d1",
+     "text": "",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4280-7813-9e0e-984d0bae3c62",
+    "startedAtMs": 1791301731818
+   },
+   "emittedAtMs": 1791301731818
+  },
+  {
+   "method": "item/agentMessage/delta",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4280-7813-9e0e-984d0bae3c62",
+    "itemId": "m-d1",
+    "delta": "Done in none mode, turn 1."
+   },
+   "emittedAtMs": 1791301731818
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-d1",
+     "text": "Done in none mode, turn 1.",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4280-7813-9e0e-984d0bae3c62",
+    "completedAtMs": 1791301731818
+   },
+   "emittedAtMs": 1791301731844
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4280-7813-9e0e-984d0bae3c62",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791301731984
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791301731984
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "status": {
+     "type": "idle"
+    }
+   },
+   "emittedAtMs": 1791301731992
+  },
+  {
+   "method": "turn/completed",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turn": {
+     "id": "01a111e7-4280-7813-9e0e-984d0bae3c62",
+     "items": [
+      {
+       "type": "agentMessage",
+       "id": "m-d1",
+       "text": "Done in none mode, turn 1.",
+       "phase": null,
+       "memoryCitation": null,
+       "delivery": null,
+       "questions": null
+      }
+     ],
+     "itemsView": "summary",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791301730,
+     "completedAt": 1791301731,
+     "durationMs": 1037
+    }
+   },
+   "emittedAtMs": 1791301731992
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "enteredReviewMode",
+     "id": "01a111e7-46b5-7ef3-8825-5271f72778c7",
+     "review": "current changes"
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-469f-79c0-a807-dc06c429b464",
+    "startedAtMs": 1791301732021
+   },
+   "emittedAtMs": 1791301732024
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "enteredReviewMode",
+     "id": "01a111e7-46b5-7ef3-8825-5271f72778c7",
+     "review": "current changes"
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-469f-79c0-a807-dc06c429b464",
+    "completedAtMs": 1791301732021
+   },
+   "emittedAtMs": 1791301732028
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791301732454
+  },
+  {
+   "method": "turn/started",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turn": {
+     "id": "01a111e7-4746-7313-afef-bc4551bd8f6b",
+     "items": [],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": 1791301732,
+     "completedAt": null,
+     "durationMs": null
+    }
+   },
+   "emittedAtMs": 1791301732454
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111e7-48c8-72b1-b416-e5ebd6291a54",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-469f-79c0-a807-dc06c429b464",
+    "startedAtMs": 1791301732560
+   },
+   "emittedAtMs": 1791301732561
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111e7-48c8-72b1-b416-e5ebd6291a54",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "Review the current code changes (staged, unstaged, and untracked files) and provide prioritized findings.",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-469f-79c0-a807-dc06c429b464",
+    "completedAtMs": 1791301732560
+   },
+   "emittedAtMs": 1791301732658
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-r2",
+     "text": "",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-469f-79c0-a807-dc06c429b464",
+    "startedAtMs": 1791301732650
+   },
+   "emittedAtMs": 1791301732658
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "exitedReviewMode",
+     "id": "01a111e7-49d6-7b22-9e78-1ebcffb82e1d",
+     "review": "One small issue.\n\nReview comment:\n\n- [P2] Port is hard-coded — app.py:1-1\n  app.py sets port = 9090; read it from PORT instead."
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-469f-79c0-a807-dc06c429b464",
+    "startedAtMs": 1791301732822
+   },
+   "emittedAtMs": 1791301732822
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "exitedReviewMode",
+     "id": "01a111e7-49d6-7b22-9e78-1ebcffb82e1d",
+     "review": "One small issue.\n\nReview comment:\n\n- [P2] Port is hard-coded — app.py:1-1\n  app.py sets port = 9090; read it from PORT instead."
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-469f-79c0-a807-dc06c429b464",
+    "completedAtMs": 1791301732822
+   },
+   "emittedAtMs": 1791301732829
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "msg_01a111e7-49dc-7db0-8b48-2392abf26838",
+     "text": "One small issue.\n\nReview comment:\n\n- [P2] Port is hard-coded — app.py:1-1\n  app.py sets port = 9090; read it from PORT instead.",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-469f-79c0-a807-dc06c429b464",
+    "startedAtMs": 1791301732830
+   },
+   "emittedAtMs": 1791301732830
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "msg_01a111e7-49dc-7db0-8b48-2392abf26838",
+     "text": "One small issue.\n\nReview comment:\n\n- [P2] Port is hard-coded — app.py:1-1\n  app.py sets port = 9090; read it from PORT instead.",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-469f-79c0-a807-dc06c429b464",
+    "completedAtMs": 1791301732830
+   },
+   "emittedAtMs": 1791301732833
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "status": {
+     "type": "idle"
+    }
+   },
+   "emittedAtMs": 1791301732909
+  },
+  {
+   "method": "turn/completed",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turn": {
+     "id": "01a111e7-469f-79c0-a807-dc06c429b464",
+     "items": [
+      {
+       "type": "agentMessage",
+       "id": "msg_01a111e7-49dc-7db0-8b48-2392abf26838",
+       "text": "One small issue.\n\nReview comment:\n\n- [P2] Port is hard-coded — app.py:1-1\n  app.py sets port = 9090; read it from PORT instead.",
+       "phase": null,
+       "memoryCitation": null,
+       "delivery": null,
+       "questions": null
+      }
+     ],
+     "itemsView": "summary",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791301732,
+     "completedAt": 1791301732,
+     "durationMs": 889
+    }
+   },
+   "emittedAtMs": 1791301732909
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "enteredReviewMode",
+     "id": "01a111e7-4a5a-7be2-9aa7-e48d67bba9e8",
+     "review": "check the port handling"
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4a2f-76c2-800b-901d1801d433",
+    "startedAtMs": 1791301732954
+   },
+   "emittedAtMs": 1791301732954
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "enteredReviewMode",
+     "id": "01a111e7-4a5a-7be2-9aa7-e48d67bba9e8",
+     "review": "check the port handling"
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4a2f-76c2-800b-901d1801d433",
+    "completedAtMs": 1791301732954
+   },
+   "emittedAtMs": 1791301732966
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791301733270
+  },
+  {
+   "method": "turn/started",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turn": {
+     "id": "01a111e7-4b11-7e73-b176-30347ed9ec04",
+     "items": [],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": 1791301733,
+     "completedAt": null,
+     "durationMs": null
+    }
+   },
+   "emittedAtMs": 1791301733270
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111e7-4bc7-7a92-9f5a-1ed0703d4d1c",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "check the port handling",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4a2f-76c2-800b-901d1801d433",
+    "startedAtMs": 1791301733322
+   },
+   "emittedAtMs": 1791301733322
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111e7-4bc7-7a92-9f5a-1ed0703d4d1c",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "check the port handling",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4a2f-76c2-800b-901d1801d433",
+    "completedAtMs": 1791301733322
+   },
+   "emittedAtMs": 1791301733329
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-r3",
+     "text": "",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4a2f-76c2-800b-901d1801d433",
+    "startedAtMs": 1791301733335
+   },
+   "emittedAtMs": 1791301733335
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "exitedReviewMode",
+     "id": "01a111e7-4be9-79c3-a84a-865bfeb80e30",
+     "review": "One small issue.\n\nReview comment:\n\n- [P2] Port is hard-coded — app.py:1-1\n  app.py sets port = 9090; read it from PORT instead."
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4a2f-76c2-800b-901d1801d433",
+    "startedAtMs": 1791301733353
+   },
+   "emittedAtMs": 1791301733354
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "exitedReviewMode",
+     "id": "01a111e7-4be9-79c3-a84a-865bfeb80e30",
+     "review": "One small issue.\n\nReview comment:\n\n- [P2] Port is hard-coded — app.py:1-1\n  app.py sets port = 9090; read it from PORT instead."
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4a2f-76c2-800b-901d1801d433",
+    "completedAtMs": 1791301733353
+   },
+   "emittedAtMs": 1791301733355
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "msg_01a111e7-4beb-70c3-8bf7-ea4339a12d15",
+     "text": "One small issue.\n\nReview comment:\n\n- [P2] Port is hard-coded — app.py:1-1\n  app.py sets port = 9090; read it from PORT instead.",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4a2f-76c2-800b-901d1801d433",
+    "startedAtMs": 1791301733375
+   },
+   "emittedAtMs": 1791301733375
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "msg_01a111e7-4beb-70c3-8bf7-ea4339a12d15",
+     "text": "One small issue.\n\nReview comment:\n\n- [P2] Port is hard-coded — app.py:1-1\n  app.py sets port = 9090; read it from PORT instead.",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turnId": "01a111e7-4a2f-76c2-800b-901d1801d433",
+    "completedAtMs": 1791301733375
+   },
+   "emittedAtMs": 1791301733406
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "status": {
+     "type": "idle"
+    }
+   },
+   "emittedAtMs": 1791301733416
+  },
+  {
+   "method": "turn/completed",
+   "params": {
+    "threadId": "01a111e7-3db9-7a32-b6a4-0fcde023a788",
+    "turn": {
+     "id": "01a111e7-4a2f-76c2-800b-901d1801d433",
+     "items": [
+      {
+       "type": "agentMessage",
+       "id": "msg_01a111e7-4beb-70c3-8bf7-ea4339a12d15",
+       "text": "One small issue.\n\nReview comment:\n\n- [P2] Port is hard-coded — app.py:1-1\n  app.py sets port = 9090; read it from PORT instead.",
+       "phase": null,
+       "memoryCitation": null,
+       "delivery": null,
+       "questions": null
+      }
+     ],
+     "itemsView": "summary",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791301733,
+     "completedAt": 1791301733,
+     "durationMs": 459
+    }
+   },
+   "emittedAtMs": 1791301733416
+  }
+ ],
+ "compact": [
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791301824172
+  },
+  {
+   "method": "turn/started",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turn": {
+     "id": "01a111e8-ad54-7fd2-8eb5-2eb11ffc90ea",
+     "items": [],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": 1791301823,
+     "completedAt": null,
+     "durationMs": null
+    }
+   },
+   "emittedAtMs": 1791301824172
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111e8-af86-78b3-b228-502fe1c48741",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "hello",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-ad54-7fd2-8eb5-2eb11ffc90ea",
+    "startedAtMs": 1791301824447
+   },
+   "emittedAtMs": 1791301824448
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "userMessage",
+     "id": "01a111e8-af86-78b3-b228-502fe1c48741",
+     "clientId": null,
+     "content": [
+      {
+       "type": "text",
+       "text": "hello",
+       "text_elements": []
+      }
+     ]
+    },
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-ad54-7fd2-8eb5-2eb11ffc90ea",
+    "completedAtMs": 1791301824447
+   },
+   "emittedAtMs": 1791301824487
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-d4",
+     "text": "",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-ad54-7fd2-8eb5-2eb11ffc90ea",
+    "startedAtMs": 1791301824532
+   },
+   "emittedAtMs": 1791301824532
+  },
+  {
+   "method": "item/agentMessage/delta",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-ad54-7fd2-8eb5-2eb11ffc90ea",
+    "itemId": "m-d4",
+    "delta": "Done in none mode, turn 4."
+   },
+   "emittedAtMs": 1791301824532
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "agentMessage",
+     "id": "m-d4",
+     "text": "Done in none mode, turn 4.",
+     "phase": null,
+     "memoryCitation": null,
+     "delivery": null,
+     "questions": null
+    },
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-ad54-7fd2-8eb5-2eb11ffc90ea",
+    "completedAtMs": 1791301824532
+   },
+   "emittedAtMs": 1791301824547
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-ad54-7fd2-8eb5-2eb11ffc90ea",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791301824574
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791301824574
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "status": {
+     "type": "idle"
+    }
+   },
+   "emittedAtMs": 1791301824610
+  },
+  {
+   "method": "turn/completed",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turn": {
+     "id": "01a111e8-ad54-7fd2-8eb5-2eb11ffc90ea",
+     "items": [
+      {
+       "type": "agentMessage",
+       "id": "m-d4",
+       "text": "Done in none mode, turn 4.",
+       "phase": null,
+       "memoryCitation": null,
+       "delivery": null,
+       "questions": null
+      }
+     ],
+     "itemsView": "summary",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791301823,
+     "completedAt": 1791301824,
+     "durationMs": 745
+    }
+   },
+   "emittedAtMs": 1791301824610
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "status": {
+     "type": "active",
+     "activeFlags": []
+    }
+   },
+   "emittedAtMs": 1791301824781
+  },
+  {
+   "method": "turn/started",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turn": {
+     "id": "01a111e8-b08b-7d90-a84e-6e8a3e4c9666",
+     "items": [],
+     "itemsView": "notLoaded",
+     "status": "inProgress",
+     "error": null,
+     "startedAt": 1791301824,
+     "completedAt": null,
+     "durationMs": null
+    }
+   },
+   "emittedAtMs": 1791301824781
+  },
+  {
+   "method": "item/started",
+   "params": {
+    "item": {
+     "type": "contextCompaction",
+     "id": "01a111e8-b111-71d0-8595-e52dbc7d2759"
+    },
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-b08b-7d90-a84e-6e8a3e4c9666",
+    "startedAtMs": 1791301824785
+   },
+   "emittedAtMs": 1791301824787
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-b08b-7d90-a84e-6e8a3e4c9666",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791301824831
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791301824831
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-b08b-7d90-a84e-6e8a3e4c9666",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 30,
+      "inputTokens": 20,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 10,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 15,
+      "inputTokens": 10,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 5,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791301824937
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791301824937
+  },
+  {
+   "method": "thread/tokenUsage/updated",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-b08b-7d90-a84e-6e8a3e4c9666",
+    "tokenUsage": {
+     "total": {
+      "totalTokens": 30,
+      "inputTokens": 20,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 10,
+      "reasoningOutputTokens": 0
+     },
+     "last": {
+      "totalTokens": 5478,
+      "inputTokens": 0,
+      "cachedInputTokens": 0,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 0,
+      "reasoningOutputTokens": 0
+     },
+     "modelContextWindow": 258400
+    }
+   },
+   "emittedAtMs": 1791301825009
+  },
+  {
+   "method": "account/rateLimits/updated",
+   "params": {
+    "rateLimits": {
+     "limitId": "codex",
+     "limitName": null,
+     "normalModelSlug": null,
+     "primary": null,
+     "secondary": null,
+     "credits": null,
+     "individualLimit": null,
+     "spendControlReached": null,
+     "planType": null,
+     "rateLimitReachedType": null
+    }
+   },
+   "emittedAtMs": 1791301825009
+  },
+  {
+   "method": "item/completed",
+   "params": {
+    "item": {
+     "type": "contextCompaction",
+     "id": "01a111e8-b111-71d0-8595-e52dbc7d2759"
+    },
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turnId": "01a111e8-b08b-7d90-a84e-6e8a3e4c9666",
+    "completedAtMs": 1791301825009
+   },
+   "emittedAtMs": 1791301825015
+  },
+  {
+   "method": "warning",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "message": "Heads up: Long threads and multiple compactions can cause the model to be less accurate. Start a new thread when possible to keep threads small and targeted."
+   },
+   "emittedAtMs": 1791301825015
+  },
+  {
+   "method": "thread/status/changed",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "status": {
+     "type": "idle"
+    }
+   },
+   "emittedAtMs": 1791301825046
+  },
+  {
+   "method": "turn/completed",
+   "params": {
+    "threadId": "01a111e8-a748-7d33-84ae-70f392e0b18b",
+    "turn": {
+     "id": "01a111e8-b08b-7d90-a84e-6e8a3e4c9666",
+     "items": [],
+     "itemsView": "notLoaded",
+     "status": "completed",
+     "error": null,
+     "startedAt": 1791301824,
+     "completedAt": 1791301825,
+     "durationMs": 382
+    }
+   },
+   "emittedAtMs": 1791301825046
+  }
+ ]
+}

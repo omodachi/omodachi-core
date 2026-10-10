@@ -98,6 +98,10 @@ def create_service(hub: Hub, *, demo=False, default_menu: Path | None = None,
                           preferences_store=preferences_store, audio_session_factory=audio_session_factory,
                           unavailable_reason="remote_runtime_unavailable")
     service.media_pairing = media_pairing
+    # REMOTE-PAIR-1: a certificate that moved to the identity proving it
+    # retires the identity it moved from.
+    if media_pairing is not None and getattr(media_pairing, "on_rebind", False) is None:
+        media_pairing.on_rebind = service.media_rebound
 
     def wire_remote(manager):
         """Give a freshly built manager the host answers only this file has.
@@ -263,8 +267,11 @@ def create_service(hub: Hub, *, demo=False, default_menu: Path | None = None,
         service.remote.audio.arbiter = arbiter
         service.voice = VoiceService(hub, factory=audio_session_factory, arbiter=arbiter,
                                      preferences=service.preferences_store)
-        from .notifications import NotificationMirror, NotificationService
-        service.notification_mirror = NotificationMirror(hub)
+        from .notifications import NotificationMirror, NotificationService, journal_line
+        # NOTIFY-3: the mirror asks the service which of Omodachi's own
+        # requests still wait, and withdraws the notifications of the rest.
+        service.notification_mirror = NotificationMirror(
+            hub, pending_requests=service.pending_request_markers, journal=journal_line)
         service.notifications = NotificationService(service.notification_mirror)
         from .shortcut_provider import install_shortcut_provider
         install_shortcut_provider(service)

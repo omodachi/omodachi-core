@@ -119,6 +119,42 @@ class RemoteApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((status, value["released"]), (200, True), value)
         self.assertEqual([row for row in self.compositor.rows if OWNED_NAME.fullmatch(row["name"])], [])
 
+    async def test_text_the_keyboard_has_no_key_for_is_typed_by_wtype_for_the_owner_only(self):
+        """REMOTE-INPUT-1, over HTTP: the route, the owner rule, the answer."""
+        from omodachi_core.remote.text import HostText
+        typed = []
+        host_text = HostText(runner=lambda argv, env, timeout: typed.append(argv) or 0,
+                             environment=lambda: {"WAYLAND_DISPLAY": "wayland-1"}, which=lambda name: "/usr/bin/wtype")
+        host_text.executable = lambda: "/usr/bin/wtype"
+        self.service.remote._host_text = host_text
+        status, value = await self.call("GET", "/v1/remote/capabilities")
+        self.assertEqual(value["text_input"], {"available": True, "layout": "us", "variant": None,
+                                               "max_chars": 1024, "max_bytes": 4096, "compose": True})
+        session = await self.start(backend="vnc")
+        path = f"/v1/remote/sessions/{session['id']}/text"
+        status, value = await self.call("POST", path, {"text": "你好👍"})
+        self.assertEqual(status, 200, value)
+        validator("remote-text.schema.json").validate(value)
+        self.assertEqual((value["chars"], value["method"]), (3, "wtype"))
+        self.assertNotIn("你好", json.dumps(value, ensure_ascii=False))
+        self.assertEqual(typed, [("/usr/bin/wtype", "-k", "VoidSymbol", "--", "你好👍")])
+        status, value = await self.call("POST", path, {"text": "你好"}, token=self.other)
+        self.assertEqual((status, value["error"]["code"]), (403, "permission_denied"))
+        status, value = await self.call("POST", path, {"text": "a\r"})
+        self.assertEqual((status, value["error"]["code"]), (400, "invalid_request"))
+        self.assertEqual(len(typed), 1)
+        # REMOTE-INPUT-2: a compose-field draft with Enter after, sent twice
+        # with one id (a retry after a lost reply) is typed once.
+        draft = {"text": "Hello, World!\n", "id": "0f8fad5b-d9cb-469f-a165-70867728950e"}
+        status, value = await self.call("POST", path, draft)
+        self.assertEqual(status, 200, value)
+        validator("remote-text.schema.json").validate(value)
+        status, again = await self.call("POST", path, draft)
+        self.assertEqual(status, 200, again)
+        validator("remote-text.schema.json").validate(again)
+        self.assertEqual(again, {**value, "replayed": True})
+        self.assertEqual(typed[1:], [("/usr/bin/wtype", "-k", "VoidSymbol", "--", "Hello, World!\n")])
+
     async def test_a_second_session_is_409_with_the_existing_id(self):
         session = await self.start(backend="vnc")
         status, value = await self.call("POST", "/v1/remote/sessions", profile_request())

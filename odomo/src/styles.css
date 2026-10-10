@@ -1,0 +1,1065 @@
+/* Odomo.
+ *
+ * Provenance: everything down to "Odomo's own" is copied from omodachi-web
+ * `src/styles.css` at main 0da28c9 (same author, MIT, like this repository):
+ * the tokens of omodachi-brand/design-system/ui-study-04.html and the App's
+ * metrics (bar 44, rows 50/58, control 28, zero radius, no shadow). Only the
+ * pieces Odomo draws were taken - the bar, the panel area and its primitives,
+ * panel 1 (menu and keybindings), Settings and Notifications. The tokens are
+ * Tokyo Night until `/v1/theme` answers; theme.js then sets the same
+ * variables from the host's own palette, through CSSOM, which the CSP allows.
+ */
+
+@font-face {
+  font-family: "JetBrains Mono Web";
+  src: url("./font/jetbrains-mono-400.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono Web";
+  src: url("./font/jetbrains-mono-500.woff2") format("woff2");
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono Web";
+  src: url("./font/jetbrains-mono-600.woff2") format("woff2");
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+
+/* AGENT-UI-2: Nerd Font code points (powerline separators, file and git
+   icons) for the Herdr mirror and anything else in the mono face. Symbols
+   only, no letterforms; each file is fetched the first time a glyph in its
+   range is drawn. Licence: font/SymbolsNerdFont-LICENSE.txt. */
+@font-face {
+  font-family: "Symbols Nerd Font Mono Web";
+  src: url("./font/symbols-nerd-font-mono-bmp.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+  unicode-range: U+E000-F8FF, U+23FB-23FE, U+2B58;
+}
+@font-face {
+  font-family: "Symbols Nerd Font Mono Web";
+  src: url("./font/symbols-nerd-font-mono-spua.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+  unicode-range: U+F0000-FFFFD;
+}
+
+*, *::before, *::after {box-sizing: border-box}
+
+:root {
+  --mono: "JetBrains Mono Web", "Symbols Nerd Font Mono Web", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+  --sys: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+
+  /* Tokyo Night, the default theme of ui-study-04.html */
+  --om-bg: #1a1b26;
+  --om-dark: #13141c;
+  --om-darker: #0e0e14;
+  --om-raised: #24283b;
+  --om-fg: #a9b1d6;
+  --om-dim: #565f89;
+  --om-bright: #c0caf5;
+  --om-accent: #7aa2f7;
+  --om-line: #414868;
+  --om-sel: #292e42;
+  --om-green: #9ece6a;
+  --om-red: #f7768e;
+  --om-yellow: #e0af68;
+  /* Study 03, supplement 2: `muted` is a border colour, not a body colour. On
+     Tokyo Night it is 2.76:1 against the background, and A-48 asks for 4.5:1
+     on text. The App resolves this at runtime by walking muted -> light
+     foreground -> foreground. A web page has one palette per theme, so the
+     same walk is done once, here, and the answer is `--om-sec`. It carries
+     prose only; `--om-dim` keeps its border and label jobs.
+     Measured: tokyo 5.44:1, lupine 6.41:1, gruvbox 5.30:1. */
+  --om-sec: #868fbe;
+  --om-cyan: #7dcfff;
+  /* The five step ramp the hero wordmark is banded with, hard stops only. */
+  --band-1: #c7d7fb; --band-2: #a8c0f9; --band-3: #7aa2f7; --band-4: #5a7fc4; --band-5: #3f5a8e;
+  --fgr: 169, 177, 214;
+  --acr: 122, 162, 247;
+  --drk: 14, 14, 20;
+  --bgr: 26, 27, 38;
+
+  /* The wallpaper, five flat steps. The paths come from
+     omodachi-brand/wallpapers/blue-hour-branded-desktop.svg; the colours are
+     per theme, because on a real computer the wallpaper belongs to the theme. */
+  --wall-sky: #0c0d14;
+  --wall-1: #161826;
+  --wall-2: #1f2337;
+  --wall-3: #2b3150;
+  --wall-4: #3b436b;
+  --wall-o: #4a58a0;
+
+  --bar: 44px;
+  --hb: 20px;
+
+  /* A-59 / rev 5 motion: 120 for a control, 160 for a panel, 200 for the
+     picture. Nothing longer, and nothing at all under reduced motion. */
+  --t-fast: 120ms;
+  --t-mid: 160ms;
+  --t-slow: 200ms;
+  --ease: cubic-bezier(.33, 1, .68, 1);
+}
+
+html, body, #root {height: 100%}
+body {
+  margin: 0;
+  background: var(--om-bg);
+  color: var(--om-fg);
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+  font-variant-ligatures: none;
+}
+button, input, textarea {font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: left}
+button {cursor: pointer}
+:focus-visible {outline: 2px solid var(--om-accent); outline-offset: -2px}
+.sr {position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap}
+
+
+/* ── the shell (WEB-9) ──────────────────────────────────────────────── */
+/* The window is an iPad that has taken over an Omarchy desktop. Two stages,
+   as in omodachi-ios SurfaceRouter: the picture, with the App's one layer
+   summoned over it, and the panels, when no session runs. The layer is the
+   bar down the left edge, 44 wide with a 2px rule, and one panel area.
+
+   The App's numbers, from DesignSystem/Metrics.swift, Row.swift and the
+   bundled Tokyo Night theme: bar 44, glyph 22, workspace square 28, hit area
+   44, rows 50 and 58, control 28, control border 1 at .4, panel rule 2,
+   fills .04 normal / .18 selected / .22 pressed, scrim .5, 140 ms.
+   Type is the tablet scale of TypeScale.swift: every host step plus 2, with
+   floors of 15 for body and 13 for secondary text. */
+.app {position: fixed; inset: 0; overflow: hidden; background: var(--om-bg)}
+.grow {flex: 1 1 auto; min-width: 0}
+
+.layer {position: absolute; inset: 0; display: flex; z-index: 20; background: var(--om-bg)}
+.layer--over {animation: layer-down 160ms var(--ease) both}
+.stage {flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--om-bg)}
+.scrim {position: absolute; inset: 0; z-index: 19; background: rgba(26, 27, 38, .5); animation: fade-in var(--t-fast) linear both}
+
+@keyframes layer-down {from {transform: translateY(-100%)} to {transform: none}}
+@keyframes fade-in {from {opacity: 0} to {opacity: 1}}
+@keyframes hint-out {0%, 80% {opacity: 1} 100% {opacity: 0}}
+@keyframes blink {0%, 49% {opacity: 1} 50%, 100% {opacity: 0}}
+.cursor {animation: blink 1.1s steps(1, end) infinite}
+.bslot, .ws, .row__tap, .fbtn, .segrow button, .pseg button, .tog i, .krow__tap, .link, .try, .hpane, .rmark {
+  transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease);
+}
+
+/* ── the bar (BarView.swift, on the left edge) ──────────────────────── */
+.sbar {
+  width: 46px; flex: none; display: flex; flex-direction: column; background: var(--om-bg);
+  border-right: 2px solid var(--om-fg); overflow: hidden auto; scrollbar-width: none;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.sbar::-webkit-scrollbar {display: none}
+.sbar__seg {display: flex; flex-direction: column; flex: none}
+.bslot {position: relative; width: 44px; height: 44px; display: grid; place-items: center; color: var(--om-fg); flex: none}
+.bslot:hover {background: rgba(var(--fgr), .08)}
+.bslot:active {background: rgba(var(--fgr), .22)}
+.bslot.on {background: rgba(var(--fgr), .18); color: var(--om-accent)}
+.bslot__badge {position: absolute; top: 8px; right: 8px; width: 6px; height: 6px}
+.bslot__dot {position: absolute; bottom: 3px; right: 3px; width: 6px; height: 6px}
+/* OVERVIEW-1: the red count on Herdr - panes waiting on you, every session. */
+.bslot__count {position: absolute; top: 4px; right: 3px; min-width: 15px; height: 15px; padding: 0 3px;
+  display: grid; place-items: center; font-style: normal; font-size: 10px; font-weight: 700; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--om-bg); background: var(--om-red)}
+.sbar__logo {display: grid; place-items: center}
+.sbar__conn {height: 10px; display: grid; place-items: center}
+.sbar__conn i {width: 6px; height: 6px; background: var(--om-green)}
+.sbar__ws {display: flex; flex-direction: column}
+.ws {width: 44px; height: 44px; display: grid; place-items: center; flex: none}
+.ws i {
+  width: 28px; height: 28px; display: grid; place-items: center; font-style: normal; font-size: 15px;
+  font-variant-numeric: tabular-nums; color: var(--om-fg);
+  background: rgba(var(--fgr), .04); border: 1px solid rgba(var(--fgr), .4);
+}
+.ws.sel i {background: rgba(var(--fgr), .18); border-color: transparent; color: var(--om-accent); font-weight: 600}
+.ws.vacant i {opacity: .5}
+.ws:hover i {background: rgba(var(--fgr), .08)}
+.bslot--page {height: 36px; color: var(--om-sec); border-top: 1px dashed rgba(var(--fgr), .25)}
+
+/* ── the panel area (PanelArea.swift) ───────────────────────────────── */
+.parea {flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--om-bg)}
+.parea__head {height: 44px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 4px 0 12px}
+.ptitle {margin: 0; font-size: 18px; font-weight: 400; letter-spacing: -.2px; color: var(--om-bright);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2}
+.parea__scroll {flex: 1; min-height: 0; overflow: auto}
+.parea__col {max-width: 760px; margin: 0 auto; padding-bottom: 12px}
+.parea__work {flex: 1; min-height: 0; display: flex; flex-direction: column}
+
+.glabel {height: 44px; display: flex; align-items: center; padding: 0 12px; font-size: 13px; letter-spacing: 1px;
+  color: var(--om-sec); text-transform: none}
+.glabel > span:first-child {flex: 1}
+.glabel__act {height: 44px; padding: 0 4px; color: var(--om-accent); font-size: 13px; letter-spacing: 0}
+.frule {height: 1px; background: rgba(var(--fgr), .35); margin: 6px 0}
+.snote {margin: 0; padding: 10px 12px; font-family: var(--sys); font-size: 13px; line-height: 1.45; color: var(--om-sec)}
+
+/* Row.swift */
+.row {display: flex; align-items: stretch; min-height: 50px}
+.row--detail {min-height: 58px}
+.row__rule {width: 1px; flex: none; margin-right: 17px; margin-left: 12px; background: rgba(var(--fgr), .25)}
+.row__rule + .row__rule {margin-left: 0}
+.row__tap {flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--om-fg)}
+.row__tap:hover {background: rgba(var(--fgr), .08)}
+.row__tap:active {background: rgba(var(--fgr), .22)}
+.row__tap.sel {background: rgba(var(--fgr), .08)}
+.row__tap:disabled {color: var(--om-line); cursor: default}
+.row__gl {width: 36px; height: 36px; flex: none; display: grid; place-items: center}
+.row__tx {min-width: 0; display: flex; flex-direction: column; gap: 4px}
+.row__t1 {font-size: 17px; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.row--detail .row__t1 {font-size: 16px}
+.row__t2 {font-size: 13px; color: var(--om-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.row__trail {display: flex; align-items: center; flex: none}
+.row__cv {padding: 0 8px; color: var(--om-sec); display: grid; place-items: center}
+.tapagain {font-size: 13px; color: var(--om-yellow); padding: 0 6px; white-space: nowrap}
+.pinbtn {width: 44px; align-self: stretch; display: grid; place-items: center; color: var(--om-line); flex: none}
+.pinbtn.on {color: var(--om-accent)}
+
+/* ODOMO-SETTINGS-1: SettingLine.swift (SETTINGS-LAYOUT-1), the one Settings row.
+   Items align on the title's first baseline. `.sline__gl` and `.sline__end`
+   carry a zero-width strut in the title's own font and line, centred, so their
+   baseline is the middle of the title line: a switch, a segmented control or
+   a chevron centres on that line, not on the title and detail together.
+   beside: never wraps; the end may use the row's padding (a 44 switch).
+   fitting: flex-wrap - the end goes under when title + end at their natural
+   widths do not fit, and the detail adds no width (contain: inline-size).
+   under: a column. */
+.sline {width: 100%; min-height: 44px; display: flex; align-items: baseline; column-gap: 16px; row-gap: 8px;
+  padding: 10px 12px; color: var(--om-fg); text-align: left; text-decoration: none}
+.sline--fitting {flex-wrap: wrap}
+.sline--under {flex-direction: column; align-items: stretch}
+.sline__tx {flex: 999 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px}
+.sline--under .sline__tx {flex: none}
+.sline__t {font-size: 16px; line-height: 22px; color: var(--om-fg)}
+.sline__d {contain: inline-size; font-family: var(--sys); font-size: 13px; line-height: 1.45; color: var(--om-sec);
+  overflow-wrap: anywhere}
+.sline__gl, .sline__end {flex: none; min-width: 0; display: flex; align-items: center}
+.sline__gl::before, .sline__end::before {content: '\200b'; width: 0; overflow: hidden; font-size: 16px; line-height: 22px}
+.sline__gl {width: 28px; justify-content: center}
+.sline--beside .sline__end {margin-block: -10px}
+.sline--fitting .sline__end {flex: 0 1 auto}
+.sline--choice .sline__end {flex: 1 1 auto; max-width: 420px}
+.sline--choice .segrow {flex: 1; min-width: 0}
+.sline--under .sline__end {align-self: stretch}
+.sline__v {min-width: 0; font-size: 15px; line-height: 22px; color: var(--om-sec); overflow-wrap: anywhere;
+  -webkit-user-select: text; user-select: text}
+.sline__cv {color: var(--om-accent)}
+.sline--tap {cursor: pointer}
+.sline--tap:hover {background: rgba(var(--fgr), .08)}
+.sline--tap:active {background: rgba(var(--fgr), .22)}
+
+.estate {display: flex; flex-direction: column; gap: 6px; padding: 18px 12px}
+.estate__t {font-family: var(--sys); font-size: 16px; color: var(--om-fg)}
+.estate__d {font-family: var(--sys); font-size: 13px; color: var(--om-sec)}
+
+.field {height: 44px; flex: none; display: flex; align-items: center; gap: 10px; margin: 0 12px;
+  border-bottom: 1px solid rgba(var(--fgr), .4); color: var(--om-fg)}
+.field input {flex: 1; min-width: 0; height: 40px; font-size: 15px; outline: none}
+.field input::placeholder {color: var(--om-sec); opacity: .8}
+.field input::-webkit-search-cancel-button {display: none}
+.field__clear {width: 32px; height: 40px; display: grid; place-items: center; color: var(--om-sec)}
+
+/* FlowButton.swift */
+.fbtn {min-height: 44px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 15px; border: 1px solid rgba(var(--fgr), .4); background: rgba(var(--fgr), .04); color: var(--om-fg);
+  white-space: nowrap}
+.fbtn:hover {background: rgba(var(--fgr), .08)}
+.fbtn:active {background: rgba(var(--fgr), .22)}
+.fbtn--primary {background: var(--om-accent); border-color: var(--om-accent); color: var(--om-bg); font-weight: 600}
+.fbtn--primary:hover {background: var(--om-bright); border-color: var(--om-bright)}
+.fbtn--ghost {background: transparent; color: var(--om-sec)}
+.fbtn--danger {border-color: var(--om-red); color: var(--om-red); background: rgba(247, 118, 142, .08)}
+.fbtn:disabled {opacity: .45; cursor: default}
+
+/* SquareToggle.swift: 42 by 22, square */
+.tog {width: 44px; height: 44px; display: grid; place-items: center; flex: none}
+.tog i {width: 42px; height: 22px; position: relative; display: block; background: rgba(var(--fgr), .04);
+  border: 1px solid rgba(var(--fgr), .4)}
+.tog i::after {content: ''; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; background: var(--om-line);
+  transition: transform var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease)}
+.tog.on i {background: rgba(var(--acr), .25); border-color: var(--om-accent)}
+.tog.on i::after {transform: translateX(20px); background: var(--om-accent)}
+.tog:disabled {opacity: .45; cursor: default}
+
+/* SegmentedRow */
+.segrow, .pseg {display: flex; border: 1px solid rgba(var(--fgr), .4); background: rgba(var(--fgr), .04)}
+.segrow {display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 6px} /* ODOMO-SETTINGS-1: equal segments, so the natural width is the widest x n */
+.segrow button {flex: 1; min-height: 32px; padding: 0 8px; text-align: center; font-size: 15px; color: var(--om-fg); white-space: nowrap}
+.segrow button.on {background: rgba(var(--fgr), .18); color: var(--om-accent)}
+.segrow button:hover:not(.on) {background: rgba(var(--fgr), .08)}
+.pseg {height: 28px}
+.pseg button {display: flex; align-items: center; gap: 6px; padding: 0 12px; height: 26px; font-size: 15px; color: var(--om-line)}
+.pseg button.on {background: rgba(var(--fgr), .18); color: var(--om-accent); font-weight: 600}
+
+.schip {display: inline-flex; align-items: center; height: 22px; padding: 0 7px; font-size: 13px;
+  border: 1px solid currentColor; white-space: nowrap; flex: none}
+.schip--ok {color: var(--om-green)}
+.schip--muted {color: var(--om-sec)}
+
+.keys {display: inline-flex; gap: 4px; flex: none}
+.keys kbd {font-family: var(--mono); font-size: 13px; padding: 3px 6px; color: var(--om-fg);
+  background: rgba(var(--fgr), .04); border: 1px solid rgba(var(--fgr), .4)}
+
+/* ── panel 1 ────────────────────────────────────────────────────────── */
+.menu1, .menu2 {flex: 1; min-height: 0; display: flex}
+.menu1 > .parea {flex: 1}
+.menu2__menu {width: 360px; flex: none; display: flex}
+.menu2__keys {flex: 1; min-width: 0; display: flex}
+.menu2__rule {width: 2px; flex: none; background: var(--om-fg)}
+.hostsw {display: flex; align-items: center; gap: 4px; height: 44px; color: var(--om-sec); min-width: 0; flex: 0 1 auto; overflow: hidden}
+.pseg {flex: none}
+.plist {flex: 1; min-height: 0; overflow: auto; padding-bottom: 12px}
+.pinned__rule {height: 1px; background: rgba(var(--fgr), .35)}
+.row__sym {display: grid; place-items: center; color: var(--om-fg)}
+.krow {display: flex; align-items: stretch; min-height: 58px}
+.krow__tap {flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px}
+.krow__tap:hover {background: rgba(var(--fgr), .08)}
+.krow__tx {flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px}
+.krow__t1 {font-size: 16px; color: var(--om-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.krow__t2 {font-size: 13px; color: var(--om-sec)}
+.krow.dis .krow__t1 {color: var(--om-line)}
+.krow__tap:disabled {cursor: default; background: none}
+.ptoast {flex: none; height: 26px; margin: 0 5px 5px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+  font-size: 13px; border: 1px solid rgba(var(--fgr), .4); background: rgba(var(--fgr), .04); color: var(--om-fg);
+  white-space: nowrap; overflow: hidden}
+.ptoast svg {color: var(--om-green)}
+.ptoast__d {margin-left: auto; color: var(--om-sec); font-family: var(--sys)}
+
+/* ── panels 6 and 7 ─────────────────────────────────────────────────── */
+.setting {display: flex; flex-direction: column; gap: 6px; padding: 10px 12px}
+.hostrow {display: flex; align-items: center; gap: 10px; height: 58px; padding: 0 12px; color: var(--om-accent)}
+.hostrow__tx {flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px}
+.hostrow__tx b {font-size: 17px; font-weight: 400; color: var(--om-fg)}
+.hostrow__tx span {font-size: 13px; color: var(--om-sec)}
+.entryrow {display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; color: var(--om-fg)}
+.entryrow > svg {width: 28px}
+.entryrow__tx {flex: 1; min-width: 0; display: flex; flex-direction: column}
+.entryrow__tx b {font-size: 15px; font-weight: 400}
+.entryrow__tx span {font-family: var(--sys); font-size: 13px; color: var(--om-sec)}
+.diag {margin: 6px 12px; border: 1px solid rgba(var(--fgr), .25)}
+.diag__h {display: flex; align-items: center; height: 36px; padding: 0 10px; font-size: 13px; color: var(--om-sec)}
+.diag__copy {font-size: 13px; color: var(--om-line)}
+.linkrow {display: flex; align-items: center; gap: 8px; min-height: 58px; padding: 0 12px; color: var(--om-fg); text-decoration: none}
+.linkrow:hover {background: rgba(var(--fgr), .08)}
+.linkrow > svg {margin: 0 9px}
+.linkrow__tx {display: flex; flex-direction: column; gap: 4px}
+.linkrow__tx b {font-size: 16px; font-weight: 400}
+.linkrow__tx span {font-size: 13px; color: var(--om-sec)}
+.dnd {height: 28px; display: flex; align-items: center; gap: 4px; padding: 0 10px; margin: 8px 0; font-size: 13px;
+  color: var(--om-line); border: 1px solid rgba(var(--fgr), .25)}
+.dnd.on {color: var(--om-accent); background: rgba(var(--fgr), .18)}
+.nclear {display: flex; justify-content: flex-end; padding: 8px 12px 0}
+.nclear .fbtn {min-width: 200px}
+.nrow {position: relative; display: flex; gap: 8px; padding: 6px 12px; min-height: 50px}
+.nrow.past .nrow__tx {opacity: .6}
+.nrow__rule {width: 2px; flex: none}
+.nrow.past .nrow__rule {opacity: .4}
+.nrow__tx {flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-right: 44px}
+.nrow__meta {display: flex; gap: 6px; font-size: 13px; color: var(--om-sec)}
+.nrow__at {color: var(--om-sec); opacity: .85}
+.nrow__sum {font-family: var(--sys); font-size: 15px; color: var(--om-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.nrow__body {font-family: var(--sys); font-size: 13px; color: var(--om-sec)}
+.nrow__x {position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; display: grid; place-items: center; color: var(--om-sec)}
+/* NOTIFY-3: the row's text is a button that opens it; open shows all of it. */
+button.nrow__tx {background: none; border: 0; padding: 0 44px 0 0; margin: 0; font: inherit; color: inherit; text-align: left; cursor: pointer}
+.nrow__sum, .nrow__body, .nrow__why {display: block}
+.nrow__body {display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden}
+.nrow.open .nrow__sum {white-space: normal}
+.nrow.open .nrow__body {display: block; -webkit-line-clamp: unset; overflow: visible; white-space: pre-line}
+.nrow__why {font-family: var(--sys); font-size: 13px; color: var(--om-fg); padding-top: 4px}
+.nhead {display: flex; align-items: center; justify-content: space-between; padding-right: 12px}
+.nhead__clear {background: none; border: 0; font: inherit; font-size: 13px; color: var(--om-sec); min-height: 44px; padding: 0 4px; cursor: pointer}
+
+/* ── an iPhone held upright (WEB-9 section 0.5: under 1024 wide) ────────────── */
+.app[data-dev="phone"] .ptitle {font-size: 17px}
+.app[data-dev="phone"] .row__t1 {font-size: 16px}
+.app[data-dev="phone"] .pseg button {padding: 0 8px; font-size: 13px}
+@media (max-width: 420px) {.pseg button svg {display: none !important} .app[data-dev="phone"] .ptitle {font-size: 16px}}
+.app[data-dev="phone"] .rsketch {max-width: none}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {animation: none !important; transition: none !important}
+  .rhint {opacity: 1}
+}
+
+
+/* ── Odomo's own ─────────────────────────────────────────────────────── */
+/* A Home Screen web app runs under the status bar (black-translucent) and,
+   on a phone in landscape, beside the notch: the layer keeps clear of both. */
+.layer {padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px)}
+.stage {padding-bottom: env(safe-area-inset-bottom, 0px)}
+/* LITE-1b, from Leo's iPhone.
+   Bottom: as a Home Screen app on iOS 26 (black-translucent, viewport-fit
+   cover) the initial containing block is the screen minus the status bar
+   (812 of 874 pt on an iPhone 17), and a `position: fixed; inset: 0` box,
+   though it measures 874, is painted only that tall - so the last 62 pt were
+   an empty band that looked like padding. Measured with a probe page in the
+   simulator: an absolute box 100lvh tall reaches the bottom; 100%, 100dvh
+   and dropping `overflow: hidden` do not. Panels then scroll under the home
+   indicator as iOS's own apps do (their last row can still scroll clear of
+   it); the bar's buttons keep clear of it (.sbar).
+   Top: iOS 26 fades the page under the status bar a little past the inset;
+   the first row gets 10 more points. */
+@media (display-mode: standalone) {
+  .app, .pair {position: absolute; top: 0; right: 0; bottom: auto; left: 0; height: 100lvh}
+  .layer {padding-top: calc(env(safe-area-inset-top, 0px) + 10px)}
+  .stage {padding-bottom: 0}
+  .parea__scroll {padding-bottom: env(safe-area-inset-bottom, 0px)}
+  .pair {padding-top: calc(env(safe-area-inset-top, 0px) + 42px)}
+}
+
+/* POLISH-U: the on-screen keyboard (lib/viewport.js). iOS keeps the layout
+   viewport screen-tall and, to show a focused box, scrolled the whole page up
+   by the keyboard's height - the header went off the top. While a keyboard is
+   up the root box is the visible part above it instead: as tall, and where it
+   begins (in the layout viewport for a tab's fixed root, in the document for a
+   Home Screen app's absolute one). The panels are flex columns, so the
+   composer sits on the keyboard and the header stays where it was. */
+html[data-keyboard="up"] .app, html[data-keyboard="up"] .pair {
+  top: var(--om-vv-offset-top, 0px); bottom: auto; height: var(--om-vv-height, 100%);
+}
+html[data-keyboard="up"] .stage, html[data-keyboard="up"] .sbar,
+html[data-keyboard="up"] .parea__scroll {padding-bottom: 0}
+@media (display-mode: standalone) {
+  html[data-keyboard="up"] .app, html[data-keyboard="up"] .pair {
+    top: var(--om-vv-page-top, 0px); height: var(--om-vv-height, 100lvh);
+  }
+}
+
+/* the 6px connection square: green / yellow while it (re)connects / red */
+.sbar__conn i[data-status="connecting"] {background: var(--om-yellow)}
+.sbar__conn i[data-status="offline"], .sbar__conn i[data-status="idle"] {background: var(--om-red)}
+
+.ptoast[data-kind="failed"] svg {color: var(--om-red)}
+.ptoast[data-kind="sent"] svg {color: var(--om-sec)}
+.row__badge {font-size: 13px; color: var(--om-sec); padding: 0 8px; white-space: nowrap}
+a.row__badge {align-self: stretch; display: inline-flex; align-items: center; color: var(--om-accent); text-decoration: none}
+
+/* pairing: one read-and-choose column, no bar until the host says yes */
+.pair {position: fixed; inset: 0; overflow: auto; background: var(--om-bg);
+  padding: calc(env(safe-area-inset-top, 0px) + 32px) 16px calc(env(safe-area-inset-bottom, 0px) + 32px)}
+.pair__col {max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px}
+.pair__mark {color: var(--om-bright)}
+.pair__title {margin: 0; font-size: 22px; font-weight: 400; color: var(--om-bright); letter-spacing: -.3px}
+.pair__lead {margin: 0; font-family: var(--sys); font-size: 15px; line-height: 1.5; color: var(--om-fg)}
+.pair__note {margin: 0; font-family: var(--sys); font-size: 13px; line-height: 1.5; color: var(--om-sec)}
+.pair__card {border: 2px solid var(--om-accent); padding: 12px}
+.pair__card.warn {border-color: var(--om-yellow)}
+.pair__card.bad {border-color: var(--om-red)}
+.pair__kv {display: flex; gap: 10px; padding: 4px 0; font-size: 13px; align-items: baseline}
+.pair__kv span {width: 104px; flex: none; color: var(--om-sec)}
+.pair__kv b {font-weight: 400; color: var(--om-fg); word-break: break-all}
+.pair__code {font-size: 18px; color: var(--om-bright); letter-spacing: .5px}
+.pair__act {display: flex; gap: 8px; flex-wrap: wrap}
+.pair__err {margin: 0; font-family: var(--sys); font-size: 13px; color: var(--om-red)}
+.pair__wait {display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--om-yellow);
+  animation: blink 1.1s steps(1, end) infinite}
+@keyframes blink {0%, 49% {opacity: 1} 50%, 100% {opacity: 0}}
+
+/* placeholders for what is not in Odomo yet: honest, and not links */
+.next {margin: 12px; padding: 14px 12px; border: 1px dashed rgba(var(--fgr), .4)}
+.next__h {display: flex; align-items: center; gap: 8px; color: var(--om-fg)}
+.next__t {font-size: 16px}
+.next__b {margin: 8px 0 0; font-family: var(--sys); font-size: 13px; line-height: 1.5; color: var(--om-sec)}
+.next__go {margin-top: 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px}
+.next__app {text-decoration: none}
+/* NOTIFY-2: what a push was about, above the placeholder, with the way in. */
+.next--waiting {border: 1px solid var(--om-accent); border-left-width: 3px}
+.next__scheme {min-height: 44px; display: inline-flex; align-items: center; font-family: var(--sys); font-size: 13px;
+  color: var(--om-accent); text-decoration: none}
+.app[data-dev="phone"] .ptitle {font-size: 17px}
+
+/* iOS Safari zooms the whole page into any focused field set under 16px and
+   leaves it zoomed (found in the LITE-1a simulator run): on a touch screen the
+   search fields are 16px, which is also the App's body step there. */
+@media (pointer: coarse) {
+  .field input {font-size: 16px}
+}
+
+/* LITE-1b: the notification a push was about, when Odomo opens from it. */
+.nrow.hl {
+  outline: 1px solid var(--om-accent);
+  outline-offset: -1px;
+}
+.snote--err {color: var(--om-red)}
+
+/* LITE-1c: the bar says what it is.
+   Named (an iPad or a desktop window): 64 wide, each entry 52 high with its
+   name under the icon in 10px system type - the Omarchy bar's icons with a
+   caption, nothing else changed. Everywhere: the name beside the bar on hover,
+   keyboard focus or a touch-and-hold (.bpeek), and on iPhone/iPad Remote is a
+   link out, marked by a small corner arrow. */
+.bslot {text-decoration: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none}
+.bslot__ic {display: grid; place-items: center}
+.sbar--named {width: 66px}
+.sbar--named .bslot {width: 64px; height: 52px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 3px}
+.sbar--named .ws {width: 64px}
+.bslot__name {max-width: 62px; font-family: var(--sys); font-size: 10px; line-height: 12px; letter-spacing: 0;
+  color: var(--om-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.bslot.on .bslot__name {color: var(--om-accent)}
+.bslot__out {position: absolute; top: 7px; right: 7px; width: 6px; height: 6px;
+  border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; opacity: .8}
+.sbar--named .bslot__out {top: 8px; right: 14px}
+.bpeek {position: fixed; z-index: 40; transform: translateY(-50%); padding: 6px 10px; max-width: 240px;
+  font-family: var(--sys); font-size: 13px; line-height: 16px; white-space: nowrap; color: var(--om-bright);
+  background: var(--om-bg); border: 1px solid var(--om-accent); pointer-events: none;
+  animation: fade-in var(--t-fast) linear both}
+/* Settings › Omodachi app: two buttons side by side, wrapping on a phone. */
+.sapp {display: flex; flex-direction: row; flex-wrap: wrap; gap: 8px}
+.sapp .fbtn {text-decoration: none}
+
+/* LITE-1e: the install screen, its three steps, and the quiet offer.
+   The pairing page's column; the steps are the bar's 28 squares with a number
+   in them, a glyph and two lines - no radius, no shadow, no Apple artwork. */
+.inst__h {margin: 8px 0 -4px; font-size: 13px; font-weight: 400; letter-spacing: 1px; color: var(--om-sec)}
+.iwhy {list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px}
+.iwhy li {display: flex; gap: 12px; align-items: flex-start; font-family: var(--sys); font-size: 15px; line-height: 1.45;
+  color: var(--om-fg)}
+.iwhy li svg {margin-top: 2px; color: var(--om-accent)}
+.isteps {list-style: none; margin: 0; padding: 0; border: 1px solid rgba(var(--fgr), .4); background: rgba(var(--fgr), .04)}
+.istep {display: flex; gap: 12px; align-items: flex-start; padding: 12px}
+.istep + .istep {border-top: 1px solid rgba(var(--fgr), .25)}
+.istep__n {width: 28px; height: 28px; flex: none; display: grid; place-items: center; font-size: 15px;
+  font-variant-numeric: tabular-nums; color: var(--om-accent); border: 1px solid var(--om-accent); background: rgba(var(--acr), .12)}
+.istep__g {width: 28px; height: 28px; flex: none; display: grid; place-items: center; color: var(--om-bright)}
+.istep__tx {min-width: 0; display: flex; flex-direction: column; gap: 4px; padding-top: 4px}
+.istep__tx b {font-weight: 400; font-size: 16px; color: var(--om-bright)}
+.istep__tx span {font-family: var(--sys); font-size: 13px; line-height: 1.45; color: var(--om-sec)}
+.parea .isteps {margin: 0 12px 10px}
+.ioffer {display: flex; flex-direction: column; gap: 8px; padding: 10px 12px}
+.ioffer--compact {margin-top: 8px; padding: 12px; border: 1px dashed rgba(var(--fgr), .4)}
+.ioffer__t {font-weight: 400; font-size: 15px; color: var(--om-fg)}
+.ioffer__b {margin: 0; font-family: var(--sys); font-size: 13px; line-height: 1.45; color: var(--om-sec)}
+.ioffer__act {display: flex}
+
+/* ── ODOMO-2: Agent and Herdr (omodachi-ios herdr-4 AgentPanelView,
+   HerdrPanelView, HerdrControlBar, HerdrQuickDock) ─────────────────────── */
+.busy {color: var(--om-sec); font-size: 13px; margin: 0}
+.busy::before {content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--om-accent);
+  animation: blink 1.1s steps(1, end) infinite}
+.warnt {color: var(--om-yellow); font-family: var(--sys); font-size: 13px; margin: 0}
+.redt {color: var(--om-red); font-family: var(--sys); font-size: 13px; margin: 0}
+.accent {color: var(--om-accent)}
+.dim {color: var(--om-sec)}
+.tlink {min-height: 44px; color: var(--om-accent); font-size: 14px; padding: 0 2px; align-self: flex-start}
+.spin {width: 10px; height: 10px; background: var(--om-accent); animation: blink .9s steps(1, end) infinite}
+.composer {flex: none; display: flex; align-items: flex-end; gap: 6px; padding: 8px 12px calc(8px + var(--safe-b, 0px))}
+.composer__in {flex: 1; min-width: 0; min-height: 44px; max-height: 160px; resize: none; padding: 11px 10px;
+  border: 1px solid rgba(var(--fgr), .4); background: rgba(var(--fgr), .04); font-size: 16px; line-height: 1.3;
+  font-family: var(--sys); outline: none; field-sizing: content}
+.composer__in::placeholder {color: var(--om-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.composer__b {min-width: 44px; padding: 0 12px}
+.fbtn.on {background: rgba(var(--fgr), .18); color: var(--om-accent); border-color: var(--om-accent)}
+.fbtn.armed {color: var(--om-yellow); border-color: var(--om-yellow)}
+.fbtn.accentb {color: var(--om-accent)}
+.pushed {flex: none; display: flex; align-items: center; gap: 8px; padding: 0 0 0 12px; min-height: 40px;
+  background: rgba(var(--acr), .12); border-bottom: 1px solid rgba(var(--acr), .4); color: var(--om-bright); font-size: 14px}
+.pushed__t {font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.pushed__w {color: var(--om-sec); font-family: var(--sys); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.pushed__app {color: var(--om-sec); font-size: 13px; text-decoration: underline; white-space: nowrap}
+.pushed__x {width: 40px; height: 40px; display: grid; place-items: center; color: var(--om-sec); flex: none}
+.ohint {display: flex; align-items: center; gap: 6px; padding: 4px 0 4px 12px; background: rgba(var(--fgr), .06);
+  font-family: var(--sys); font-size: 13px; color: var(--om-sec)}
+.ohint > span {flex: 1}
+.ohint__x {width: 36px; height: 36px; display: grid; place-items: center; flex: none}
+
+/* Agent */
+.apanel {flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--om-bg)}
+.apanel__head {height: 44px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px;
+  border-bottom: 2px solid var(--om-line); color: var(--om-sec)}
+/* AGENT-UI-2: on a narrow phone the agent's name gives way before the model does */
+.apanel__id {display: flex; flex-direction: column; min-width: 0; line-height: 1.2; flex: 0 1000 auto}
+.apanel__id b {font-size: 13px; color: var(--om-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.apanel__id span {font-size: 12px; color: var(--om-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.apanel__model {min-height: 38px; padding: 0 8px; font-size: 13px; max-width: 220px; gap: 6px; flex: 0 1 auto; min-width: 0}
+/* AGENT-NEW-1: New conversation, a quiet square beside the model control */
+.apanel__new {min-height: 32px; width: 32px; padding: 0; justify-content: center; flex: none}
+.apanel__mv {overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+/* AGENT-UI-2: model over effort, each one line, both whole on a phone */
+.apanel__mvs {display: flex; flex-direction: column; align-items: flex-start; min-width: 0; max-width: 100%; line-height: 1.15}
+.apanel__me {font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%}
+/* AGENT-PLAN-1: Plan mode on - a small accent chip; a tap leaves it */
+.apanel__plan {min-height: 32px; padding: 0 8px; gap: 5px; font-size: 13px; flex: none; color: var(--om-accent);
+  border-color: var(--om-accent)}
+.apanel__list {flex: 1; min-height: 0; overflow: auto}
+.apanel__col {display: flex; flex-direction: column; gap: 22px; padding: 14px 12px}
+.apanel__empty {margin: 0; font-family: var(--sys); font-size: 16px; color: var(--om-sec)}
+.apanel__app, .hpanel__app {align-self: flex-start; font-size: 12px; color: var(--om-dim); text-decoration: underline;
+  padding: 2px 0}
+.hpanel__app {flex: none; align-self: center; margin: 0 10px 0 auto; padding-left: 8px; white-space: nowrap}
+.ausage {display: flex; gap: 8px; font-size: 11px; color: var(--om-sec)}
+.ausage__m {display: flex; flex-direction: column; gap: 2px}
+.ausage__m i {display: block; width: 44px; height: 4px; background: rgba(var(--fgr), .12)}
+.ausage__m b {display: block; height: 4px; background: var(--om-accent)}
+.ausage__m b.warn {background: var(--om-yellow)}
+.amsg {display: flex; flex-direction: column; gap: 6px; max-width: 760px}
+.amsg--you {padding-left: 10px; border-left: 2px solid var(--om-accent)}
+.amsg__who {font-size: 12px; font-weight: 600; color: var(--om-dim)}
+.amsg--you .amsg__who {color: var(--om-accent)}
+.amsg__tx {margin: 0; font-family: var(--sys); font-size: 16px; line-height: 1.5; color: var(--om-fg); white-space: pre-wrap;
+  overflow-wrap: anywhere; user-select: text}
+/* AGENT-PLAN-1: the plan codex proposed, a card of its own */
+/* AGENT-PLAN-1: what /diff brings */
+.adiff {gap: 10px}
+.adiff__h {display: flex; align-items: center; gap: 8px}
+.aplan {display: flex; flex-direction: column; gap: 8px; max-width: 760px; padding: 14px 16px;
+  border: 2px solid var(--om-accent); background: rgba(var(--fgr), .03)}
+.aplan__t {display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--om-accent)}
+.aplan__act {display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 4px}
+.aplan__act .fbtn {min-height: 40px; padding: 0 14px; font-size: 14px}
+.aplan__act p {margin: 0; flex: 1 1 200px; font-family: var(--sys); font-size: 13px}
+.acursor {display: inline-block; width: 8px; height: 15px; margin-left: 2px; vertical-align: text-bottom;
+  background: var(--om-accent); animation: blink 1s steps(1, end) infinite}
+.atool {display: flex; flex-direction: column}
+.atool__row {min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 13px;
+  border: 1px solid rgba(var(--fgr), .4); background: rgba(var(--fgr), .04)}
+.atool__g--succeeded {color: var(--om-green)}
+.atool__g--failed {color: var(--om-red)}
+.atool__g--running {color: var(--om-accent)}
+.atool__n {white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0}
+.atool__s {color: var(--om-sec)}
+/* AGENT-FIX-2: core kept only the newest part of the output. */
+.atool__cut {margin: 0; padding: 6px 12px 0; font-size: 12px; color: var(--om-sec);}
+.atool__d {margin: 0; max-height: 260px; overflow: auto; padding: 10px 12px; font-family: var(--mono); font-size: 13px;
+  background: rgba(var(--fgr), .04); border: 1px solid rgba(var(--fgr), .4); border-top: 0; white-space: pre}
+.acard {display: flex; flex-direction: column; gap: 10px; padding: 16px; background: var(--om-raised);
+  border: 2px solid var(--om-line)}
+.acard__t {font-family: var(--sys); font-size: 17px; font-weight: 600; color: var(--om-bright)}
+.acard__s {margin: 0; font-family: var(--mono); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text}
+.acard__det {display: flex; flex-direction: column; gap: 4px}
+.acard__more {min-height: 40px; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--om-sec)}
+.acard__line {display: flex; gap: 10px; font-size: 13px}
+.acard__line span {width: 96px; flex: none; color: var(--om-sec)}
+.acard__line code {font-family: var(--mono); overflow-wrap: anywhere; user-select: text}
+.acard__acts {display: flex; flex-wrap: wrap; gap: 8px; align-items: center}
+.acard__acts .fbtn {min-height: 40px; padding: 0 14px; font-size: 14px}
+.acard__qs, .acard__q {display: flex; flex-direction: column; gap: 8px}
+.acard__in {min-height: 44px; padding: 0 10px; border: 1px solid rgba(var(--fgr), .4); font-size: 16px; font-family: var(--sys)}
+.aresolved {min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px; font-size: 13px;
+  border: 1px solid rgba(var(--fgr), .4)}
+.aresolved__g {color: var(--om-sec)}
+.aresolved__g.ok {color: var(--om-green)}
+.aresolved__s {white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0}
+.aresolved__d {color: var(--om-sec); white-space: nowrap}
+.ahand {display: flex; flex-direction: column; gap: 8px; padding: 16px; border: 1px solid rgba(var(--fgr), .4);
+  font-family: var(--sys); font-size: 14px}
+.ahand p {margin: 0}
+.aerr {display: flex; flex-direction: column; gap: 4px}
+.acomp {flex: none; border-top: 2px solid var(--om-line)}
+.anotice {display: flex; align-items: flex-start; gap: 6px; padding: 6px 0 0 12px; max-height: 160px; overflow: auto}
+.anotice p {flex: 1; margin: 0; font-family: var(--sys); font-size: 13px; white-space: pre-wrap; user-select: text}
+.apick {flex: 1; min-height: 0; overflow: auto; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px}
+.apick__h {margin: 0; height: 44px; display: flex; align-items: center; font-size: 17px; font-weight: 400; color: var(--om-bright)}
+.apick__row {display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px}
+.apick__t {display: flex; align-items: center; gap: 8px}
+.apick__d {font-size: 12px; color: var(--om-sec)}
+.apick__x {margin: 0; font-family: var(--sys); font-size: 13px; color: var(--om-sec)}
+
+/* Herdr */
+.hpanel {position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--om-bg)}
+.hsess {height: 44px; flex: none; display: flex; align-items: center; gap: 6px;
+  border-bottom: 2px solid var(--om-line)}
+.hsess__btn {height: 44px; display: flex; align-items: center; gap: 6px; padding: 0 12px; color: var(--om-bright)}
+.hsess__btn b {font-weight: 600; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+.hsess__d {flex: 1 1 auto; font-size: 12px; color: var(--om-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0}
+.hsess .hmenu {flex: none}
+.hmenu {position: relative; display: flex}
+.hmenu__list {position: absolute; top: 100%; left: 0; z-index: 30; min-width: 260px; max-width: min(380px, 90vw);
+  max-height: 60vh; overflow: auto; background: var(--om-raised); border: 2px solid var(--om-line); padding: 4px 0}
+.hmenu__list.up {top: auto; bottom: 100%; left: auto; right: 0}
+.hmenu__item {width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+  color: var(--om-fg)}
+.hmenu__item:hover {background: rgba(var(--fgr), .08)}
+.hmenu__item.on {color: var(--om-accent)}
+.hmenu__item.danger {color: var(--om-red)}
+.hmenu__sp {width: 14px; flex: none}
+.hmenu__tx {display: flex; flex-direction: column; gap: 2px; min-width: 0}
+.hmenu__d {font-family: var(--sys); font-size: 12px; color: var(--om-sec)}
+.hmenu__rule {display: block; height: 1px; margin: 4px 0; background: rgba(var(--fgr), .25)}
+.hnew {flex: none; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: rgba(var(--fgr), .04);
+  border-bottom: 1px solid rgba(var(--fgr), .25)}
+.hnew p {margin: 0; font-family: var(--sys); font-size: 13px; color: var(--om-sec)}
+.hnew__in {min-height: 44px; padding: 0 10px; border: 1px solid rgba(var(--fgr), .4); font-size: 16px; outline: none;
+  max-width: 420px}
+.hnew__acts {display: flex; gap: 8px; align-items: center}
+/* HERDR-6: the new-workspace card */
+/* It scrolls inside itself, so the pane under it keeps some room on a phone. */
+.hnew--ws {max-height: 52vh; overflow: auto}
+.hnew__row {display: flex; gap: 8px; align-items: center; max-width: 560px}
+.hnew__row .hnew__in {flex: 1; min-width: 0; max-width: none}
+.hbrowse {display: flex; flex-direction: column; border: 1px solid rgba(var(--fgr), .25); max-width: 560px}
+.hbrowse__head {display: flex; align-items: center; gap: 8px; padding: 4px; border-bottom: 1px solid rgba(var(--fgr), .25)}
+.hbrowse__at {font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0}
+.hbrowse__hid {display: inline-flex; align-items: center; gap: 4px; font-family: var(--sys); font-size: 12px;
+  color: var(--om-sec); white-space: nowrap}
+.hbrowse__list {display: flex; flex-direction: column; max-height: min(240px, 24vh); overflow: auto; max-width: 560px}
+.hbrowse__e {margin: 0; padding: 8px; font-family: var(--sys); font-size: 12px; color: var(--om-sec)}
+.hfolder {min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 8px; text-align: left; width: 100%}
+.hfolder:hover {background: rgba(var(--fgr), .08)}
+.hfolder.on {color: var(--om-accent)}
+.hfolder__n {font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0}
+.hws--new {color: var(--om-sec)}
+.hchip--new {min-width: 30px; justify-content: center; color: var(--om-sec)}
+.hpanel__body {flex: 1; min-height: 0; display: flex; flex-direction: column}
+.hpanel.wide .hpanel__body {flex-direction: row}
+.hpanel__grid {flex: none; min-height: 0; overflow: auto; border-right: 2px solid var(--om-line)}
+.hgrid {display: flex; flex-direction: column}
+.hgrid__e {margin: 0; padding: 12px; font-size: 12px; color: var(--om-sec)}
+.hws {width: 100%; height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px}
+.hws.on {background: rgba(var(--fgr), .08)}
+.hws__l {font-size: 12px; color: var(--om-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.hws__f {font-size: 12px; color: var(--om-accent)}
+.htab {display: block; padding: 4px 12px 0; font-size: 12px; color: var(--om-sec)}
+.hpane {width: 100%; min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 4px 12px}
+.hpane:hover {background: rgba(var(--fgr), .08)}
+.hpane.on {background: rgba(var(--fgr), .18)}
+.hpane__tx {display: flex; flex-direction: column; min-width: 0; line-height: 1.25}
+.hpane__n {font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.hpane__s {font-size: 12px; color: var(--om-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.hpane__s.agent {color: var(--om-sec)}
+.hdot {width: 6px; height: 6px; flex: none; background: var(--om-dim)}
+.hdot--working {background: var(--om-accent)}
+.hdot--blocked {background: var(--om-red)}
+.hdot--done, .hdot--idle {background: var(--om-green)}
+.hwait {font-size: 12px; font-weight: 600; color: var(--om-red); white-space: nowrap}
+/* HERDR-7: an agent's pane is marked by the bar's still Agent glyph in the App's status colour. */
+.hmark {width: 24px; height: 24px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--om-dim)}
+.hmark--working {color: var(--om-accent)}
+.hmark--blocked {color: var(--om-red)}
+.hmark--done {color: var(--om-green)}
+.hstrip {flex: none; height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 4px; overflow-x: auto;
+  border-bottom: 1px solid rgba(var(--fgr), .25); scrollbar-width: none}
+.hstrip::-webkit-scrollbar {display: none}
+.hchip {height: 30px; flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font-size: 13px;
+  border: 1px solid rgba(var(--fgr), .4); white-space: nowrap}
+.hchip.on {background: rgba(var(--fgr), .18); color: var(--om-accent); border-color: var(--om-accent)}
+.hchip--ws {font-weight: 600}
+/* OVERVIEW-1: the switcher's summary, the "What wants you" card, and the
+   state dots on workspace chips (a slot that is always there). */
+.hsum {flex: none; min-height: 30px; padding: 0 10px; font-size: 12px; font-weight: 600; white-space: nowrap;
+  color: var(--om-sec); border: 1px solid rgba(var(--fgr), .4)}
+.hsum--needs {color: var(--om-red); border-color: var(--om-red)}
+.hsum.on {background: rgba(var(--fgr), .18)}
+.hover {max-height: 52vh; overflow: auto; gap: 4px}
+.hover__head {display: flex; align-items: center; gap: 8px}
+.hover__head b {color: var(--om-bright); font-weight: 600}
+.hover__group {display: flex; flex-direction: column}
+.hover__sec {padding: 6px 0 2px; font-size: 12px; font-weight: 600; color: var(--om-sec)}
+.hover__sec--needs_you {color: var(--om-red)}
+.hover__row {width: 100%; min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 4px 6px; text-align: left}
+.hover__row:hover {background: rgba(var(--fgr), .08)}
+.hover__tx {display: flex; flex-direction: column; min-width: 0; line-height: 1.25}
+.hover__ask {font-family: var(--sys); font-size: 14px; color: var(--om-fg); overflow-wrap: anywhere}
+.hover__where {font-size: 12px; color: var(--om-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.hsdot {width: 7px; height: 7px; flex: none; display: inline-block; border-radius: 50%; background: transparent}
+.hsdot--needs_you {background: var(--om-red)}
+.hsdot--working {background: var(--om-accent)}
+.hsdot--done {background: var(--om-green); border-radius: 0}
+.hstage {flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column}
+.hnotice {flex: none; display: flex; align-items: center; gap: 6px; padding-left: 12px; min-height: 32px;
+  background: rgba(var(--fgr), .06); font-size: 13px}
+.hnotice > span {flex: 1; font-family: var(--sys)}
+.hempty {flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  padding: 24px; text-align: center}
+.hempty b {font-size: 17px; color: var(--om-bright); font-weight: 600}
+.hempty p {margin: 0; font-family: var(--sys); font-size: 14px; color: var(--om-sec); max-width: 420px}
+.mirror {position: relative; flex: 1; min-width: 0; min-height: 0; display: flex}
+/* AGENT-UI-3: the mirror is nested (the stale wrapper holds the mirror), and a
+   flex item's automatic minimum width is its content's - the canvas, wider
+   than a phone at Fit (a wide pane stops at the smallest scale) and at Actual
+   size. That widened the panel past the screen and took the bar, the keys and
+   the mode chip with it. The canvas scrolls inside .mirror__scroll; nothing
+   in the mirror widens what holds it. */
+.hpanel, .hpanel__body {min-width: 0}
+.hstage > .mirror {overflow: hidden}
+.mirror__scroll {flex: 1; min-width: 0; overflow: auto; touch-action: pan-x pan-y; -webkit-user-select: none; user-select: none}
+.mirror__canvas {display: block}
+/* HERDR-8: Wrap - the pane's rows as text at the terminal's own size, wrapped to the width. */
+.mirror__scroll.hidden {position: absolute; inset: 0; visibility: hidden; pointer-events: none}
+.wrapv {flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 4px 8px 8px; font: 13px/1.25 var(--mono);
+  white-space: pre-wrap; overflow-wrap: anywhere; touch-action: pan-y; -webkit-user-select: text; user-select: text}
+.wrapv__l {min-height: 1.25em}
+.wrapv__r {white-space: pre; overflow: hidden}
+.wrapv__w {overflow-x: auto; overscroll-behavior-x: contain; touch-action: pan-x pan-y}
+.wrapv__w pre {margin: 0; font: inherit; white-space: pre}
+.wrapv__a {text-decoration: underline; cursor: pointer}
+.mirror__note {position: absolute; top: 6px; left: 6px; max-width: calc(100% - 140px); min-height: 28px; display: flex;
+  align-items: center; padding: 0 8px; font-size: 12px; color: var(--om-sec); background: rgba(var(--bgr), .85);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.mirror__zoom {position: absolute; top: 6px; right: 6px; min-height: 28px; padding: 0 8px; font-size: 12px;
+  background: rgba(var(--bgr), .85)}
+.typein {position: absolute; left: 0; bottom: 0; width: 2px; height: 2px; opacity: .01; font-size: 16px;
+  caret-color: transparent; resize: none; overflow: hidden; z-index: -1}
+.hinput {flex: none; display: flex; flex-direction: column}
+.htype {min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; font-size: 13px;
+  background: rgba(var(--fgr), .18); border-top: 2px solid var(--om-accent); color: var(--om-accent)}
+.htype .fbtn {min-height: 32px; padding: 0 12px; font-size: 13px}
+.hquick {display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow: auto; padding: 8px 12px;
+  border-top: 1px solid rgba(var(--fgr), .25)}
+.hquick__g {display: flex; flex-direction: column; gap: 4px}
+.hquick__t {font-size: 12px; color: var(--om-sec)}
+.hquick__r {display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none}
+.hquick__r .fbtn {min-height: 36px; padding: 0 12px; font-size: 14px}
+/* HERDR-9: the pane's choices as buttons, above the composer. */
+.hchoices {border-top: 2px solid var(--om-accent); padding-bottom: 4px}
+.hchoices.answered {opacity: .55}
+.hchoices__head {display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 0 8px 0 12px; font-size: 12px;
+  font-weight: 600; color: var(--om-accent)}
+.hchoices.answered .hchoices__head {color: var(--om-sec)}
+.hchoices__head .fbtn {min-height: 28px; padding: 0 10px; font-size: 12px}
+.hchoices__list {display: flex; flex-direction: column; max-height: 198px; overflow-y: auto}
+.hchoice {display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 12px; border: 0; background: none;
+  color: inherit; font: inherit; font-size: 14px; text-align: left; cursor: pointer; width: 100%}
+.hchoice:active, .hchoice.on {background: rgba(var(--fgr), .18)}
+.hchoice.on .hchoice__l {font-weight: 600}
+.hchoice.lasting .hchoice__l {color: var(--om-sec)}
+.hchoice__n {min-width: 18px; text-align: right; font-size: 12px; color: var(--om-sec)}
+.hchoice__l {flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+.hchoice__m {color: var(--om-accent); font-weight: 600}
+.hchoices__yn {display: flex; gap: 8px; padding: 0 12px}
+.hchoices__yn .fbtn {flex: 1; min-height: 44px; font-size: 15px}
+.hstate {display: flex; align-items: center; gap: 6px; padding-left: 12px; min-height: 32px; font-size: 13px}
+.hstate > span {flex: 1}
+.hstate--ok {color: var(--om-green)}
+.hstate--warn {color: var(--om-yellow)}
+.hstate--bad {color: var(--om-red)}
+.hinput .composer {border-top: 1px solid rgba(var(--fgr), .25)}
+.krows {flex: none; display: flex; flex-direction: column; background: var(--om-dark); border-top: 1px solid rgba(var(--fgr), .25)}
+.krow1 {height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 4px; overflow-x: auto; scrollbar-width: thin}
+.krow1.fill .kcap {flex: 1 1 0; min-width: 24px; padding: 0}
+.kcap {height: 32px; min-width: 36px; padding: 0 8px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px; border: 1px solid rgba(var(--fgr), .4); background: rgba(var(--fgr), .04); touch-action: manipulation;
+  -webkit-user-select: none; user-select: none}
+.kcap:active {background: rgba(var(--fgr), .22)}
+.kcap.armed {color: var(--om-yellow); border-color: var(--om-yellow)}
+.krule {width: 1px; height: 20px; flex: none; background: rgba(var(--fgr), .4)}
+.hbar {position: relative; flex: none; height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 4px 0 6px;
+  background: var(--om-dark); border-top: 1px solid rgba(var(--fgr), .25); margin-bottom: var(--safe-b, 0px)}
+.hbar .fbtn, .hbar__t {min-height: 32px; padding: 0 10px; font-size: 13px; gap: 6px}
+.hbar__h {display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; min-width: 0}
+.hbar__mode {font-size: 12px; color: var(--om-dim); padding: 0 6px; white-space: nowrap}
+.hbar__mode.on {color: var(--om-accent)}
+.hconfirm {position: absolute; inset: 0; z-index: 40; display: grid; place-items: center; background: rgba(var(--bgr), .6)}
+.hconfirm__box {width: min(380px, 90%); display: flex; flex-direction: column; gap: 10px; padding: 16px;
+  background: var(--om-raised); border: 2px solid var(--om-line)}
+.hconfirm__box p {margin: 0; font-family: var(--sys); font-size: 14px; color: var(--om-sec)}
+@media (max-width: 480px) {
+  .apanel .ausage {display: none}
+  .composer {padding-left: 8px; padding-right: 8px; gap: 4px}
+  .composer__b {padding: 0 8px; min-width: 40px}
+}
+
+/* ATTACH-1: the paperclip, its two-row menu, the chips, the drop veil. Zero
+   radius, one 1px border, no shadow - the composer's own language. */
+.attach {position: relative; display: inline-flex; flex: none}
+.attach__menu {position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 30; min-width: 168px; display: flex;
+  flex-direction: column; background: var(--om-bg); border: 1px solid var(--om-accent)}
+.attach__row {display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; color: var(--om-fg);
+  font-size: 15px; text-align: left}
+.attach__row:hover {background: rgba(var(--fgr), .08)}
+.chips {display: flex; gap: 6px; overflow-x: auto; padding: 6px 12px 0; flex: none; scrollbar-width: none}
+.chip {position: relative; display: flex; align-items: center; gap: 8px; flex: none; height: 52px; padding: 5px 2px 5px 5px;
+  max-width: 220px; border: 1px solid rgba(var(--fgr), .4); background: rgba(var(--fgr), .04)}
+.chip--loose {border-style: dashed; border-color: var(--om-yellow)}
+.chip__thumb, .chip__tile {width: 40px; height: 40px; flex: none; object-fit: cover; display: grid; place-items: center;
+  color: var(--om-sec); background: rgba(var(--fgr), .08)}
+.chip__text {display: flex; flex-direction: column; min-width: 0; font-size: 12px; line-height: 1.3}
+.chip__text b {font-weight: 600; color: var(--om-accent); white-space: nowrap}
+.chip__text span {color: var(--om-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis}
+.chip__bar {position: absolute; left: 0; bottom: 0; height: 2px; background: var(--om-accent)}
+.chip__x {width: 36px; height: 44px; display: grid; place-items: center; color: var(--om-sec); flex: none}
+.chip--up .chip__thumb {opacity: .6}
+.anotice--warn p {color: var(--om-yellow)}
+.amsg__pics {display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 13px; color: var(--om-sec)}
+.apanel, .hpanel {position: relative}
+.dropveil {position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; gap: 10px;
+  background: rgba(var(--bgr), .86); color: var(--om-accent); border: 2px dashed var(--om-accent);
+  font-size: 17px; pointer-events: none}
+/* ATTACH-1: the paperclip inside the composer's box, before the words. */
+.composer__box {flex: 1 1 0; min-width: 0; display: flex; align-items: flex-end; border: 1px solid rgba(var(--fgr), .4);
+  background: rgba(var(--fgr), .04)}
+.composer__box .composer__in {flex: 1 1 0; width: 0; border: 0; background: transparent; padding-left: 4px; padding-right: 6px}
+.attach__b {width: 40px; min-height: 44px; display: grid; place-items: center; color: var(--om-fg)}
+.attach__b:hover {background: rgba(var(--fgr), .08)}
+.attach__b.on {color: var(--om-accent)}
+.attach__b:disabled {opacity: .45; cursor: default}
+/* MOTION-1: the animated face. The head is the foreground (tokens.colors.head);
+   the face and the ring are holes, so they show whatever is behind them. */
+.aface {display: inline-grid; place-items: center; flex: none; line-height: 0; color: var(--om-fg)}
+.aface svg {display: block}
+.bslot.on .aface {color: var(--om-accent)}
+.bslot__vendor--dim {opacity: .45}
+.apanel__art {display: grid; place-items: center; padding: 12px 0 4px}
+
+/* LINKS-1: an agent's markdown (blocks, never re-flowed code), its links,
+   and the line that says what a tapped link did. */
+.amsg__md {white-space: normal}
+.md {display: flex; flex-direction: column; gap: 10px; min-width: 0}
+.md__p {margin: 0}
+.md__h {margin: 4px 0 0; font-family: var(--sys); font-weight: 600; color: var(--om-bright); line-height: 1.3}
+.md__h1 {font-size: 20px}
+.md__h2 {font-size: 18px}
+.md__h3, .md__h4, .md__h5, .md__h6 {font-size: 16px}
+.md__ul, .md__ol {margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 4px}
+.md__ul li > .md__p, .md__ol li > .md__p {margin: 0}
+.md__q {margin: 0; padding-left: 10px; border-left: 2px solid var(--om-line); color: var(--om-sec)}
+.md__hr {border: 0; border-top: 1px solid var(--om-line); margin: 4px 0; width: 100%}
+.md__code {font-family: var(--mono); font-size: 14px; padding: 0 3px; background: rgba(var(--fgr), .08)}
+.md__pre {margin: 0; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.45;
+  white-space: pre; background: rgba(var(--fgr), .04); border: 1px solid rgba(var(--fgr), .4); user-select: text}
+.md__pre code {font-family: inherit}
+.md__a {color: var(--om-accent); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere}
+.md__file {display: inline; padding: 0; border: 0; background: none; color: var(--om-accent); font: inherit;
+  text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; overflow-wrap: anywhere; text-align: left}
+.md__file .md__code {text-decoration: underline dotted}
+.md__img {display: inline-flex; align-items: center; gap: 6px; color: var(--om-sec)}
+.atool__paths {display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 6px 12px; font-family: var(--mono); font-size: 13px;
+  border: 1px solid rgba(var(--fgr), .4); border-top: 0}
+/* AGENT-COLLIE-1: steps, runs, change cards, questions, find your place */
+.atool__v {color: var(--om-sec); font-family: var(--sys)}
+.atool__m {font-family: var(--mono)}
+.achgs {display: flex; flex-direction: column; gap: 8px}
+.achg {display: flex; flex-direction: column; border: 1px solid rgba(var(--fgr), .4); background: rgba(var(--fgr), .02)}
+.achg--wait {border: 2px solid var(--om-yellow)}
+.achg__h {min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: 13px; min-width: 0}
+.achg__f {font-family: var(--mono); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+.achg__n {font-family: var(--mono); font-size: 12px; white-space: nowrap; flex: none}
+.achg__add {color: var(--om-green)}
+.achg__del {color: var(--om-red)}
+.achg__w {margin: 0; padding: 0 12px 8px; font-family: var(--sys); font-size: 13px; color: var(--om-yellow)}
+.achg__d {border-top: 1px solid rgba(var(--fgr), .25); font-family: var(--mono); font-size: 12px; line-height: 1.6;
+  user-select: text}
+.achg__l {display: flex; padding-left: 4px}
+.achg__l--add {background: color-mix(in srgb, var(--om-green) 14%, transparent)}
+.achg__l--del {background: color-mix(in srgb, var(--om-red) 14%, transparent)}
+.achg__l--add .achg__sg {color: var(--om-green)}
+.achg__l--del .achg__sg {color: var(--om-red)}
+.achg__sg {width: 2ch; flex: none; text-align: center; user-select: none}
+.achg__t {flex: 1; min-width: 0; padding-right: 12px; white-space: pre-wrap; overflow-wrap: anywhere}
+.achg__sep {padding: 2px 12px; color: var(--om-sec); border-top: 1px solid rgba(var(--fgr), .15);
+  border-bottom: 1px solid rgba(var(--fgr), .15)}
+.achg__more {min-height: 40px; border-top: 1px solid rgba(var(--fgr), .25); font-size: 12px; color: var(--om-sec)}
+.achgsum {display: flex; flex-direction: column; gap: 4px; font-size: 13px}
+.achgsum__f {font-family: var(--mono); color: var(--om-sec); overflow-wrap: anywhere}
+.arun {display: flex; flex-direction: column; gap: 8px}
+.arun--folded {min-height: 44px; gap: 2px; padding: 6px 12px; text-align: left; border: 1px solid rgba(var(--fgr), .4)}
+.arun__h, .arun__fold {display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--om-sec)}
+.arun__fold {min-height: 44px; padding: 0 12px; border: 1px solid rgba(var(--fgr), .4)}
+.arun__s {min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+.arun__bad {flex: none; padding: 0 6px; color: var(--om-red); border: 1px solid var(--om-red); font-size: 11px}
+.arun__last {padding-left: 18px; font-family: var(--mono); font-size: 12px; color: var(--om-sec); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap}
+.acard__step {font-size: 12px; color: var(--om-sec)}
+.aopts {display: flex; flex-direction: column; gap: 6px}
+.aopt {min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; text-align: left;
+  border: 1px solid rgba(var(--fgr), .4); background: rgba(var(--fgr), .04)}
+.aopt.on {border-color: var(--om-accent); color: var(--om-accent)}
+.aopt__tx {flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px}
+.aopt__l {font-family: var(--sys); font-size: 15px}
+.aopt__d {font-family: var(--sys); font-size: 13px; color: var(--om-sec)}
+.areview {display: flex; flex-direction: column; gap: 6px}
+.apanel__wrap {flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative}
+.afind {min-height: 44px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--om-line); color: var(--om-sec)}
+.afind__in {flex: 1; min-width: 0; min-height: 36px; background: transparent; color: var(--om-fg); font-size: 16px;
+  font-family: var(--sys)}
+.afind__n {flex: none; font-size: 12px; font-variant-numeric: tabular-nums}
+.aentry {scroll-margin: 40px}
+.afind-hit {outline: 1px solid rgba(var(--acr), .45); outline-offset: 4px}
+.afind-cur {outline: 2px solid var(--om-accent)}
+.afind-mark {background: color-mix(in srgb, var(--om-yellow) 40%, transparent); color: inherit}
+.ajump {position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); width: 40px; height: 40px;
+  display: grid; place-items: center; border-radius: 50%; background: var(--om-raised); color: var(--om-fg);
+  border: 1px solid rgba(var(--fgr), .5)}
+.ajump__dot {position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--om-yellow); border: 2px solid var(--om-bg)}
+.lnotice {align-items: center; flex-wrap: wrap}
+.lnotice .lnotice__a {min-height: 32px}
+.hstage > .lnotice {padding: 6px 12px}
+
+/* TUTORIAL-1: the first-steps tour. The page is dimmed around a window cut
+   where the bar or one entry is (a box-shadow, so nothing is drawn over the
+   window itself); neither takes a pointer. The callout is the only thing
+   that does. Square, 2px, accent-ruled like the App's `TourSpotlight`. */
+.tour {position: fixed; inset: 0; z-index: 50; pointer-events: none}
+.tour__cut {position: absolute; pointer-events: none; outline: 2px solid var(--om-accent);
+  box-shadow: 0 0 0 200vmax rgba(0, 0, 0, .5); transition: left 200ms var(--ease), top 200ms var(--ease),
+  width 200ms var(--ease), height 200ms var(--ease)}
+.tour__dim {position: absolute; inset: 0; pointer-events: none; background: rgba(0, 0, 0, .5)}
+.tour__card {position: absolute; pointer-events: auto; display: flex; flex-direction: column; gap: 8px;
+  padding: 12px 14px 12px 16px; background: var(--om-bg); border: 2px solid var(--om-accent); border-left-width: 4px;
+  overflow: hidden; transition: left 200ms var(--ease), top 200ms var(--ease); animation: fade-in var(--t-fast) linear both}
+.tour__n {margin: 0; font-size: 13px; color: var(--om-sec); font-variant-numeric: tabular-nums}
+.tour__words {flex: 1 1 auto; min-height: 0; overflow: auto}
+.tour__words h2 {margin: 0 0 6px; font-family: var(--mono); font-size: 16px; font-weight: 600; color: var(--om-bright)}
+.tour__words h2:focus {outline: none}
+.tour__words p {margin: 0; font-family: var(--sys); font-size: 15px; line-height: 1.45; color: var(--om-fg)}
+/* The person's own text size, where the browser offers it (iOS: Dynamic Type). */
+@supports (font: -apple-system-body) {
+  .tour__words p {font: -apple-system-body; line-height: 1.45}
+}
+.tour__ctl {flex: none; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap}
+@media (prefers-reduced-motion: reduce) {
+  .tour__cut, .tour__card {transition: none; animation: none}
+}
+
+/* HERDR-11 §3: the one connection clock, over the top of every panel - an
+   overlay, so nothing under it moves. Amber, then red with Try again. */
+.stage {position: relative}
+.conn {position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 20; max-width: calc(100% - 24px);
+  display: flex; align-items: center; gap: 10px; min-height: 28px; padding: 0 14px; background: rgba(var(--bgr), .94);
+  border: 1px solid var(--om-yellow); font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--om-bright);
+  white-space: nowrap; animation: fade-in var(--t-fast) linear both}
+.conn--lost {border-color: var(--om-red)}
+.conn__dot {flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--om-yellow)}
+.conn--lost .conn__dot {background: var(--om-red)}
+.conn__words {overflow: hidden; text-overflow: ellipsis}
+.conn__retry {flex: none; min-height: 28px; color: var(--om-accent); font-weight: 400}
+.conn--inline {position: static; transform: none; margin: 8px 12px; align-self: center}
+
+/* HERDR-11 §3: a mirror not known to be current is dimmed and says when. */
+.hmirror--stale > .mirror {opacity: .45}
+.hstale {position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 5; padding: 4px 10px;
+  background: rgba(var(--bgr), .9); font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--om-bright);
+  pointer-events: none; white-space: nowrap}
+
+/* HERDR-11 §1: the Start row and the stars on the New workspace card. */
+.hlaunch {display: flex; flex-direction: column; gap: 6px}
+.hlaunch__row {display: flex; gap: 6px; flex-wrap: wrap}
+.hlaunch__chip[aria-pressed="true"] {background: var(--om-sel); color: var(--om-bright); border-color: var(--om-accent)}
+.hstar {flex: none; width: 44px; min-height: 44px; display: grid; place-items: center; color: var(--om-sec)}
+.hstar[aria-pressed="true"] {color: var(--om-accent)}
+
+/* AGENT-QUEUE-1: codex's checklist pinned over the conversation */
+.asteps {flex: none; border-bottom: 1px solid var(--om-line); background: var(--om-raised)}
+.asteps__h {width: 100%; min-height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: 13px;
+  color: var(--om-fg); text-align: left}
+.asteps__h b {font-weight: 600; color: var(--om-accent)}
+.asteps__n {flex: none; color: var(--om-sec); font-variant-numeric: tabular-nums}
+.asteps__c {flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--sys)}
+.asteps__l {margin: 0; padding: 0 12px 10px; list-style: none; display: flex; flex-direction: column; gap: 4px;
+  font-family: var(--sys); font-size: 14px; max-height: 40vh; overflow: auto}
+.asteps__s {display: flex; gap: 8px}
+.asteps__s--completed {color: var(--om-sec); text-decoration: line-through}
+.asteps__s--completed span:first-child {color: var(--om-green); text-decoration: none}
+.asteps__s--inProgress {color: var(--om-bright); font-weight: 600}
+.asteps__s--inProgress span:first-child {color: var(--om-accent)}
+.asteps__x {color: var(--om-sec); font-size: 13px}
+/* AGENT-QUEUE-1: what waits for the turn to end, above the composer */
+.aqueue {display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 0; max-height: 36vh; overflow: auto}
+.aqueue__h {margin: 0; display: flex; align-items: baseline; gap: 8px; font-size: 13px; flex-wrap: wrap}
+.aqueue__h b {color: var(--om-accent); font-weight: 600}
+.aqueue__i {display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px dashed rgba(var(--fgr), .5)}
+.aqueue__tx {margin: 0; font-family: var(--sys); font-size: 15px; white-space: pre-wrap; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden}
+.aqueue__a {display: flex; flex-wrap: wrap; gap: 6px}
+.aqueue__a .fbtn {min-height: 36px; padding: 0 12px; font-size: 13px}
+.aqueue__i--edit .composer__in {min-height: 60px; border: 1px solid rgba(var(--fgr), .4); padding: 6px 8px}
+/* AGENT-QUEUE-1: a decline's one line of why */
+.acard__why {display: flex; flex-direction: column; gap: 8px}
+.aearlier {align-self: center}

@@ -19,7 +19,11 @@
     "tls_fingerprint_sha256",
     "endpoints",
     "ssh",
-    "remote_addr"
+    "remote_addr",
+    "client",
+    "client_label",
+    "via",
+    "already_paired"
   ],
   "additionalProperties": false,
   "properties": {
@@ -88,26 +92,34 @@
       "pattern": "^[0-9a-f]{64}$"
     },
     "endpoints": {
-      "description": "Every non-loopback address the daemon answers on, with its bound port.",
+      "description": "TAIL-2 P0-2: every road to this host, each with its kind. `lan` addresses first (IPv4 before IPv6), then `<host_name>.local` (`mdns`), then the MagicDNS name and the tailnet addresses (`tailnet`, 100.64.0.0/10 and fd7a:115c:a1e0::/48). An iOS client can dial a tailnet road only by its MagicDNS name (ATS); it keeps the addresses to recognise a typed 100.x as this host. A client of a core before TAIL-2 receives no `kind` and infers it.",
       "type": "array",
       "maxItems": 16,
       "items": {
         "type": "object",
         "required": [
           "host",
-          "port"
+          "port",
+          "kind"
         ],
         "additionalProperties": false,
         "properties": {
           "host": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 45
+            "maxLength": 255
           },
           "port": {
             "type": "integer",
             "minimum": 1,
             "maximum": 65535
+          },
+          "kind": {
+            "enum": [
+              "lan",
+              "mdns",
+              "tailnet"
+            ]
           }
         }
       }
@@ -129,7 +141,7 @@
       "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
     },
     "grants": {
-      "description": "One approval, three grants. `companion` is this credential, `media` the Sunshine streaming certificate, `ssh` the authorized_keys line.",
+      "description": "One approval, three grants. `companion` is this credential, `media` the Sunshine streaming certificate, `ssh` the authorized_keys line. A web client (LITE-1a) only ever gets `companion`.",
       "type": "object",
       "required": [
         "companion",
@@ -150,7 +162,7 @@
       }
     },
     "ssh": {
-      "description": "Where this host's terminal is. The client fills its SSH surface from here instead of asking.",
+      "description": "Where this host's terminal is. The client fills its SSH surface from here instead of asking. TAIL-2 P0-4: `host` stays the first LAN address (what a client before TAIL-2 dials); `hosts` is every road with its kind, so a client connected over the tailnet dials the MagicDNS name. P1-1: `tailscale_ssh` is true when Tailscale SSH is on, which answers port 22 over the tailnet itself: Omodachi's key, its approval and a revoke here do not apply there.",
       "type": "object",
       "required": [
         "user",
@@ -179,6 +191,35 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 65535
+        },
+        "hosts": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": [
+              "host",
+              "kind"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "kind": {
+                "enum": [
+                  "lan",
+                  "mdns",
+                  "tailnet"
+                ]
+              }
+            }
+          }
+        },
+        "tailscale_ssh": {
+          "type": "boolean"
         }
       }
     },
@@ -190,6 +231,110 @@
       ],
       "minLength": 1,
       "maxLength": 45
+    },
+    "client": {
+      "description": "LITE-1a: what asked. `native` is the App; `web` is Odomo in a browser. A request that carried an `Origin` header is `web` whatever it said. `label` is the browser's own guess (\"Safari on iPhone\"), cleaned like a device name; null for the App.",
+      "type": "object",
+      "required": [
+        "kind",
+        "label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "native",
+            "web"
+          ]
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 48
+        }
+      }
+    },
+    "client_label": {
+      "description": "LITE-1a: the approval card's words for a web client, formatted by core (\"Web app · Safari on iPhone\"). Null for the App.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "via": {
+      "description": "The road the request came by (TAIL-2 P1-6) and who this host's own tailscaled says the peer is (`tailscale whois`): the node's short name and its owner's login (null for a tagged node, or when tailscaled cannot say). Behind `tailscale serve` (LITE-1a C3) the peer is the forwarded client, so a browser on the tailnet is `tailnet` like the App; when whois has no login, the `Tailscale-User-Login` serve added is used. Shown instead of a raw 100.x address. Context for the person approving, never authorization; null on a row written before TAIL-2.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "kind",
+        "peer_name",
+        "login"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "lan",
+            "tailnet",
+            "loopback",
+            "other"
+          ]
+        },
+        "peer_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "login": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        }
+      }
+    },
+    "already_paired": {
+      "description": "TAIL-2 P0-2: this device still held a live credential here when it asked (it forgot this host, or was reinstalled). The request waits for the same local Approve; the claim retires the older credentials with the renewal grace, so the device ends with one.",
+      "type": "boolean"
+    },
+    "odomo_url": {
+      "description": "LITE-1b C7: Odomo's https address on the tailnet, from the `tailscale serve` mapping the installer recorded (443, or 8443 when 443 is somebody else's). Absent when there is none. Authenticated documents only; never on /health.",
+      "type": "string",
+      "pattern": "^https://[a-z0-9.-]+\\.ts\\.net(:[0-9]{1,5})?/odomo/$",
+      "maxLength": 300
+    },
+    "odomo": {
+      "description": "LITE-1d: Odomo for a native app deciding whether to offer it. `url` is `odomo_url` again (null when this host has no front door, i.e. no Tailscale serve mapping); `push_devices` is how many of this host's web devices hold a live push subscription that the person at the computer has not switched off, with a working credential. A count only: no device ids, no endpoints. Per host, not per person (core does not know who holds a device). Absent `push_devices`: this host cannot say (no push here). The whole object is absent when the host knows neither.",
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^https://[a-z0-9.-]+\\.ts\\.net(:[0-9]{1,5})?/odomo/$",
+          "maxLength": 300
+        },
+        "push_devices": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        }
+      }
     }
   }
 }

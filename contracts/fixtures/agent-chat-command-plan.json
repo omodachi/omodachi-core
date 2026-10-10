@@ -1,0 +1,16 @@
+{
+  "status": "completed",
+  "result": {
+    "mode": "plan",
+    "summary": "Plan mode is on. The agent works out a plan with you and changes nothing until you say so."
+  },
+  "display": {
+    "key": "plan.on",
+    "args": {
+      "mode": "plan"
+    }
+  },
+  "command_id": "plan",
+  "request_id": "request-fixture-04",
+  "contract_revision": "omodachi.v1"
+}

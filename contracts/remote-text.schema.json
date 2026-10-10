@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/remote-text.schema.json",
+  "title": "Remote text typed",
+  "description": "REMOTE-INPUT-1: the reply to `POST /v1/remote/sessions/{id}/text {\"text\": string, \"id\"?: string}`. Text the Remote keyboard has no key for (中文 committed by the phone's input method, emoji, accented letters) - and, since REMOTE-INPUT-2, a whole draft from the app's compose field - is typed on the host by `wtype`, as the desktop user, into the focused window - the window the stream's keys go to. Only the device holding the session, only while it is `ready`. At most 1024 characters / 4 KiB of UTF-8 (published as `text_input.max_chars`/`max_bytes`). Control characters are refused, never stripped or truncated (`400 invalid_request`), except two: a line break (`\\n`), which `wtype` types as the Return key, and a tab (`\\t`), typed as Tab. REMOTE-INPUT-2 `id` (8-64 of `A-Za-z0-9_-`): one press of Send. The same device sending the same id for the same session again gets the first answer back with `replayed: true` and nothing is typed again (the same id with different text is `400 invalid_request`); an attempt refused before `wtype` ran does not spend the id. `chars` is a count; the text is never echoed and never journaled. `503 remote_text_unavailable`: no `wtype` or no graphical session; `503 remote_text_failed`: `wtype` ran and failed.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "typed",
+    "chars",
+    "method"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "typed": {
+      "const": true
+    },
+    "chars": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1024
+    },
+    "method": {
+      "const": "wtype"
+    },
+    "replayed": {
+      "const": true
+    }
+  }
+}

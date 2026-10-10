@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/ws-ticket.schema.json",
+  "title": "WebSocket ticket",
+  "description": "LITE-1a C5. `POST /v1/ws-ticket {\"path\": ...}` answers one ticket for one WebSocket path: `/v1/events`, `/v1/agent/default/chat/events` or `/v1/herdr/panes/{pane}/observe|control` (a web credential cannot ask for `control`). The browser opens `wss://<host><path>?ticket=<ticket>` with no Authorization header; the daemon spends the ticket on arrival, so it works once, for `expires_in` seconds, and only on that path. A spent, expired or foreign ticket is `401 ws_ticket_invalid`.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "ticket",
+    "path",
+    "expires_in"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "ticket": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^/v1/(events|agent/default/chat/events|herdr/panes/[^/]{1,256}/(observe|control))$"
+    },
+    "expires_in": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 60
+    }
+  }
+}

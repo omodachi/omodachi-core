@@ -29,8 +29,11 @@ from .runtime_paths import SOCKET_DIR_MODE, SOCKET_MODE
 # strictly same-uid, so root gains nothing over this socket that it lacked.
 ROOT_LOCAL_OPS = frozenset({"local.auth.approve"})
 # An approval is a human being picking up a tablet. The default 11 s belongs to
-# operations that talk to the local desktop.
-LOCAL_TIMEOUTS = {"local.auth.approve": 150.0}
+# operations that talk to the local desktop. Ending a Remote session walks the
+# whole restore (backend, screens, workspaces, bar, output), and a takeover's
+# can take longer than that; the release itself is shielded and finishes
+# either way, this is only how long the caller is kept waiting for the answer.
+LOCAL_TIMEOUTS = {"local.auth.approve": 150.0, "local.remote.stop": 75.0}
 DEFAULT_LOCAL_TIMEOUT = 11.0
 
 
@@ -341,7 +344,10 @@ class JsonLineServer:
             if request["op"] == "events.subscribe":
                 await self._stream(request, device_id, reader, writer, local=local)
             else:
-                result = self.dispatch(request, device_id)
+                # REMOTE-STOP-1: the same proof of "this host's own user" goes
+                # to the few handlers that act on it (`remote.stop` with the
+                # panel's credential); every other handler never sees it.
+                result = self.dispatch(request, device_id, local=local)
                 if inspect.isawaitable(result):
                     result = await asyncio.wait_for(result, self.request_timeout)
                 await self._send(writer, {"ok": True, "result": result})
@@ -366,10 +372,11 @@ class JsonLineServer:
             self._connections.discard(task)
             self._writers.discard(writer)
 
-    def dispatch(self, request: dict[str, Any], device_id=None):
-        return self.hub.dispatch(request["op"],
-                                 {key: value for key, value in request.items() if key not in {"op", "token"}},
-                                 device_id)
+    def dispatch(self, request: dict[str, Any], device_id=None, *, local=False):
+        params = {key: value for key, value in request.items() if key not in {"op", "token"}}
+        if local is True:
+            return self.hub.dispatch(request["op"], params, device_id, local=True)
+        return self.hub.dispatch(request["op"], params, device_id)
 
 
 class JsonLineClient:

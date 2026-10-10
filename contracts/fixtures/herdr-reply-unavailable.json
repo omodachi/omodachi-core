@@ -1,0 +1,13 @@
+{
+  "session": "h11-test",
+  "pane": "w1:p2",
+  "available": false,
+  "reason": "not_an_agent",
+  "agent": null,
+  "text": null,
+  "at": null,
+  "complete": null,
+  "phase": null,
+  "truncated": false,
+  "contract_revision": "omodachi.v1"
+}

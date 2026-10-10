@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "upload_not_text",
+    "message": "a text file has to be UTF-8 text with no control bytes"
+  },
+  "contract_revision": "omodachi.v1"
+}

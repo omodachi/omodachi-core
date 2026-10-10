@@ -39,6 +39,7 @@ from omodachi_core.remote.session import RemoteManager, RemoteSession
 from omodachi_core.auth import DeviceAuthenticator
 from omodachi_core.host_identity import HostIdentity
 from omodachi_core.pairing import PairingStore
+from omodachi_core.network import apply_road
 
 ENCODER = EncoderLimits(4096, 4096, 16_777_216, 60, 40_000, 2, 2)
 OWNED_OUTPUT = "OMODACHI-0123456789abcdef"
@@ -78,9 +79,26 @@ def remote_fixtures():
     session.connection = VncBackend(lambda _: _FixtureWayVNC()).prepare(session, profile)
     manager = RemoteManager(hyprland=None, journal_dir=Path("/home/user/.local/state/omodachi/remote"),
                             encoder=ENCODER)
+    # REMOTE-INPUT-1: `text_input` is added by RemoteService from the live
+    # keymap and `wtype`; the example shows a US host that has it.
+    # REMOTE-INPUT-2 adds the route's limits and `compose`.
+    from omodachi_core.remote.text import LIMITS
+    capabilities = {**manager.capabilities(),
+                    "text_input": {"available": True, "layout": "us", "variant": None, **LIMITS,
+                                   "compose": True}}
+    from omodachi_core.remote.text import HostText
+    typed = HostText(runner=lambda argv, env, timeout: 0, environment=lambda: {"WAYLAND_DISPLAY": "wayland-1"},
+                     which=lambda name: "/usr/bin/wtype")
+    typed.executable = lambda: "/usr/bin/wtype"
     return {"remote-session.json": resource(session.to_dict()),
             "remote-connection.json": session.connection,
-            "remote-capabilities.json": resource(manager.capabilities())}
+            "remote-capabilities.json": resource(capabilities),
+            "remote-text.json": resource(typed.type("你好")),
+            # TAIL-2 P2-2: the HTTPS answer for a peer Tailscale is relaying.
+            "remote-capabilities-relayed.json": resource(apply_road(
+                {**capabilities, "backends": {
+                    "sunshine": {"available": True, "reason": None},
+                    "vnc": {"available": True, "reason": None}}}, "tailnet", True))}
 
 
 FIXTURE_IDENTITY = HostIdentity(host_id="0" * 32, host_name="omarchy-fixture",
@@ -89,6 +107,11 @@ FIXTURE_IDENTITY = HostIdentity(host_id="0" * 32, host_name="omarchy-fixture",
 # A fixed synthetic fingerprint: the fixture must not depend on a certificate
 # that exists only on one developer machine.
 FIXTURE_IDENTITY.fingerprint = lambda: "ab" * 32
+# TAIL-2: a synthetic tailnet reading (TEST-NET-style names, no real tailnet).
+FIXTURE_IDENTITY.tailnet = lambda: {
+    "installed": True, "backend_state": "Running", "running": True,
+    "dns_name": "omarchy-fixture.tail0000.ts.net", "ips": ["100.64.0.35", "fd7a:115c:a1e0::35"],
+    "ssh": False, "accept_routes": False, "netfilter_mode": 2}
 
 
 # A syntactically real ed25519 public key with an all-known body, so the example
@@ -122,10 +145,17 @@ def ssh_key_fixture(service: CoreService) -> dict[str, Any]:
         try:
             return {"ssh-key.json": service.ssh_key("device-fixture-redacted",
                                                     {"public_key": FIXTURE_SSH_KEY_REPLACEMENT}),
-                    "ssh-key-state.json": service.ssh_key_state("device-fixture-redacted")}
+                    "ssh-key-state.json": redact_ssh_user(service.ssh_key_state("device-fixture-redacted"))}
         finally:
             service.ssh_keys = original
             del service._ssh_grants
+
+
+def redact_ssh_user(document):
+    """The daemon's own Unix account exists only on one machine."""
+    if isinstance(document.get("target"), dict):
+        document["target"] = {**document["target"], "user": "fixture-user"}
+    return document
 
 
 def pairing_fixtures(service: CoreService) -> dict[str, Any]:
@@ -137,7 +167,9 @@ def pairing_fixtures(service: CoreService) -> dict[str, Any]:
         service.pairing = PairingStore(authority, root / "pairing.json")
         invitation = service.pairing.begin()["invitation"]
         row = service.pairing.request(invitation, "device-fixture-redacted", "Fixture iPad",
-                                      ssh_public_key=FIXTURE_SSH_KEY)
+                                      ssh_public_key=FIXTURE_SSH_KEY,
+                                      via={"kind": "tailnet", "peer_name": "fixture-ipad",
+                                           "login": "fixture@example.com"})
         service.pairing.decide(row["request_id"], approve=True)
         # What a local Approve records once the streaming grant and the
         # authorized_keys line have landed.
@@ -150,7 +182,196 @@ def pairing_fixtures(service: CoreService) -> dict[str, Any]:
     claim["issued_at"] = int(NOW.timestamp())
     claim["credential_expires_at"] = int(NOW.timestamp()) + authority.ttl_seconds
     claim["expires_at"] = int(NOW.timestamp()) + PairingStore.TTL
-    return {"pairing-claim.json": claim, **credential_fixtures()}
+    return {"pairing-claim.json": claim, "pairing-claim-web.json": web_claim_fixture(service),
+            **credential_fixtures()}
+
+
+def web_claim_fixture(service: CoreService) -> dict[str, Any]:
+    """LITE-1a: a browser's pairing through `tailscale serve`, claimed.
+
+    The request carried `Origin` (so it is `web` whatever it said), came from a
+    loopback peer that forwarded for a tailnet address - so its `via` is the
+    same tailnet road and whois answer the App's would be (NEXT-1) - and was
+    approved: the claim holds the companion credential and nothing else.
+    """
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        authority = DeviceAuthenticator(secret=b"\x00" * 32, state_path=root / "credentials.json")
+        service.pairing = PairingStore(authority, root / "pairing.json")
+        row = service.pairing.request(None, "odomo-fixture-redacted", "Safari on iPhone",
+                                      remote_addr="100.64.0.7", client={"kind": "web", "label": "Safari on iPhone"},
+                                      browser=True, via={"kind": "tailnet", "peer_name": "fixture-iphone",
+                                                         "login": "fixture@example.com"})
+        service.pairing.decide(row["request_id"], approve=True)
+        # LITE-1b C7: a host whose installer made the `tailscale serve`
+        # mapping tells the browser that paired through it where Odomo lives.
+        identity = service.host_identity
+        service.install_host_identity(with_odomo(identity))
+        claim = service.pairing_claim(row["request_id"], {"request_secret": row["request_secret"]})
+        service.install_host_identity(identity)
+    claim["request_id"] = "pair_" + "1" * 32
+    claim["ssh"] = {**claim["ssh"], "user": "fixture-user"}
+    claim["credential"] = "fixture-redacted-web-credential"
+    claim["issued_at"] = int(NOW.timestamp())
+    claim["credential_expires_at"] = int(NOW.timestamp()) + authority.ttl_seconds
+    claim["expires_at"] = int(NOW.timestamp()) + PairingStore.TTL
+    return claim
+
+
+FIXTURE_ODOMO_URL = "https://omarchy-fixture.tail0000.ts.net/odomo/"
+
+
+def with_odomo(identity: HostIdentity) -> HostIdentity:
+    """The same fixture identity, with the installer's serve record behind it."""
+    value = replace(identity, odomo=lambda: FIXTURE_ODOMO_URL, odomo_push=lambda: 1)
+    value.fingerprint = identity.fingerprint
+    return value
+
+
+def without_odomo(identity: HostIdentity) -> HostIdentity:
+    """LITE-1d: a host with push but no front door (no Tailscale there)."""
+    value = replace(identity, odomo=lambda: None, odomo_push=lambda: 0)
+    value.fingerprint = identity.fingerprint
+    return value
+
+
+def push_fixtures(service: CoreService) -> dict[str, Any]:
+    """LITE-1b C6: the push routes' documents, from the real store and builders."""
+    import tempfile
+    from omodachi_core import webpush
+    from omodachi_core.push import AGENT_TAG, PushStore, Signal, payload_for, retract_payload
+    from omodachi_core.notifications import NotificationMirror
+    vapid = webpush.Vapid.from_document({"private": webpush.b64u(bytes(range(1, 33)))})
+    browser_key = webpush.b64u(b"\x04" + bytes(range(64)))
+    with tempfile.TemporaryDirectory() as directory:
+        store = PushStore(Path(directory) / "push-subscriptions.json", clock=lambda: NOW.timestamp())
+        record = store.subscribe("odomo-fixture-redacted", {
+            "endpoint": "https://web.push.apple.com/fixture-not-a-real-endpoint",
+            "keys": {"p256dh": browser_key, "auth": webpush.b64u(bytes(16))}, "expirationTime": None})
+        prefs = store.set_prefs("odomo-fixture-redacted", 0, {"kinds": {"agent_done": False}, "lang": "en"})
+    origin = FIXTURE_ODOMO_URL.removesuffix("/odomo/")
+    approval = Signal("agent_approval", "agent", AGENT_TAG, panel="agent", ids={"ref": "approval"})
+    note = Signal("host_notification", "note:Omodachi", "note-1789711988810-1", panel="notifications",
+                  ids={"note": "1789711988810-1"}, name="Omodachi", title="\u201cQA companion\u201d wants to connect",
+                  body="Open Omodachi to approve or reject it.")
+    blocked = Signal("herdr_blocked", "herdr:omodachi:w1:p2", "herdr-w1-p2", panel="herdr",
+                     ids={"session": "omodachi", "pane": "w1:p2", "agent": "codex"}, name="codex")
+    hub = Hub()
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory) / "notifications"
+        (root / "history").mkdir(parents=True)
+        (root / "1789711988810-1.json").write_text(json.dumps({
+            "id": 1, "app": "Omodachi", "summary": "\u201cQA companion\u201d wants to connect",
+            "body": "Open Omodachi to approve or reject it.", "glyph": "", "urgency": 2,
+            "timestamp": 1789711988810}))
+        mirror = NotificationMirror(hub, state_dir=root)
+        mirror.scan()
+        (root / "1789711988810-1.json").rename(root / "history/1789711988810-1.json")
+        mirror.scan()
+    updated = next(event for event in hub.events_since(0) if event.type == "notification.updated")
+    updated = replace(updated, ts=NOW.timestamp())
+    return {
+        "push-vapid-key.json": resource({"vapid_public_key": vapid.public_b64u}),
+        "push-subscription.json": resource({"subscription_id": "sub_" + "0" * 24,
+                                            "device_id": "odomo-fixture-redacted",
+                                            "created_at": record["created_at"],
+                                            "endpoint_host": "web.push.apple.com",
+                                            "vapid_public_key": vapid.public_b64u}),
+        "push-unsubscribe.json": resource({"device_id": "odomo-fixture-redacted", "removed": True}),
+        "notifications-prefs.json": resource(prefs),
+        # NOTIFY-2: `navigate` carries the host id, so Odomo can link the App there.
+        "push-payload-agent-approval.json": json.loads(payload_for(approval, origin=origin, lang="en",
+                                                                    host="omarchy-fixture",
+                                                                    host_id=FIXTURE_IDENTITY.host_id)),
+        "push-payload-herdr-blocked-zh.json": json.loads(payload_for(blocked, origin=origin, lang="zh-Hans",
+                                                                      host="omarchy-fixture",
+                                                                      host_id=FIXTURE_IDENTITY.host_id)),
+        "push-payload-host-notification.json": json.loads(payload_for(note, origin=origin, lang="en",
+                                                                       host="omarchy-fixture")),
+        "push-payload-retract.json": json.loads(retract_payload(AGENT_TAG)),
+        "event-notification-updated.json": resource(asdict(updated)),
+        **presence_fixtures(),
+    }
+
+
+def notify1_state(state: dict) -> dict:
+    """NOTIFY-1: what the App's alerts read off the state - the oldest pending
+    approval's ids, whether the person is at the computer, and what finished
+    with nobody looking - from the real provider helper, desk and ledger."""
+    from omodachi_core.agent_chat_provider import approval_fingerprint
+    from omodachi_core.desk import DeskPresence
+    from omodachi_core.seen import SeenLedger
+    value = json.loads(json.dumps(state))
+    row = {"request_id": "approval-fixture-01", "kind": "commandExecution", "summary": "make test",
+           "details": {"cwd": "/home/fixture/project"}, "decisions": ["accept", "acceptForSession", "decline", "cancel"]}
+    value["agent"]["chat"] = {"status": {"type": "active", "activeFlags": ["waitingOnApproval"], "waiting": "approval"},
+                              "pending_approvals": 1,
+                              "approval": {"request_id": row["request_id"], "kind": row["kind"],
+                                           "fingerprint": approval_fingerprint(row), "decidable": True}}
+    value["agent"]["status"] = "waiting_on_approval"
+    desk = DeskPresence(locked_probe=lambda: False)
+    desk._set(False, "wayland")
+    value["desk"] = desk.evaluate()
+    ledger = SeenLedger(None, clock=lambda: 1_790_000_000.0)
+    pane = lambda status: {"workspaces": [{"tabs": [{"panes": [
+        {"id": "w1:p2", "agent_status": status, "agent": {"name": "default", "kind": "codex", "status": status}}]}]}]}
+    ledger.observe_herdr("omodachi", pane("working"))
+    ledger.observe_herdr("omodachi", pane("idle"))
+    value["unseen"] = ledger.value()
+    return value
+
+
+def overview1_state(state: dict) -> dict:
+    """OVERVIEW-1: the "Needs you" list from the real projector - the Agent
+    waiting on a command approval, and two sessions: a codex pane blocked on
+    an approval dialog (read off a synthetic screen), a claude pane working, a
+    blocked pane whose screen reads as no dialog, and a finished pane whose
+    agent's last reply ends in a question."""
+    from omodachi_core.overview import OverviewProjector
+    value = notify1_state(state)
+    projector = OverviewProjector(clock=lambda: 100.0)
+    pane = lambda ident, status, kind, title, cwd: {
+        "id": ident, "title": title, "cwd": cwd, "agent_status": status, "revision": 4,
+        "agent": {"name": "default" if kind else None, "kind": kind, "status": status} if kind else None}
+    projector.set_session("work", {"workspaces": [
+        {"id": "w1", "label": "api", "number": 1, "tabs": [{"panes": [
+            pane("w1:p1", "blocked", "codex", None, "/home/fixture/api"),
+            pane("w1:p2", "working", "claude", "claude", "/home/fixture/api")]}]},
+        {"id": "w2", "label": None, "number": 2, "tabs": [{"panes": [
+            pane("w2:p1", "blocked", "codex", None, "/home/fixture/site")]}]}]})
+    projector.set_session("omodachi", {"workspaces": [{"id": "w1", "label": "~", "number": 1, "tabs": [{"panes": [
+        pane("w1:p1", "working", "codex", "codex", "/home/fixture"),
+        pane("w1:p3", "idle", "codex", None, "/home/fixture/notes")]}]}]})
+    projector.note_screen("work", "w1:p1", "\n".join([
+        "  Would you like to run the following command?", "", "  $ make test", "",
+        "› 1. Yes, proceed (y)", "  2. No, and tell Codex what to do differently (esc)", "",
+        "  Press enter to confirm or esc to cancel"]))
+    projector.note_screen("work", "w2:p1", "Thinking about it…")
+    projector.note_reply("omodachi", "w1:p3", "Done. The notes are sorted.\n\nShould I also archive the old ones?")
+    value["unseen"] = {"agent": False, "herdr": [{"session": "omodachi", "pane_id": "w1:p3", "name": "codex"}]}
+    value["overview"] = projector.value(agent=value["agent"], unseen=value["unseen"], default_pane="w1:p1")
+    return value
+
+
+def presence_fixtures() -> dict[str, Any]:
+    """NOTIFY-2: the App in front, alerting the kinds it shows by itself; and
+    the last word of a Herdr session that stopped, from the real service."""
+    from omodachi_core.herdr_bridge import HerdrBridge
+    hub = Hub()
+    hub.register_device("ipad-fixture")
+    service = create_service(hub, demo=True)
+    presence = service.set_presence("ipad-fixture", {"foreground": True, "alerts": [
+        "agent_approval", "agent_needs_input", "herdr_blocked", "host_notification"]})
+    service.herdr_bridge = HerdrBridge("omodachi", runner=lambda argv: {"result": {}})
+    gone = HerdrBridge("probe", runner=lambda argv: {"result": {}})
+    gone._revision = 7
+    service._herdr_bridges["probe"] = gone
+    service._watch_running_sessions = lambda now=None: [service._herdr_bridges.pop("probe")]
+    service.notify_herdr_layout()
+    stopped = next(event for event in hub.events_since(0) if event.payload.get("stopped"))
+    stopped = DeviceEvent(1, "evt_00000001", stopped.type, stopped.device_id, stopped.payload, NOW.timestamp())
+    return {"presence.json": presence, "event-herdr-layout-stopped.json": resource(asdict(stopped))}
 
 
 def credential_fixtures() -> dict[str, Any]:
@@ -238,9 +459,314 @@ def theme_font_herdr_fixtures() -> dict[str, Any]:
         sessions.append(entry)
     return {"theme.json": theme.snapshot() | {"contract_revision": REVISION},
             "fonts.json": resource(rows),
+            **herdr_write_fixtures(),
+            **herdr_session_start_fixtures(),
+            **herdr_workspace_fixtures(),
+            **herdr11_fixtures(),
+            **operator_rows_fixtures(),
             "herdr-layout.json": resource(bridge.layout()),
             "herdr-sessions.json": resource({"selected": "omodachi", "owned": "omodachi",
                                              "sessions": sessions})}
+
+
+def herdr_write_fixtures() -> dict[str, Any]:
+    """HERDR-3. The real bridge, against a pretend pane with one input line.
+
+    `echo` shows what was typed, so the proof holds and Enter follows;
+    `dialog` swallows it, so nothing is submitted and the reply says why.
+    """
+    from omodachi_core.herdr_bridge import HerdrBridge
+
+    def pane(echo: bool, blocked: bool = False):
+        screen = {"text": "\u2500\u2500\u2500\n> "}
+
+        def request(method, params):
+            if method == "pane.read":
+                return {"type": "pane_read", "read": {"text": screen["text"]}}
+            if method == "pane.send_text" and echo:
+                screen["text"] += params["text"]
+            return {"type": "ok"}
+        # VERIFY-1: what Herdr says about the pane's agent. `{}` is a snapshot
+        # that cannot be read, which says nothing and leaves the proof to decide.
+        state = {"snapshot": {"panes": [{"pane_id": "w1:p2", "agent_status": "blocked"}]}} if blocked else {}
+        bridge = HerdrBridge(runner=lambda argv: state)
+        bridge.request = request
+        return bridge
+
+    quiet = lambda seconds: None
+    return {"herdr-keys.json": resource(pane(True).send_keys("w1:p2", ["Down", "2", "Enter"])),
+            "herdr-text.json": resource(pane(True).send_text(
+                "w1:p2", "please run the tests again", submit=True, sleep=quiet)),
+            "herdr-text-not-seen.json": resource(pane(False).send_text(
+                "w1:p2", "please run the tests again", submit=True, sleep=quiet)),
+            # HERDR-4: a reply this short is proved by its line only.
+            "herdr-text-short.json": resource(pane(True).send_text("w1:p2", "yes", submit=True, sleep=quiet)),
+            # VERIFY-1: a dialog has the keyboard; nothing is typed.
+            "herdr-text-agent-blocked.json": resource(pane(True, blocked=True).send_text(
+                "w1:p2", "continue", submit=True, sleep=quiet))}
+
+
+def upload_fixtures() -> dict[str, Any]:
+    """ATTACH-1. The real store over synthetic bytes in a throwaway directory,
+    with a fixed clock and ids; the path is then written as a home's own."""
+    import tempfile
+    from omodachi_core import uploads
+    from omodachi_core.service import ServiceError
+    home_dir = "/home/user/.local/state/omodachi/uploads"
+    ids = iter(f"{n:032x}" for n in range(0xa1, 0xa1 + 16))
+    real_uuid4 = uploads.uuid.uuid4
+    uploads.uuid.uuid4 = lambda: type("U", (), {"hex": next(ids)})()
+    try:
+        with tempfile.TemporaryDirectory() as scratch:
+            store = uploads.UploadStore(Path(scratch) / "uploads", clock=lambda: NOW.timestamp())
+
+            def put(name, data, target):
+                receiving = store.receive()
+                receiving.write(data)
+                upload = receiving.finish(name, device="ipad-fixture", target=target)
+                document = upload.document()
+                document["path"] = document["path"].replace(str((Path(scratch) / "uploads").resolve()), home_dir)
+                return resource(document)
+
+            def refusal(name, data):
+                try:
+                    put(name, data, {})
+                except ServiceError as error:
+                    return resource({"error": {"code": error.code, "message": str(error)}})
+                raise AssertionError(name)
+            png = b"\x89PNG\r\n\x1a\n" + b"\0" * 64
+            fixtures = {
+                "upload-image.json": put("Screenshot 2026-10-04.png", png, {"kind": "agent"}),
+                "upload-text.json": put("main.py", b"print('hello')\n", {"kind": "herdr", "session": "work",
+                                                                          "pane": "w1:p2"}),
+                "upload-pdf.json": put("notes.pdf", b"%PDF-1.7\n%fixture\n", {"kind": "agent"}),
+                "http-error-upload-svg-refused.json": refusal("drawing.svg", b"<svg xmlns='x'/>"),
+                "http-error-upload-type-refused.json": refusal("bundle.zip", b"PK\x03\x04" + b"\0" * 32),
+                "http-error-upload-not-text.json": refusal("data.py", b"\x00\x01\x02binary"),
+            }
+            small = uploads.UploadStore(Path(scratch) / "small", max_bytes=8)
+            receiving = small.receive()
+            try:
+                receiving.write(b"0123456789")
+            except ServiceError as error:
+                fixtures["http-error-upload-too-large.json"] = resource(
+                    {"error": {"code": error.code, "message": str(error)}})
+            fixtures["upload-removed.json"] = resource(store.delete(fixtures["upload-pdf.json"]["id"]))
+            return fixtures
+    finally:
+        uploads.uuid.uuid4 = real_uuid4
+
+
+def herdr_session_start_fixtures() -> dict[str, Any]:
+    """HERDR-5. The real service and starter against the recorded listing:
+    `default` is stopped and comes back with its own workspaces; `h5test` is
+    new and gets one in $HOME. The runner stands in for `systemd-run`."""
+    from omodachi_core.agent import ProbeOutput
+    from omodachi_core.herdr_bridge import (HerdrBridge, HerdrSessionChoices, HerdrSessions,
+                                            HerdrSessionStarter, HerdrWriteAudit)
+    listing = json.loads((FIXTURES / "herdr/session-list.json").read_text())
+    for row in listing["sessions"]:
+        row["running"] = row["name"] == "omodachi"
+
+    def runner(argv):
+        if argv[0] == "systemd-run":
+            name = argv[-2]
+            rows = [row for row in listing["sessions"] if row["name"] == name]
+            if rows:
+                rows[0]["running"] = True
+            else:
+                listing["sessions"].append({"default": False, "name": name, "running": True})
+        return ProbeOutput(0)
+    service = create_service(Hub(), demo=True)
+    service.herdr_bridge = HerdrBridge(runner=lambda argv: {})
+    service.herdr_choices = HerdrSessionChoices()
+    service.herdr_audit = HerdrWriteAudit()
+    service._herdr_sessions = HerdrSessions(runner=lambda argv: listing, home=Path("/home/alex/.config/herdr"))
+    service.herdr_starter = HerdrSessionStarter(runner=runner, home=Path("/home/user"), sleep=lambda _: None)
+    service._herdr_fresh_snapshot = lambda name, socket_path=None: {"workspaces": [] if name == "h5test" else [{}]}
+    return {"herdr-session-start.json": service.herdr_start_session("phone-a", "default"),
+            "herdr-session-create.json": service.herdr_create_session("phone-a", {"name": "h5test"})}
+
+
+def herdr_workspace_fixtures() -> dict[str, Any]:
+    """HERDR-6. The real service over a scratch home folder, written back as
+    `/home/user`: a new workspace in `~/Work/omodachi`, the folders offered
+    (two running sessions' panes), one level of `~/Work`, and two refusals.
+    Herdr's side is the recorded `workspace create` reply."""
+    import os
+    import tempfile
+    from omodachi_core.herdr_bridge import (HerdrBridge, HerdrFolders, HerdrSessionChoices, HerdrSessions,
+                                            HerdrWriteAudit)
+    from omodachi_core.service import ServiceError
+    listing = json.loads((FIXTURES / "herdr/session-list.json").read_text())
+    work = "work"
+    listing["sessions"].append({"default": False, "name": work, "running": True,
+                                "session_dir": "/home/alex/.config/herdr/sessions/work",
+                                "socket_path": "/home/alex/.config/herdr/sessions/work/herdr.sock"})
+    for row in listing["sessions"]:
+        row["running"] = row["name"] in ("omodachi", work)
+    with tempfile.TemporaryDirectory() as scratch:
+        home = Path(os.path.realpath(scratch)) / "home"
+        for name in ("Work/omodachi", "Work/notes", "Work/.cache", "code", "Projects", ".ssh"):
+            (home / name).mkdir(parents=True)
+        panes = {"omodachi": [str(home)], work: [str(home / "code"), str(home / "Work/omodachi")]}
+
+        def runner(session):
+            def run(argv):
+                if argv[3:5] == ("workspace", "create"):
+                    cwd = argv[6]
+                    return {"type": "workspace_created",
+                            "workspace": {"workspace_id": "w3",
+                                          "label": argv[8] if "--label" in argv else Path(cwd).name,
+                                          "number": 3, "focused": False,
+                                          "active_tab_id": "w3:t1", "agent_status": "unknown",
+                                          "pane_count": 1, "tab_count": 1},
+                            "root_pane": {"pane_id": "w3:p1", "cwd": cwd, "foreground_cwd": cwd}}
+                return {"snapshot": {"panes": [{"pane_id": f"w{n + 1}:p1", "cwd": cwd}
+                                               for n, cwd in enumerate(panes[session])]}}
+            return run
+        service = create_service(Hub(), demo=True)
+        service.herdr_bridge = HerdrBridge("omodachi", runner=runner("omodachi"))
+        service._herdr_bridges[work] = HerdrBridge(work, runner=runner(work))
+        service.herdr_choices = HerdrSessionChoices()
+        service.herdr_audit = HerdrWriteAudit()
+        service._herdr_sessions = HerdrSessions(runner=lambda argv: listing, home=Path("/home/alex/.config/herdr"))
+        service.herdr_folders_memory = HerdrFolders(home, clock=lambda: 0.0)
+        # HERDR-11: the launchers a host with both agents installed offers,
+        # and the root pane a launcher is typed into (its prompt drawn).
+        from omodachi_core.operator_rows import Launchers
+        nowhere = Path("/nonexistent/omodachi-fixture")
+        service.herdr_launchers = Launchers(nowhere, nowhere, which=lambda name, path=None: "/usr/bin/" + name)
+        for bridge in (service.herdr_bridge, *service._herdr_bridges.values()):
+            bridge.request = lambda method, params: {"read": {"text": "~/Work/omodachi $ "}} \
+                if method == "pane.read" else {}
+
+        def refusal(cwd, launch=None):
+            try:
+                body = {"cwd": cwd} if launch is None else {"cwd": cwd, "launch": launch}
+                service.herdr_create_workspace("phone-a", work, body)
+            except ServiceError as error:
+                return resource({"error": {"code": error.code, "message": str(error)}})
+            raise AssertionError(cwd)
+        service.herdr_folder_favourite("phone-a", {"path": "~/Work/notes", "favourite": True})
+        documents = {
+            "herdr-folders.json": service.herdr_folders("phone-a", {}),
+            "herdr-folders-browse.json": service.herdr_folders("phone-a", {"under": "~/Work"}),
+            "herdr-workspace-create.json": service.herdr_create_workspace(
+                "phone-a", work, {"cwd": "~/Work/omodachi", "name": "omodachi"}),
+            "herdr-workspace-create-launch.json": service.herdr_create_workspace(
+                "phone-a", work, {"cwd": "", "launch": "codex"}),
+            "http-error-herdr-launch-not-allowed.json": refusal("~", "rm -rf ~"),
+            "http-error-herdr-folder-private.json": refusal("~/.ssh"),
+            "http-error-herdr-folder-outside-home.json": refusal("/etc"),
+        }
+        text = json.dumps(documents).replace(str(home), "/home/user")
+    return json.loads(text)
+
+
+def herdr11_state(light: dict, full: dict) -> dict:
+    """The light state, with the per-process identity normalised the way
+    `state.json`'s is, so the two documents differ only in the catalog."""
+    light = json.loads(json.dumps(light))
+    light["instance_id"] = full["instance_id"]
+    light["event_cursor"] = full["event_cursor"]
+    light["revision"] = full["revision"]
+    if light.get("focus", {}).get("target_token") is not None:
+        light["focus"]["target_token"] = full["focus"]["target_token"]
+    return light
+
+
+def herdr11_fixtures() -> dict[str, Any]:
+    """HERDR-11. A pane's latest reply from a synthetic codex rollout and a
+    synthetic Claude Code log (shapes read off the host, words made up), one
+    pane with nothing to show, a workspace started with a launcher, and the
+    refusal of a command that is not one."""
+    import tempfile
+    from omodachi_core.herdr_reply import AgentReplies, ProcessTable
+    from omodachi_core.service import ServiceError
+    documents = {}
+    with tempfile.TemporaryDirectory() as scratch:
+        home = Path(scratch)
+        sessions = home / ".codex/sessions/2026/10/07"
+        sessions.mkdir(parents=True)
+        thread = "01a110e1-ee88-7e23-aae2-3c5cdbb8a356"
+        rollout = sessions / f"rollout-2026-10-07T10-00-00-{thread}.jsonl"
+        lines = [
+            {"timestamp": "2026-10-07T10:00:00.000Z", "type": "session_meta", "payload": {"id": thread}},
+            {"timestamp": "2026-10-07T10:00:01.000Z", "type": "event_msg",
+             "payload": {"type": "task_started", "turn_id": "turn-fixture-01"}},
+            {"timestamp": "2026-10-07T10:00:04.000Z", "type": "response_item",
+             "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [
+                 {"type": "output_text", "text": "Done. The tests pass now:\n\n| suite | result |\n|---|---|\n"
+                                                  "| unit | 12 passed |\n\n中文也一样：全部通过。"}]}},
+            {"timestamp": "2026-10-07T10:00:05.000Z", "type": "event_msg",
+             "payload": {"type": "task_complete", "turn_id": "turn-fixture-01"}}]
+        rollout.write_text("\n".join(json.dumps(line, ensure_ascii=False) for line in lines) + "\n")
+        project = home / ".claude/projects/-home-user-h11test"
+        project.mkdir(parents=True)
+        session_id = "6f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f"
+        claude = [{"type": "assistant", "isSidechain": False, "timestamp": "2026-10-07T10:02:00.000Z",
+                   "message": {"id": "msg_fixture", "role": "assistant", "stop_reason": None,
+                               "content": [{"type": "text", "text": "I read the two files."}]}},
+                  {"type": "assistant", "isSidechain": False, "timestamp": "2026-10-07T10:02:00.000Z",
+                   "message": {"id": "msg_fixture", "role": "assistant", "stop_reason": "end_turn",
+                               "content": [{"type": "text", "text": "Both look right; nothing to change."}]}}]
+        (project / f"{session_id}.jsonl").write_text("\n".join(json.dumps(line) for line in claude) + "\n")
+
+        class Table(ProcessTable):
+            def tree(self, roots): return list(roots)
+            def open_files(self, pid): return [str(rollout)] if pid == 41 else []
+            def name(self, pid): return {41: "codex", 42: "claude"}.get(pid, "zsh")
+            def cmdline(self, pid): return [self.name(pid)]
+            def cwd(self, pid): return "/home/user/h11test"
+            def pids(self): return [41, 42]
+            def parent(self, pid): return 1
+            def started(self, pid): return 0.0
+        replies = AgentReplies(home=home, table=Table())
+        codex = replies.reply(session="h11-test", pane="w1:p1", agent="codex",
+                              process_info={"foreground_processes": [{"pid": 41}]})
+        claude_reply = replies.reply(session="h11-test", pane="w2:p1", agent="claude",
+                                     process_info={"foreground_processes": [{"pid": 42}]})
+        documents["herdr-reply.json"] = resource({"session": "h11-test", "pane": "w1:p1", **codex})
+        documents["herdr-reply-claude.json"] = resource({"session": "h11-test", "pane": "w2:p1", **claude_reply})
+        documents["herdr-reply-unavailable.json"] = resource(
+            {"session": "h11-test", "pane": "w1:p2", **replies.unavailable("not_an_agent")})
+    return documents
+
+
+def operator_rows_fixtures() -> dict[str, Any]:
+    """HERDR-4. What ships for a claude pane and a shell; and an operator's
+    Collie-format files (in a scratch directory standing in for
+    `~/.config/collie/`) replacing it, with one dropped row and one file that
+    no longer parses holding its last good rows."""
+    import tempfile
+    from omodachi_core.operator_rows import OperatorRows
+
+    with tempfile.TemporaryDirectory() as scratch:
+        ours, collie = Path(scratch) / "omodachi", Path(scratch) / "collie"
+        ours.mkdir(); collie.mkdir()
+        shipped = OperatorRows(ours, collie)
+        claude, shell = shipped.resolve("claude"), shipped.resolve(None)
+        (collie / "quick-replies.toml").write_text(
+            '[[replies]]\nscope = "claude"\ntitle = "bestätigen"\nitems = ["ja", "nein"]\n\n'
+            '[[replies]]\ntitle = "häufig"\nitems = ["weiter", "nochmal"]\n')
+        (ours / "keys.toml").write_text(
+            '[[keys]]\nscope = "claude"\nlabel = "Back"\nkeys = ["shift+tab"]\n\n'
+            '[[keys]]\nlabel = "Quit"\nkeys = ["ctrl+d"]\ndanger = true\n\n'
+            '[[keys]]\nlabel = "Page"\nkeys = ["PageUp"]\n')
+        (ours / "commands.toml").write_text(
+            '[[commands]]\nscope = "claude"\ncommand = "/statusline"\ndescription = "Set the status line"\n'
+            'bar = true\nbar_label = "Status"\n\n'
+            '[[commands]]\ncommand = "/standup"\ndescription = "Post today\'s standup"\n\n'
+            '[[commands]]\nscope = "claude"\ncommand = "/clear"\nbar = true\n')
+        rows = OperatorRows(ours, collie)
+        rows.resolve("claude")
+        # Mid-edit: the commands file stops parsing; its last good rows stay.
+        (ours / "commands.toml").write_text('[[commands]]\ncommand = "/statusline\n')
+        operator = rows.resolve("claude-code")
+    return {"herdr-operator-rows.json": resource(claude),
+            "herdr-operator-rows-shell.json": resource(shell),
+            "herdr-operator-rows-operator.json": resource(operator)}
 
 
 #: SHORTCUT-1. Synthetic records in the exact three-field shape the host's
@@ -392,6 +918,14 @@ def generated_fixtures() -> dict[str, Any]:
     service = create_service(hub, demo=True)
     service.install_host_identity(FIXTURE_IDENTITY)
     fixtures["health.json"] = service.resource(hub.dispatch("health", {}))
+    fixtures["host-roads.json"] = service.host_roads()
+    service.install_host_identity(with_odomo(FIXTURE_IDENTITY))
+    fixtures["host-roads-odomo.json"] = service.host_roads()
+    service.install_host_identity(without_odomo(FIXTURE_IDENTITY))
+    fixtures["host-roads-odomo-none.json"] = service.host_roads()
+    service.install_host_identity(FIXTURE_IDENTITY)
+    fixtures.update(push_fixtures(service))
+    fixtures.update(upload_fixtures())
     fixtures.update(pairing_fixtures(service))
     fixtures.update(ssh_key_fixture(service))
     service.update_agent(agent, herdr)
@@ -409,6 +943,19 @@ def generated_fixtures() -> dict[str, Any]:
     if ipc_state.get("focus", {}).get("target_token") is not None:
         ipc_state["focus"]["target_token"] = "window-token-fixture-01"
     fixtures["state.json"] = state
+    # MOTION-1: the chat summary `agent.changed` carries while a tool runs. A
+    # copy of the same state, so no later fixture's revision or cursor moves.
+    activity_state = json.loads(json.dumps(state))
+    activity_state["agent"]["chat"] = {"status": {"type": "active", "activeFlags": [], "waiting": None},
+                                       "pending_approvals": 0,
+                                       "activity": {"phase": "tool", "turn_id": "turn-fixture-01"}}
+    fixtures["state-agent-activity.json"] = activity_state
+    fixtures["state-notify1.json"] = notify1_state(state)
+    fixtures["state-overview1.json"] = overview1_state(state)
+    # HERDR-11 §4: the same reading for a client that already holds this
+    # catalog revision (`X-Omodachi-Catalog`): the rows are not sent again.
+    fixtures["state-herdr11-catalog-unchanged.json"] = herdr11_state(
+        service.state("device-fixture-redacted", known_catalog=state["catalog"]["revision"]), state)
     fixtures["capabilities.json"] = service.resource(hub.capabilities_snapshot())
     fixtures["herdr-resource.json"] = service.resource(hub.herdr_snapshot())
     # Every handed-off component belongs to this same effective host snapshot:
@@ -461,6 +1008,13 @@ def generated_fixtures() -> dict[str, Any]:
     fixtures["event-clipboard-changed.json"] = resource(change_data)
     fixtures.update(remote_fixtures())
     fixtures.update(agent_chat_fixtures())
+    fixtures.update(agent_new_conversation_fixtures())
+    fixtures.update(links_fixtures())
+    fixtures.update(agent_fix2_fixtures())
+    fixtures.update(agent_collie1_fixtures())
+    fixtures.update(agent_command_fixtures())
+    fixtures.update(agent_plan1_fixtures())
+    fixtures.update(agent_queue1_fixtures())
     fixtures.update(voice_fixtures())
     fixtures.update(notification_fixtures())
     fixtures.update(auth_fixtures())
@@ -471,6 +1025,10 @@ def generated_fixtures() -> dict[str, Any]:
         "cursor": state["event_cursor"]}
     fixtures["wss-event.json"] = {"event": event_data,
         "instance_id": "daemon-instance-fixture", "after_cursor": event.seq - 1}
+    # LITE-1a L4 / C5: the opt-in heartbeat and a WebSocket ticket.
+    fixtures["wss-heartbeat.json"] = {"type": "heartbeat", "instance_id": "daemon-instance-fixture"}
+    fixtures["ws-ticket.json"] = resource({"ticket": "fixture-ticket-not-a-real-one-0123456789abc",
+                                           "path": "/v1/events", "expires_in": 30})
     action = service.dispatch("actions.invoke", {"entry_id": "omodachi.agent",
         "request_id": "request-fixture-prepared", "catalog_revision": service.refresh_catalog()["revision"]},
         "device-fixture-redacted")
@@ -599,6 +1157,406 @@ def agent_chat_fixtures():
     return asyncio.run(build())
 
 
+def links_fixtures() -> dict[str, Any]:
+    """LINKS-1. `POST /v1/host/open` from the real rules over a throwaway home
+    (the opener records instead of launching anything), and an agent snapshot
+    whose rows carry what codex emits for files: a markdown reply, a
+    fileChange and an imageView, read through the real adapter."""
+    import asyncio
+    import os
+    import tempfile
+    from omodachi_core.agent_chat_provider import CodexDefaultAgentChat, DefaultAgentBinding
+    from omodachi_core.host_open import DesktopOpener, HostOpen, Request
+    from omodachi_core.service import ServiceError
+
+    fixtures: dict[str, Any] = {}
+    with tempfile.TemporaryDirectory() as scratch:
+        home = Path(scratch).resolve()
+        (home / "l1test").mkdir()
+        (home / "l1test" / "report.md").write_text("# Report\n" + "line\n" * 20)
+        (home / "l1test" / "run.sh").write_text("#!/bin/sh\necho hi\n")
+        os.chmod(home / "l1test" / "run.sh", 0o755)
+        (home / ".ssh").mkdir()
+        (home / ".ssh" / "config").write_text("Host *\n")
+        launched = []
+        opener = DesktopOpener(environment=lambda: {"PATH": "/usr/bin"}, home=home,
+                               runner=lambda argv, env: (
+                                   "text/markdown" if argv[1:3] == ("query", "filetype") else
+                                   "nvim.desktop" if argv[1:3] == ("query", "default") else
+                                   json.dumps([{"name": "OMODACHI-0123456789abcdef", "focused": True}])
+                                   if argv[1:] == ("-j", "monitors") else "ok"),
+                               spawner=lambda argv, env, cwd: launched.append(argv))
+        opener.default_editor = lambda: "nvim"
+        opener.has_editor_launcher = lambda: True
+        rules = HostOpen(opener=opener, home=home, log=lambda entry: None)
+        said = (f"Wrote [report.md]({home}/l1test/report.md) - the totals are at `{home}/l1test/report.md:12`. "
+                f"Serving at http://localhost:8000/ ; the script is {home}/l1test/run.sh and your SSH config is {home}/.ssh/config.")
+        agent = {"kind": "agent", "item": "item-fixture-reply"}
+
+        def run(text, *, url=False, check=False, output="OMODACHI-0123456789abcdef"):
+            try:
+                return resource(rules.run(Request(agent, text, url, check), device="ipad-fixture", role="companion",
+                                          haystack=said, cwd=home / "l1test", output=output))
+            except ServiceError as error:
+                return resource({"error": {"code": error.code, "message": str(error)}})
+
+        fixtures["host-open.json"] = run(f"{home}/l1test/report.md:12")
+        fixtures["host-open-check.json"] = run(f"{home}/l1test/report.md", check=True)
+        fixtures["host-open-url.json"] = run("http://localhost:8000/", url=True, output=None)
+        fixtures["http-error-open-not-mentioned.json"] = run(f"{home}/.bashrc")
+        fixtures["http-error-open-denied.json"] = run(f"{home}/.ssh/config")
+        fixtures["http-error-open-executable.json"] = run(f"{home}/l1test/run.sh")
+        assert launched == [("/usr/bin/omarchy-launch-editor", "+12", f"{home}/l1test/report.md"),
+                            ("/usr/bin/xdg-open", "http://localhost:8000/")], launched
+
+    turns = [{"id": "turn-fixture-01", "status": "completed", "items": [
+        {"type": "userMessage", "id": "item-fixture-ask", "content": [
+            {"type": "text", "text": "Make a chart of the totals and show it to me."}]},
+        {"type": "fileChange", "id": "item-fixture-change", "status": "completed", "changes": [
+            {"path": "/home/user/l1test/chart.py", "kind": {"type": "add"}, "diff": "print('chart')\n"}]},
+        {"type": "imageView", "id": "item-fixture-view", "path": "/home/user/l1test/chart.png"},
+        {"type": "agentMessage", "id": "item-fixture-reply", "text":
+            "## Done\n\n- Chart: ![Bar chart](/home/user/l1test/chart.png)\n- Script: [chart.py](/home/user/l1test/chart.py)\n\n"
+            "Preview at http://localhost:8000/ (served from `~/l1test`).\n\n```sh\npython3 chart.py\n```"},
+        {"type": "agentMessage", "id": "item-fixture-blank", "text": " "}]}]
+
+    class Peer:
+        def __init__(self):
+            self.ordinal = 0
+            self.on_notification = lambda value, ordinal: None
+            self.on_server_request = lambda value: None
+            self.on_disconnect = lambda: None
+        async def request(self, method, params):
+            result, _ = await self.request_fenced(method, params)
+            return result
+        async def request_fenced(self, method, params):
+            self.ordinal += 1
+            if method == "thread/loaded/list":
+                return {"data": ["thread-fixture-01"]}, self.ordinal
+            return {"thread": {"id": "thread-fixture-01", "turns": turns}}, self.ordinal
+        async def close(self):
+            pass
+
+    async def build():
+        binding = DefaultAgentBinding("omarchy-fixture", "thread-fixture-01", "ws://127.0.0.1:47311", "f" * 64)
+        chat = CodexDefaultAgentChat(binding, Peer())
+        await chat.attach()
+        return chat.snapshot_value()
+
+    fixtures["agent-chat-snapshot-links.json"] = asyncio.run(build())
+    return fixtures
+
+
+def agent_fix2_fixtures():
+    """AGENT-FIX-2: a command's output as increments (`tool.output`) and a
+    snapshot whose tool row was clipped to its newest output
+    (`detail_truncated`), from the real adapter and a controlled peer."""
+    import asyncio
+    from omodachi_core.agent_chat_provider import CodexDefaultAgentChat, DefaultAgentBinding, TOOL_DETAIL_LIMIT
+
+    class Peer:
+        def __init__(self):
+            self.ordinal = 0
+            self.on_notification = lambda value, ordinal: None
+            self.on_server_request = lambda value: None
+            self.on_disconnect = lambda: None
+        async def request(self, method, params):
+            result, _ = await self.request_fenced(method, params)
+            return result
+        async def request_fenced(self, method, params):
+            self.ordinal += 1
+            if method == "thread/loaded/list":
+                return {"data": ["thread-fixture-01"]}, self.ordinal
+            return {"thread": {"id": "thread-fixture-01", "turns": []}}, self.ordinal
+        async def close(self):
+            pass
+
+    async def build():
+        peer = Peer()
+        chat = CodexDefaultAgentChat(DefaultAgentBinding("omarchy-fixture", "thread-fixture-01",
+                                                         "ws://127.0.0.1:47311", "f" * 64), peer)
+        await chat.attach()
+        def notify(method, **params):
+            peer.ordinal += 1
+            peer.on_notification({"method": method, "params": {"threadId": "thread-fixture-01", **params}},
+                                 peer.ordinal)
+        notify("turn/started", turn={"id": "turn-fixture-01", "status": "inProgress"})
+        notify("item/started", turnId="turn-fixture-01", item={
+            "type": "commandExecution", "id": "item-fixture-build", "command": "make", "status": "inProgress"})
+        notify("item/commandExecution/outputDelta", turnId="turn-fixture-01", itemId="item-fixture-build",
+               delta="cc -c main.c\n")
+        notify("item/commandExecution/outputDelta", turnId="turn-fixture-01", itemId="item-fixture-build",
+               delta="cc -o app main.o\n")
+        chat._flush_output()
+        events = []
+        while not chat.events.empty():
+            events.append(chat.events.get_nowait())
+        output = next(row for row in events if row["event"]["type"] == "tool.output")
+        notify("item/completed", turnId="turn-fixture-01", item={
+            "type": "commandExecution", "id": "item-fixture-build", "command": "make", "status": "completed",
+            "aggregatedOutput": "".join("compile step %05d\n" % index for index in range(4000))})
+        snapshot = chat.snapshot_value()
+        assert snapshot["rows"][0]["detail_truncated"] > 0 and len(snapshot["rows"][0]["detail"]) == TOOL_DETAIL_LIMIT
+        # The fixture keeps the row's shape, not 64 KB of it.
+        snapshot["rows"][0]["detail"] = snapshot["rows"][0]["detail"][-38:]
+        return {"agent-chat-event-tool-output.json": output, "agent-chat-snapshot-tool-output.json": snapshot}
+
+    return asyncio.run(build())
+
+
+def agent_collie1_fixtures():
+    """AGENT-COLLIE-1: what real codex 0.160 frames become. The frames are the
+    ones `tests/test_agent_collie1.py` replays (a private app-server with a
+    scripted model, paths redacted): a fileChange waiting for approval with its
+    change cards, six commands read into steps, and a question with
+    descriptions, Other and a secret answer."""
+    import asyncio
+    sys.path.insert(0, str(ROOT / "tests"))
+    from test_agent_collie1 import replay
+
+    async def build():
+        changes, _, _ = await replay("edit", until="serverRequest/resolved")
+        steps, _, _ = await replay("steps")
+        _, _, asked = await replay("ask", until="serverRequest/resolved")
+        snapshot = steps.snapshot_value()
+        for row in snapshot["rows"]:
+            # The rows' shape, not every byte a command printed.
+            if row["kind"] == "tool" and len(row["detail"]) > 80:
+                row["detail"] = row["detail"][:80]
+        events = [event for event in asked if event["type"] == "agent.approval.requested"]
+        question = {"identity": steps.binding.identity() | {"providerSessionID": "thread-fixture-01"},
+                    "sequence": 1, "event": events[0]}
+        return {"agent-chat-snapshot-changes.json": changes.snapshot_value(),
+                "agent-chat-snapshot-steps.json": snapshot,
+                "agent-chat-event-question.json": question}
+
+    return asyncio.run(build())
+
+
+def agent_plan1_fixtures():
+    """AGENT-PLAN-1: Plan mode, from the real codex 0.160 frames
+    `tests/test_agent_plan1.py` replays (redacted): the conversation after a
+    Plan turn (a question answered, the plan as a marked message), the plan's
+    streamed message event, the chip's `POST /v1/agent/default/chat/mode` from
+    the real service and adapter, and `/plan` from the shipped commands."""
+    import asyncio
+    import tempfile
+    from types import SimpleNamespace
+    sys.path.insert(0, str(ROOT / "tests"))
+    from test_agent_plan1 import Peer, attached, replay, binding, CAPTURE
+    from omodachi_core.agent_chat_provider import CodexDefaultAgentChat
+    from omodachi_core.agent_chat_service import DefaultAgentChatService
+    from omodachi_core.agent_commands import AgentCommands
+
+    async def build():
+        chat, peer = await attached()
+        # Up to the Plan turn's end: one question answered, one plan.
+        ends = [index for index, frame in enumerate(CAPTURE["plan"]) if frame["method"] == "turn/completed"]
+        frames = iter(range(len(CAPTURE["plan"])))
+        events = await replay("plan", chat, peer, until=lambda frame: next(frames) > ends[1])
+        snapshot = chat.snapshot_value()
+        plan = [event for event in events if event["type"] == "message" and event["value"].get("plan")][-1]
+        event = {"identity": chat.binding.identity(), "sequence": 1, "event": plan}
+
+        with tempfile.TemporaryDirectory() as temporary:
+            class Owner:
+                def owned_metadata(self): return None
+                async def ensure_new_or_owned(self, existing_agent=False): return binding()
+                def tui_argv(self, b): return ["codex"]
+                async def close_proxy(self): pass
+
+            async def connect(b, **options):
+                adapter = CodexDefaultAgentChat(b, Peer(), **options)
+                await adapter.attach()
+                return adapter
+            manager = SimpleNamespace(root=Path(temporary), cwd=Path(temporary) / "agent-workspace", probe=None)
+            service = DefaultAgentChatService(manager, "omarchy-fixture", owner=Owner(), connector=connect)
+            await service._attach(binding())
+            mode = await service.set_mode({"mode": "plan"}, lambda: None)
+            await service.close()
+
+        commands_chat, _ = await attached()
+        async def require(authorize): return commands_chat
+        commands = AgentCommands(SimpleNamespace(require=require, manager=SimpleNamespace(cwd=Path("/home/fixture"))))
+        command = await commands.execute("plan", {"revision": commands.revision, "arguments": "",
+                                                  "request_id": "request-fixture-04"}, lambda: None)
+        return {"agent-chat-snapshot-plan.json": snapshot, "agent-chat-event-plan.json": event,
+                "agent-chat-mode.json": resource(mode), "agent-chat-command-plan.json": resource(command)}
+
+    return asyncio.run(build())
+
+
+def agent_queue1_fixtures():
+    """AGENT-QUEUE-1, from the real codex 0.160 frames `tests/test_agent_queue1.py`
+    replays (redacted): a thread opened on its newest page (`earlier`), two
+    messages waiting in codex's queue, codex's plan checklist; the queue and
+    checklist events; the queue route's answer from the real service; a page
+    of earlier messages."""
+    import asyncio
+    import tempfile
+    from types import SimpleNamespace
+    sys.path.insert(0, str(ROOT / "tests"))
+    from test_agent_queue1 import (CAPTURE, CHECKLIST_THREAD, Codex, PAGED_RESUME, PAGING, PAGING_THREAD,
+                                   attached, binding, drain)
+    from omodachi_core.agent_chat_provider import CodexDefaultAgentChat
+    from omodachi_core.agent_chat_service import DefaultAgentChatService
+
+    lists = [call for call in PAGING if call["method"] == "thread/turns/list" and call["conn"] == "cold"
+             and call["params"].get("limit") == 5]
+    pages = {lists[0]["result"]["nextCursor"]: dict(lists[1]["result"], nextCursor=None)}
+    # The resume's first page as the capture's thread had it: hello 11 back to 7.
+    resume = dict(PAGED_RESUME["result"], initialTurnsPage=lists[0]["result"])
+    checklist = json.loads(json.dumps([frame for frame in CAPTURE["checklist"]
+                                       if frame["method"] == "turn/plan/updated"]).replace(CHECKLIST_THREAD, PAGING_THREAD))
+
+    async def build():
+        peer = Codex(PAGING_THREAD, resume=resume, pages=pages)
+        chat = await attached(peer)
+        drain(chat)
+        chat.active_turn = "turn-fixture-running"
+        await chat.enqueue("And then run the tests on SQLite.", "request-fixture-q1")
+        await chat.enqueue("Keep the old port as a fallback.", "request-fixture-q2")
+        queued = [event for event in drain(chat) if event["type"] == "agent.queue.changed"][-1]
+        for frame in checklist:
+            peer.feed(frame)
+        ticked = [event for event in drain(chat) if event["type"] == "agent.checklist.updated"][1]
+        chat.active_turn = None
+        snapshot = chat.snapshot_value()
+        history = await chat.history(snapshot["rows"][0]["id"], 4)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            class Owner:
+                def owned_metadata(self): return None
+                async def ensure_new_or_owned(self, existing_agent=False): return binding(PAGING_THREAD)
+                def tui_argv(self, b): return ["codex"]
+                async def close_proxy(self): pass
+
+            async def connect(b, **options):
+                adapter = CodexDefaultAgentChat(b, Codex(PAGING_THREAD, resume=resume, pages=pages),
+                                                **options)
+                await adapter.attach()
+                return adapter
+            manager = SimpleNamespace(root=Path(temporary), cwd=Path(temporary) / "agent-workspace", probe=None)
+            service = DefaultAgentChatService(manager, "omarchy-fixture", owner=Owner(), connector=connect)
+            await service._attach(binding(PAGING_THREAD))
+            service.chat.active_turn = "turn-fixture-running"
+            reply = await service.queue_add({"request_id": "request-fixture-q1",
+                                             "text": "And then run the tests on SQLite."}, lambda: None)
+            await service.close()
+        identity = chat.binding.identity()
+        return {"agent-chat-snapshot-queue.json": snapshot,
+                "agent-chat-event-queue.json": {"identity": identity, "sequence": 1, "event": queued},
+                "agent-chat-event-checklist.json": {"identity": identity, "sequence": 2, "event": ticked},
+                "agent-chat-queue.json": resource(reply),
+                "agent-chat-history.json": resource({"agent_id": "default", **history})}
+
+    return asyncio.run(build())
+
+
+def agent_new_conversation_fixtures():
+    """AGENT-NEW-1: `POST /v1/agent/default/chat:new`, from the real owner,
+    adapter and service, against a peer that keeps threads as codex does (a
+    fresh thread is loaded and has no rollout until its first message)."""
+    import asyncio
+    import tempfile
+    from types import SimpleNamespace
+    from omodachi_core.agent_chat_owner import OwnedCodexAgent
+    from omodachi_core.agent_chat_provider import AgentChatError
+    from omodachi_core.agent_chat_service import DefaultAgentChatService
+
+    class Peer:
+        def __init__(self):
+            self.ordinal = 0
+            self.loaded = ["thread-fixture-01"]
+            self.on_notification = lambda value, ordinal: None
+            self.on_server_request = lambda value: None
+            self.on_disconnect = lambda: None
+        async def initialize(self): return {}
+        async def request(self, method, params):
+            result, _ = await self.request_fenced(method, params)
+            return result
+        async def request_fenced(self, method, params):
+            self.ordinal += 1
+            thread = params.get("threadId")
+            if method == "thread/loaded/list":
+                return {"data": list(self.loaded), "nextCursor": None}, self.ordinal
+            if method == "thread/start":
+                self.loaded.append("thread-fixture-02")
+                return {"thread": {"id": "thread-fixture-02"}, "model": "gpt-6-astra",
+                        "reasoningEffort": "medium"}, self.ordinal
+            if thread == "thread-fixture-02" and method == "thread/resume":
+                raise AgentChatError("provider_thread_rollout_missing")
+            if thread == "thread-fixture-02" and method == "thread/read" and params.get("includeTurns"):
+                raise AgentChatError("provider_thread_not_materialized")
+            if method == "thread/read":
+                return {"thread": {"id": thread, "turns": [], "status": {"type": "idle"}}}, self.ordinal
+            return {"thread": {"id": thread, "turns": [], "status": {"type": "idle"}},
+                    "model": "gpt-6-astra", "reasoningEffort": "high"}, self.ordinal
+        async def respond(self, request_id, result): pass
+        async def respond_error(self, request_id, code, message): pass
+        async def close(self): pass
+
+    async def build():
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            peer = Peer()
+            async def proxy(): return peer
+            # The workspace path is not part of the answer; a temporary one
+            # keeps the generator from creating anything outside it.
+            owner = OwnedCodexAgent(home / "structured-default", home / "agent-workspace",
+                                    "omarchy-fixture", rpc_factory=proxy, agent_dir=home / "agent")
+            owner.token = "f" * 64
+            owner._write_endpoint(47311)
+            owner._save(owner._record("thread-fixture-01", creation_pending=False))
+            manager = SimpleNamespace(root=home, cwd=owner.cwd, probe=None)
+            service = DefaultAgentChatService(manager, "omarchy-fixture", owner=owner)
+            binding = await owner.ensure_new_or_owned()
+            await service._attach(binding)
+            result = await service.new_conversation({"confirmed": True,
+                                                     "expected_provider_session_id": "thread-fixture-01"},
+                                                    lambda: None)
+            await service.close()
+            return {"agent-chat-new.json": resource(result)}
+
+    return asyncio.run(build())
+
+
+def agent_command_fixtures():
+    """AGENT-NEW-1: the slash catalog and three answers - `/model` opening the
+    picker, `/model <id> <effort>` choosing in it, `/status` running - from
+    the shipped `AgentCommands`, so `display` and `summary` are what ships."""
+    import asyncio
+    from types import SimpleNamespace
+    from omodachi_core.agent_commands import AgentCommands
+
+    async def rpc(method, params):
+        if method == "model/list":
+            return {"data": [{"id": "gpt-6-astra", "model": "gpt-6-astra", "displayName": "GPT-6-Astra",
+                              "supportedReasoningEfforts": [{"reasoningEffort": "medium"}, {"reasoningEffort": "high"}]}],
+                    "nextCursor": None}
+        return {"thread": {"id": "thread-fixture-02", "cwd": "/home/fixture/.local/share/omodachi/agent-workspace",
+                           "name": None, "status": {"type": "idle"}}}
+
+    adapter = SimpleNamespace(binding=SimpleNamespace(thread_id="thread-fixture-02",
+                                                      cwd="/home/fixture/.local/share/omodachi/agent-workspace"),
+                              active_turn=None, rpc=SimpleNamespace(request=rpc),
+                              settings={"model": "gpt-6-astra", "effort": "medium"})
+    async def require(authorize): return adapter
+    commands = AgentCommands(SimpleNamespace(require=require, manager=SimpleNamespace(cwd=Path("/home/fixture"))))
+
+    async def build():
+        rev = commands.revision
+        run = lambda name, args, request: commands.execute(name, {"revision": rev, "arguments": args,
+                                                                  "request_id": request}, lambda: None)
+        return {"agent-chat-commands.json": resource(commands.listing()),
+                "agent-chat-command-model.json": resource(await run("model", "", "request-fixture-01")),
+                "agent-chat-command-model-selected.json": resource(await run("model", "gpt-6-astra high",
+                                                                             "request-fixture-02")),
+                "agent-chat-command-status.json": resource(await run("status", "", "request-fixture-03"))}
+
+    return asyncio.run(build())
+
+
 def voice_fixtures():
     """Synthetic host, real serializers: no Voxtype and no audio device."""
     import asyncio
@@ -644,20 +1602,33 @@ def notification_fixtures():
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory) / "notifications"
         (root / "history").mkdir(parents=True)
+        # NOTIFY-3: the plugin's real click command, which names the request.
+        request_id = "pair_" + "0" * 32
+        summon = json_module.dumps({"view": "devices", "request_id": request_id}, separators=(",", ":"))
         (root / "1789711988810-1.json").write_text(json_module.dumps({
             "id": 1, "originalId": 1, "app": "Omodachi", "appIcon": "",
             "summary": "\u201cQA companion\u201d wants to connect",
             "body": "Open Omodachi to approve or reject it.", "image": "", "glyph": "",
-            "execArgv": "[\"omarchy-shell\",\"shell\",\"summon\",\"com.omodachi.host\",\"{}\"]",
+            "execArgv": json_module.dumps(["omarchy-shell", "shell", "summon", "com.omodachi.host", summon],
+                                          separators=(",", ":")),
             "urgency": 2, "expireTimeout": 30000, "timestamp": 1789711988810}))
         (root / "history/1789608484220-52.json").write_text(json_module.dumps({
             "id": 52, "app": "omarchy-action", "summary": "Theme set", "body": "gruvbox",
             "glyph": "", "urgency": 1, "expireTimeout": 5000, "timestamp": 1789608484220}))
-        mirror = NotificationMirror(None, state_dir=root)
+        waiting = {"pair": {request_id}, "ssh": set()}
+        hub = Hub()
+        mirror = NotificationMirror(hub, state_dir=root, pending_requests=lambda: waiting)
         mirror.scan()
         listing = resource(mirror.history())
         posted = next(row for row in listing["notifications"] if row["id"] == "1789711988810-1")
+        # Approved on the computer: the next pass withdraws it.
+        waiting["pair"] = set()
+        mirror.scan()
+        withdrawn = next(event for event in hub.events_since(0)
+                         if event.type == "notification.updated" and event.payload.get("withdrawn"))
+        withdrawn = replace(withdrawn, seq=4, event_id="evt_00000004", ts=NOW.timestamp())
         return {"notifications.json": listing,
+                "event-notification-withdrawn.json": resource(asdict(withdrawn)),
                 "notification-action.json": resource({"id": "1789711988810-1", "action": "dismiss",
                                                       "result": "ok"}),
                 "notifications-dnd.json": resource({"dnd": False}),
@@ -776,19 +1747,42 @@ def schema_for_fixture(name: str) -> str:
     if name == "auth-keys.json": return "auth-keys.schema.json"
     if name.startswith(("voice-", "notifications", "notification-")): return name.removesuffix(".json") + ".schema.json"
     if name.startswith("agent-chat-event-"): return "agent-chat-event.schema.json"
+    if name.startswith("agent-chat-command-"): return "agent-chat-command.schema.json"
+    if name in ("agent-chat-snapshot-links.json", "agent-chat-snapshot-tool-output.json",
+                "agent-chat-snapshot-changes.json", "agent-chat-snapshot-steps.json",
+                "agent-chat-snapshot-plan.json", "agent-chat-snapshot-queue.json"):
+        return "agent-chat-snapshot.schema.json"
+    if name.startswith("host-open"): return "host-open.schema.json"
+    if name == "links-detect.json": return "links-detect.schema.json"
     if name.startswith("agent-chat-"): return name.removesuffix(".json") + ".schema.json"
     if name == "health.json": return "health.schema.json"
+    if name in {"host-roads.json", "host-roads-odomo.json", "host-roads-odomo-none.json"}: return "host-roads.schema.json"
+    if name.startswith("push-payload-"): return "push-payload.schema.json"
+    if name.startswith("push-"): return name.removesuffix(".json") + ".schema.json"
+    if name == "presence.json": return "presence.schema.json"
+    if name == "remote-capabilities-relayed.json": return "remote-capabilities.schema.json"
     if name == "theme.json": return "theme.schema.json"
     if name == "fonts.json": return "fonts.schema.json"
     if name == "herdr-layout.json": return "herdr-layout.schema.json"
     if name == "herdr-sessions.json": return "herdr-sessions.schema.json"
-    if name == "pairing-claim.json": return "pairing-claim.schema.json"
+    if name in {"herdr-session-start.json", "herdr-session-create.json"}: return "herdr-session-start.schema.json"
+    if name.startswith("herdr-workspace-create"): return "herdr-workspace-create.schema.json"
+    if name.startswith("herdr-reply"): return "herdr-reply.schema.json"
+    if name.startswith("herdr-folders"): return "herdr-folders.schema.json"
+    if name == "herdr-keys.json": return "herdr-keys.schema.json"
+    if name.startswith("herdr-text"): return "herdr-text.schema.json"
+    if name == "upload-removed.json": return "upload-removed.schema.json"
+    if name.startswith("upload-"): return "upload.schema.json"
+    if name.startswith("herdr-operator-rows"): return "herdr-operator-rows.schema.json"
+    if name in {"pairing-claim.json", "pairing-claim-web.json"}: return "pairing-claim.schema.json"
+    if name == "ws-ticket.json": return "ws-ticket.schema.json"
     if name == "pairing-credential.json": return "pairing-credential.schema.json"
     if name == "pairing-renew.json": return "pairing-renew.schema.json"
     if name == "ssh-key.json": return "ssh-key.schema.json"
     if name == "ssh-key-state.json": return "ssh-key-state.schema.json"
     if name == "capabilities.json": return "capabilities.schema.json"
-    if name == "state.json": return "state.schema.json"
+    if name in {"state.json", "state-agent-activity.json", "state-notify1.json", "state-overview1.json",
+                "state-herdr11-catalog-unchanged.json"}: return "state.schema.json"
     if name in {"bar.json", "bar-unavailable.json", "bar-geometry.json"}: return "bar.schema.json"
     if name in {"catalog.json", "catalog-layered.json", "catalog-search-3.json"}: return "catalog.schema.json"
     if name in {"route-descriptors.json", "route-descriptors-menu-actions.json"}: return "route-descriptors.schema.json"

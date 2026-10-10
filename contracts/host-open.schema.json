@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/host-open.schema.json",
+  "title": "Opened on the computer",
+  "description": "LINKS-1: the reply to `POST /v1/host/open {source, path | url, check?}`. Native and web credentials. `source` is `{kind: \"agent\", item: <agent row id>}` or `{kind: \"herdr\", pane: \"w1:p2\", session?: <this device's selected session>}`; `path` is the text exactly as it appeared (`/abs/x.md:12`, `~/x.png`, `./out.csv`, `out.csv`, `/a/b#L12`, a markdown target, `file://`), `url` an http(s) address exactly as it appeared (the original, not a client's rewrite). It must appear in that source: an assistant message's text or a tool row's `paths` for the Agent; the pane's visible screen now (line breaks taken out) for Herdr. A path resolves against the thread's or the pane's folder; its real path must be in `$HOME`, in that folder or in `/tmp` (outside `$HOME` only the user's own files); private places are refused first (`~/.ssh`, `~/.gnupg`, `~/.codex`, `~/.claude`, Omodachi's config and state except uploads and the agent workspace, key and credential files, `.env`); only regular files and folders; never anything with an exec bit, an ELF binary, a `.desktop`, an AppImage or another launchable kind. Opened with the desktop's default handler (`xdg-open`), on the Remote session's output when one runs (`where: remote`), else on the computer's focused screen (`where: screen`); `check: true` opens nothing (`opened: false`, `where: null`). `line` is the `:12` / `#L12` the text carried; `at_line` says the editor was opened there (Omarchy's terminal editor through `omarchy-launch-editor`; any other default handler opens the file as usual). No byte of the file is in this reply. Refusals are http-error documents: `403 open_not_mentioned`, `403 open_outside_roots`, `403 open_denied`, `403 open_executable`, `404 open_missing`, `404 open_source_gone`, `415 open_type_refused`, `400 open_url_refused`, `429 open_rate_limited` (30 a minute per device), `503 open_unavailable` (no graphical session, or the handler failed). One journal line per request.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "opened",
+    "kind",
+    "name",
+    "line",
+    "where",
+    "at_line"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "opened": {
+      "type": "boolean"
+    },
+    "kind": {
+      "enum": [
+        "file",
+        "directory",
+        "url"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "line": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "where": {
+      "enum": [
+        "remote",
+        "screen",
+        null
+      ]
+    },
+    "at_line": {
+      "type": "boolean"
+    }
+  }
+}

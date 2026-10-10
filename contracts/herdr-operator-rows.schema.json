@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/herdr-operator-rows.schema.json",
+  "title": "Herdr operator rows",
+  "description": "HERDR-4: `GET /v1/herdr/operator-rows[?agent=<herdr agent name>]` (native credentials only; a web credential is refused with 403 `web_client_forbidden`). What one pane's Quick dock, key presets and harness segment show. No `agent` means a shell pane. The operator's own `quick-replies.toml`, `keys.toml` and `commands.toml` are read in Collie's format from `~/.config/omodachi/`, or from `~/.config/collie/` when ours is absent (per file), behind an mtime check on every request. Rules (Collie ADR 0018/0043): on a pane the operator's rows address, those rows replace what ships for that surface, never merge into it; the narrowest scope wins (exact agent name, then its family, then unscoped); a bad row is dropped with a warning; a file that does not parse keeps the last good rows and says so in its source's `warning`. Shipped rows carry an `id` the client turns into its own words and `label`/`title` null; operator rows carry their own words and `operator: true`. Every quick item is sent with `/text submit:true`, every key row with one `/keys`, every harness button as its bare command with `/text submit:true`. `danger`/`confirm` ask for a second tap.",
+  "type": "object",
+  "required": ["contract_revision", "agent", "family", "quick", "keys", "harness", "commands", "sources"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "agent": {"type": ["string", "null"], "maxLength": 40},
+    "family": {"type": "string", "maxLength": 40},
+    "quick": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "title", "items", "operator"],
+        "properties": {
+          "id": {"enum": [null, "confirm", "common"]},
+          "title": {"type": ["string", "null"], "minLength": 1, "maxLength": 40},
+          "items": {"type": "array", "minItems": 1, "maxItems": 12,
+                    "items": {"type": "string", "minLength": 1, "maxLength": 200}},
+          "operator": {"type": "boolean"}
+        }
+      }
+    },
+    "keys": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["label", "keys", "danger", "operator"],
+        "properties": {
+          "label": {"type": "string", "minLength": 1, "maxLength": 40},
+          "keys": {"type": "array", "minItems": 1, "maxItems": 32,
+                   "items": {"type": "string", "minLength": 1, "maxLength": 24}},
+          "danger": {"type": "boolean"},
+          "operator": {"type": "boolean"}
+        }
+      }
+    },
+    "harness": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "label", "command", "confirm", "operator"],
+        "properties": {
+          "id": {"enum": [null, "model", "effort", "compact", "resume"]},
+          "label": {"type": ["string", "null"], "minLength": 1, "maxLength": 12},
+          "command": {"type": "string", "pattern": "^/[^\\s]{1,63}$"},
+          "confirm": {"type": "boolean"},
+          "operator": {"type": "boolean"}
+        }
+      }
+    },
+    "commands": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["command", "description", "arg_hint", "confirm"],
+        "properties": {
+          "command": {"type": "string", "pattern": "^/[^\\s]{1,63}$"},
+          "description": {"type": ["string", "null"], "maxLength": 200},
+          "arg_hint": {"type": ["string", "null"], "maxLength": 200},
+          "confirm": {"type": "boolean"}
+        }
+      }
+    },
+    "sources": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["file", "origin", "warning"],
+        "properties": {
+          "file": {"enum": ["quick-replies.toml", "keys.toml", "commands.toml"]},
+          "origin": {"enum": ["shipped", "omodachi", "collie"]},
+          "warning": {
+            "oneOf": [
+              {"type": "null"},
+              {"type": "object", "additionalProperties": false, "required": ["code", "detail"],
+               "properties": {"code": {"enum": ["operator_file_unparsed", "operator_rows_dropped"]},
+                              "detail": {"type": "string", "maxLength": 200}}}
+            ]
+          }
+        }
+      }
+    }
+  }
+}

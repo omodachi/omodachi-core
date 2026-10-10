@@ -92,14 +92,20 @@ _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 def pinned(path: Path = VERSIONS) -> dict:
     """`sunshine_package` from the core version table:
-    {version, url, sha256, manifest_sha256, satisfied_by}."""
+    {version, commit, url, sha256, manifest_sha256, satisfied_by}.
+
+    SUNSHINE-2: `commit` is the full public fork commit the pinned archive was
+    built from; `version` is its short form. A bare `--sunshine-build` builds
+    SUNSHINE_REPOSITORY at exactly that commit."""
     try:
         entry = json.loads(path.read_text())["sunshine_package"]
         version, url, sha256 = entry["version"], entry["url"], entry["sha256"]
-        manifest = entry["manifest_sha256"]
+        manifest, commit = entry["manifest_sha256"], entry["commit"]
         url = url.replace("{repository}", SUNSHINE_REPOSITORY) if isinstance(url, str) else url
         satisfied = entry.get("satisfied_by", [])
         if (not _COMMIT.fullmatch(version) or not isinstance(url, str) or "://" not in url
+                or not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit)
+                or not commit.startswith(version)
                 or "/releases/latest/" in url or not re.fullmatch(r"[0-9a-f]{64}", sha256)
                 or not re.fullmatch(r"[0-9a-f]{64}", manifest)
                 or not isinstance(satisfied, list) or not all(isinstance(v, str) and _COMMIT.fullmatch(v)
@@ -108,8 +114,8 @@ def pinned(path: Path = VERSIONS) -> dict:
     except (OSError, ValueError, KeyError, TypeError):
         raise SunshinePackageError("sunshine_package_pin_invalid",
                                    f"{path} has no usable sunshine_package pin") from None
-    return {"version": version, "url": url, "sha256": sha256, "manifest_sha256": manifest,
-            "satisfied_by": list(satisfied)}
+    return {"version": version, "commit": commit, "url": url, "sha256": sha256,
+            "manifest_sha256": manifest, "satisfied_by": list(satisfied)}
 
 
 def choose(spec: str | None = None, sha256: str | None = None, *, environ=None,
@@ -595,30 +601,128 @@ def render_nodes(dri: Path = Path("/dev/dri")) -> list[Path]:
         return []
 
 
-def encoder_arguments(*, adapter=None, nodes=None, probe=None) -> list[str]:
+# REMOTE-FIX-1. The fork's own log, which it truncates at every start, so the
+# file is always the running fork's. Its startup probe writes one line per
+# codec it settled on, e.g. `Found H.264 encoder: h264_vaapi [vaapi]`
+# (`video.cpp`); the bracket is the encoder family (`vaapi`, `nvenc`,
+# `software`, ...).
+SUNSHINE_LOG = ".config/sunshine/sunshine.log"
+_FOUND_H264 = re.compile(r"Found H\.264 encoder: \S+ \[([a-z0-9_]+)\]")
+
+
+def fork_probed_encoder(home: Path | None = None, *, path: Path | None = None,
+                        limit: int = 262144) -> str | None:
+    """The encoder family the running fork's startup probe chose for H.264.
+
+    `None` when there is no log, or it has no verdict yet (the probe runs a
+    second or so after start): "we could not tell" is not "it has none". Only
+    the last `limit` bytes are read; the verdict is near the top of a fresh
+    log, and a later re-probe (a display change) writes a newer line.
+    """
+    path = path or (home or Path.home()) / SUNSHINE_LOG
+    try:
+        with open(path, "rb") as stream:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(max(0, size - limit))
+            text = stream.read(limit).decode("utf-8", "replace")
+    except OSError:
+        return None
+    found = _FOUND_H264.findall(text)
+    return found[-1] if found else None
+
+
+# REMOTE-FIX-2. Kernel drivers of a render node, by how the fork's wlr capture
+# fares on them. On a hybrid laptop (Leo's MacBook with T2: i915 drives the
+# panel, amdgpu is the discrete GPU) Hyprland hands the capture over as an
+# Intel Y-tiled dmabuf (modifier 0x0100000000000002) when the fork encodes on
+# i915, and the fork's VAAPI path imports it as if it were linear: every frame
+# arrives as 32-pixel tile columns. Pointed at amdgpu the same capture comes as
+# an implicit-modifier buffer on that node and encodes cleanly - every good
+# Sunshine stream on that host (PERF-3, STREAM-1b, MERGE-1) ran there. So a
+# discrete node is tried first and the integrated one last.
+_DISCRETE_DRIVERS = ("amdgpu", "radeon", "nouveau", "nvidia")
+_INTEGRATED_DRIVERS = ("i915", "xe")
+# Drivers whose VAAPI encodes H.264 with the stock Arch drivers (radeonsi,
+# intel-media-driver). nouveau / nvidia have no VAAPI encoder.
+_VAAPI_DRIVERS = ("amdgpu", "radeon", "i915", "xe")
+
+
+def node_driver(node, sys_drm: Path = Path("/sys/class/drm")) -> str | None:
+    """The kernel driver behind a render node (`i915`, `amdgpu`, ...), or None."""
+    link = sys_drm / Path(node).name / "device" / "driver"
+    try:
+        if not link.exists():
+            return None
+        return os.path.basename(os.path.realpath(link)) or None
+    except OSError:
+        return None
+
+
+def ranked_nodes(nodes, driver=node_driver) -> list[tuple[Path, str | None]]:
+    """Render nodes, discrete GPU first, integrated last, unknown in between,
+    each kept in its own order (`sorted` is stable)."""
+    def rank(item):
+        name = item[1]
+        if name in _DISCRETE_DRIVERS:
+            return 0
+        if name in _INTEGRATED_DRIVERS:
+            return 2
+        return 1
+    return sorted(((Path(node), driver(node)) for node in nodes), key=rank)
+
+
+def encoder_arguments(*, adapter=None, nodes=None, probe=None, probed=None,
+                      driver=node_driver) -> list[str]:
     """`capture=wlr`, plus VAAPI only when a render node really answers for it.
 
     A virtual machine with virtio-gpu has no render node at all, and a laptop
-    has two. Guessing wrong is not a visible failure - the fork accepts the
-    adapter, fails to build the VAAPI pipeline and streams on the CPU - so the
-    adapter is only named when `vainfo` says that node decodes H.264, and is
-    left out entirely otherwise so the fork chooses for itself.
+    has two. Guessing wrong is not always a visible failure - the fork accepts
+    the adapter, fails to build the VAAPI pipeline and streams on the CPU - so
+    the adapter is only named when `vainfo` says that node encodes H.264, and
+    is left out entirely otherwise so the fork chooses for itself.
+
+    REMOTE-FIX-1. `vainfo` is `libva-utils`, which nothing installs: on a host
+    without it every node is "could not look" (`probe` -> `None`), not "no
+    VAAPI". Then the fork's own verdict decides - `probed`, the family its
+    last startup probe settled on (`fork_probed_encoder`).
+
+    REMOTE-FIX-2. Which node, when there are two, is not "the first that
+    answers" nor "the fork's default": both are the integrated GPU, whose
+    encode of the wlr capture is garbled on a hybrid laptop (see
+    `_DISCRETE_DRIVERS`). Nodes are tried discrete first (`ranked_nodes`). On
+    a host without `vainfo` whose fork chose VAAPI, the best-ranked node with a
+    VAAPI driver is pinned when there is more than one node; with one node, or
+    drivers that cannot be read, the fork's default stays (it is the only
+    candidate). `adapter` - `install_host.py --sunshine-adapter` - overrides
+    all of it.
     """
     if adapter:
         return ["capture=wlr", "encoder=vaapi", f"adapter_name={adapter}"]
     nodes = render_nodes() if nodes is None else [Path(node) for node in nodes]
     if not nodes:
         return ["capture=wlr"]
+    ranked = ranked_nodes(nodes, driver)
     probe = probe or _vainfo
-    for node in nodes:
-        if probe(node):
+    unknown = False
+    for node, _name in ranked:
+        answer = probe(node)
+        if answer:
             return ["capture=wlr", "encoder=vaapi", f"adapter_name={node}"]
+        unknown = unknown or answer is None
+    if unknown and probed == "vaapi":
+        if len(ranked) > 1:
+            for node, name in ranked:
+                if name in _VAAPI_DRIVERS:
+                    return ["capture=wlr", "encoder=vaapi", f"adapter_name={node}"]
+        return ["capture=wlr", "encoder=vaapi"]
     return ["capture=wlr"]
 
 
-def _vainfo(node: Path) -> bool:
+def _vainfo(node: Path) -> bool | None:
+    """Whether `node` answers for H.264 over VAAPI; `None` without `vainfo`."""
     if shutil.which("vainfo") is None:
-        return False
+        return None
     result = _run(["vainfo", "--display", "drm", "--device", str(node)])
     return result.returncode == 0 and "VAProfileH264" in (result.stdout or "")
 
@@ -862,7 +966,12 @@ def install(spec: str, home: Path, *, sha256=None, cache=None, runner=None,
         raise SunshinePackageError("sunshine_package_manifest_mismatch",
                                    f"{len(bad)} file(s) do not match MANIFEST.sha256: {bad[:3]}")
     packages = install_packages(package_depends(directory), runner=runner)
-    unit = ensure_unit(home, directory, arguments=encoder_arguments(adapter=adapter), runner=runner,
+    # The fork that is running now (before this install restarts it) has
+    # already probed this machine's encoders; its verdict stands in for
+    # `vainfo` when that is not installed.
+    unit = ensure_unit(home, directory, arguments=encoder_arguments(adapter=adapter,
+                                                                    probed=fork_probed_encoder(home)),
+                       runner=runner,
                        config_created=config_created)
     source = {}
     try:

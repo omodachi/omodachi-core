@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/herdr-session-start.schema.json",
+  "title": "Herdr session started",
+  "description": "HERDR-5: the reply to `POST /v1/herdr/sessions/{name}/start` (a session the host lists, started headless when it was stopped) and to `POST /v1/herdr/sessions {name}` (a new session in $HOME). Either way the session is running and is now this device's selection, as after `.../select`. `started` is false when it was already running; `created` is true only for a new session. Native credentials only.",
+  "type": "object",
+  "required": ["contract_revision", "selected", "owned", "scope", "started", "created"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "selected": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+    "owned": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+    "scope": {"enum": ["device", "host"]},
+    "started": {"type": "boolean"},
+    "created": {"type": "boolean"}
+  }
+}

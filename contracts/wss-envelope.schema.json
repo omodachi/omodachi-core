@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://omodachi.dev/contracts/v1/wss-envelope.schema.json",
-  "title": "WSS initial state, replay-ready or device event",
+  "title": "WSS initial state, replay-ready, device event or heartbeat",
   "oneOf": [
     {
       "type": "object",
@@ -69,6 +69,24 @@
       },
       "required": [
         "event",
+        "instance_id"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "description": "LITE-1a L4: sent every 15 s only to a stream opened with `?heartbeat=1`. A client that hears nothing for two intervals treats the socket as dead and reconnects.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "heartbeat"
+        },
+        "instance_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "type",
         "instance_id"
       ],
       "additionalProperties": false

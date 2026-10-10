@@ -7,13 +7,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "omodachi-core"
-version = "0.1.5"
+version = "0.2.0"
 description = "Omodachi host hub and protocol primitives"
 requires-python = ">=3.11"
 # Exact pins matching requirements/host.lock, which also holds every transitive
 # dependency with its sha256. The host never resolves these: it installs the lock
 # with --require-hashes --no-deps and this package with --no-deps.
-dependencies = ["aiohttp==3.14.3", "zeroconf==0.151.3"]
+dependencies = ["aiohttp==3.14.3", "zeroconf==0.151.3", "cryptography==50.0.2"]
 
 [project.optional-dependencies]
 test = ["jsonschema>=4.24,<5"]
@@ -31,4 +31,6 @@ where = ["src"]
 pythonpath = ["src"]
 
 [tool.setuptools.package-data]
-omodachi_core = ["data/*.jsonc", "data/*.json", "data/desktop_launcher/*"]
+# LITE-1a: the built Odomo app. `**` because Vite writes `assets/`; without it
+# the wheel would silently leave the app out (LITE-0 §5.1).
+omodachi_core = ["data/*.jsonc", "data/*.json", "data/desktop_launcher/*", "data/odomo/*", "data/odomo/**/*"]

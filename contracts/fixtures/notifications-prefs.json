@@ -1,0 +1,19 @@
+{
+  "device_id": "odomo-fixture-redacted",
+  "revision": 1,
+  "kinds": {
+    "agent_approval": true,
+    "agent_needs_input": true,
+    "agent_done": false,
+    "herdr_blocked": true,
+    "host_notification": true,
+    "herdr_done": false
+  },
+  "snooze_until": null,
+  "quiet_when_native_connected": true,
+  "quiet_at_desk": true,
+  "lang": "en",
+  "subscribed": true,
+  "host_enabled": true,
+  "contract_revision": "omodachi.v1"
+}

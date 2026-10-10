@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/host-roads.schema.json",
+  "title": "TAIL-2 every road to this host (authenticated)",
+  "description": "GET /v1/host/roads, device credential required. The typed endpoints a pairing claim carries and this host's Tailscale identity, read fresh, so a paired app keeps its roads current (it learns the MagicDNS name at home and dials it away). Not on unauthenticated /health: that stays an anchor (host_id + fingerprint), enough to recognise the same host on another address, and never tells a stranger on the LAN where else this host can be reached.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "host_id",
+    "tls_fingerprint_sha256",
+    "endpoints"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "host_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "tls_fingerprint_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "endpoints": {
+      "description": "TAIL-2 P0-2: every road to this host, each with its kind. `lan` addresses first (IPv4 before IPv6), then `<host_name>.local` (`mdns`), then the MagicDNS name and the tailnet addresses (`tailnet`, 100.64.0.0/10 and fd7a:115c:a1e0::/48). An iOS client can dial a tailnet road only by its MagicDNS name (ATS); it keeps the addresses to recognise a typed 100.x as this host. A client of a core before TAIL-2 receives no `kind` and infers it.",
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": [
+          "host",
+          "port",
+          "kind"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "kind": {
+            "enum": [
+              "lan",
+              "mdns",
+              "tailnet"
+            ]
+          }
+        }
+      }
+    },
+    "tailnet": {
+      "description": "This host on its Tailscale tailnet, from `tailscale status --json`. Present only while BackendState is Running; absent without Tailscale or when it is stopped or logged out. `dns_name` is the MagicDNS name without the trailing dot (null when MagicDNS gives none).",
+      "type": "object",
+      "required": [
+        "dns_name",
+        "ips"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "dns_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 253,
+          "pattern": "\\.ts\\.net$"
+        },
+        "ips": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 45
+          }
+        }
+      }
+    },
+    "odomo_url": {
+      "description": "LITE-1b C7: Odomo's https address on the tailnet, from the `tailscale serve` mapping the installer recorded (443, or 8443 when 443 is somebody else's). Absent when there is none. Authenticated documents only; never on /health.",
+      "type": "string",
+      "pattern": "^https://[a-z0-9.-]+\\.ts\\.net(:[0-9]{1,5})?/odomo/$",
+      "maxLength": 300
+    },
+    "odomo": {
+      "description": "LITE-1d: Odomo for a native app deciding whether to offer it. `url` is `odomo_url` again (null when this host has no front door, i.e. no Tailscale serve mapping); `push_devices` is how many of this host's web devices hold a live push subscription that the person at the computer has not switched off, with a working credential. A count only: no device ids, no endpoints. Per host, not per person (core does not know who holds a device). Absent `push_devices`: this host cannot say (no push here). The whole object is absent when the host knows neither.",
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^https://[a-z0-9.-]+\\.ts\\.net(:[0-9]{1,5})?/odomo/$",
+          "maxLength": 300
+        },
+        "push_devices": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 64
+        }
+      }
+    }
+  }
+}

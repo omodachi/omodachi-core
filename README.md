@@ -38,9 +38,22 @@ Core provides:
 - a thin **Bonjour** advertisement and the local IPC surface the Omarchy plugin
   talks to.
 
-Devices reach it over authenticated HTTPS and WSS on the LAN or over Tailscale,
-on `0.0.0.0:8099` behind a self-signed certificate the companion pins when
-pairing succeeds. The Omarchy plugin reaches it over a user-owned Unix socket.
+Devices reach it over authenticated HTTPS and WSS on `0.0.0.0:8099`, behind a
+self-signed certificate the companion pins when pairing succeeds, on the LAN or
+over Tailscale. The Omarchy plugin reaches it over a user-owned Unix socket.
+
+**Tailscale** works from core 0.2.0 with iOS app 0.2.0 (TAIL-2).
+The app reaches the computer by its MagicDNS name (`name.<tailnet>.ts.net`; a
+typed `100.x` address cannot pass iOS App Transport Security and the app says
+so), recognises a computer it paired with at home by its `host_id` and pinned
+certificate when it meets it on the tailnet, keeps one credential for both
+roads, and its terminal and Remote follow the road in use. App 0.1.0 can pair on
+the LAN only. Over Tailscale, who can reach this computer is decided by your
+tailnet's access rules (ACLs), not by ufw: Tailscale accepts everything on
+`tailscale0` before ufw sees it. If Tailscale SSH is on, port 22 over the tailnet
+is Tailscale's, and Omodachi's SSH approval and revoke do not apply to it.
+`omodachi-host tailnet` prints what Tailscale on this computer means for
+Omodachi, and the panel shows the same warnings.
 
 ## Install
 
@@ -78,9 +91,10 @@ The installer runs on the system `python3` with the standard library only.
 | `~/.local/bin/`, `~/.local/share/applications/`, icons | the `omodachid`, `omodachi-host` and `omodachi-panel` commands, the desktop entry and its icon |
 | `~/.config/omarchy/` | `themed/omodachi-theme.json.tpl` and the `theme-set` and `font-set` hooks (installed with `omarchy hook install`); the current theme is re-applied headless so Omarchy renders the template. Nothing else there, and never `~/.config/hypr` |
 | `~/.config/sunshine/apps.json` | one app entry added (the original kept as `apps.json.omodachi-bak`) |
-| ufw (sudo) | allow rules for `8099/tcp` and the Sunshine ports from the private ranges and `tailscale0`; the installer then says whether ufw is actually active and filtering |
+| ufw (sudo) | allow rules for `8099/tcp` and the Sunshine ports from the private ranges (and removal of the no-op `tailscale0` rules versions before 0.2.0 added); the installer then says whether ufw is actually active and filtering, and that it does not filter Tailscale |
 | pacman | the fork's runtime libraries and `wayvnc`, only those missing |
 | `~/.local/state/omodachi/`, `~/.cache/omodachi/` | the installer's records (which venv and Sunshine unit it made), Remote's session journals, the downloaded Sunshine archive |
+| `tailscale serve` (when Tailscale runs) | one mapping, `https://<this computer>.<tailnet>.ts.net` → `https+insecure://127.0.0.1:8099`, on port 443 if nothing else uses it there, otherwise 8443, otherwise none (the command is printed instead). It is Odomo's address: a real certificate a phone already trusts, which a Home Screen web app needs for push. Never a path under somebody else's port, never `tailscale serve reset`. Recorded in `~/.local/state/omodachi/tailscale-serve.json`. Tailscale puts the name in public certificate-transparency logs, as it does for any `tailscale serve`. If you are not Tailscale's operator the installer prints `sudo tailscale set --operator=$USER` and does not run it. `omodachi-host odomo status`, `odomo enable` and `odomo disable` read, add and remove it later |
 | `/etc` (only with `--pam`) | the opt-in device-approval PAM helper, its lines in `/etc/pam.d/sudo` and `polkit-1`, and the root-owned store of the device keys it accepts (`/etc/omodachi/pam/`, filled only by `--pam`/`--pam-enroll` after you see each key and type your password); see `src/omodachi_core/pam_install.py` |
 
 While it runs, the daemon also adds one line per device you grant SSH to
@@ -92,6 +106,9 @@ device at its own source while a device dictates, keeping the original as
 `config.toml.omodachi-dictation-bak` until it puts it back; moves the Omarchy
 bar with `omarchy bar position` during a Remote session and back after it; and
 runs the Omarchy menu's own `when` conditions to decide which rows to show.
+For Odomo's push it creates `~/.config/omodachi/vapid.json` (this
+host's VAPID key pair, 0600) the first time a browser asks for it, and keeps
+each web device's push subscription in `push-subscriptions.json` beside it.
 
 ### Removing it
 
@@ -99,7 +116,9 @@ runs the Omarchy menu's own `when` conditions to decide which rows to show.
 desktop entry, venv, the managed Sunshine (its unit disabled only if Install
 enabled it; the fork's own state, including the clients it paired, only if
 `~/.config/sunshine` did not exist before Omodachi - otherwise it says that
-state is kept), the `apps.json` entry (and the file, if Install created it), the Omarchy template and hooks, the ufw
+state is kept), the `tailscale serve` mapping (only one Install made, and only
+while it still points where Install pointed it; a mapping that was already
+there, or that somebody changed, stays), the `apps.json` entry (and the file, if Install created it), the Omarchy template and hooks, the ufw
 rules, every `authorized_keys` line marked as Omodachi's, a Voxtype config left
 mid-dictation, and, if you used `--pam`, the PAM entry (it asks for your
 password in the terminal). If something that grants access cannot be taken
@@ -154,18 +173,25 @@ template `themed/omodachi-theme.json.tpl` and the `theme-set` and `font-set`
 hook scripts, installed with `omarchy hook install`. `--remove` takes back
 those three and nothing else. It never touches `~/.config/hypr`.
 
-The firewall step copies `omarchy-install-service-sunshine`. It opens
-`8099/tcp` for `10.0.0.0/8`, `172.16.0.0/12` and `192.168.0.0/16` plus
-`tailscale0` with the comment `omodachi-core`, and the managed Sunshine fork's
-`47984,47989,48010/tcp` and `47998:48000/udp` the same way with the comment
-`omodachi-sunshine`. It needs sudo, a failure only warns, `--no-firewall` skips
-it, and `--remove-firewall` takes exactly those two comments back out. Rules are
-only a filter when ufw is enabled with incoming traffic denied by default, so
-the step reads `ufw status verbose` afterwards and says which it is: when ufw
-is missing or inactive it says plainly that the daemon's and Sunshine's ports
-are reachable from every network the computer is on (`sudo ufw enable` turns
-the rules on). The daemon listens on `0.0.0.0:8099` either way, behind TLS and
-device credentials.
+The firewall step opens `8099/tcp` for `10.0.0.0/8`, `172.16.0.0/12` and
+`192.168.0.0/16` with the comment `omodachi-core`, and the managed Sunshine
+fork's `47984,47989,48010/tcp` and `47998:48000/udp` the same way with the
+comment `omodachi-sunshine`. It needs sudo, a failure only warns,
+`--no-firewall` skips it, and `--remove-firewall` takes exactly those two
+comments back out. Rules are only a filter when ufw is enabled with incoming
+traffic denied by default, so the step reads `ufw status verbose` afterwards and
+says which it is: when ufw is missing or inactive it says plainly that the
+daemon's and Sunshine's ports are reachable from every network the computer is
+on (`sudo ufw enable` turns the rules on). The daemon listens on `0.0.0.0:8099`
+either way, behind TLS and device credentials.
+
+ufw does not filter Tailscale. Tailscale's own `ts-input` rule sits before ufw
+in `INPUT` and accepts everything arriving on `tailscale0`, so over the tailnet
+every listening port - 8099, 22, the Sunshine ports, the Sunshine admin page on
+47990 - is open to whoever the tailnet's access rules allow (measured in
+TAIL-1). Versions before 0.2.0 added `tailscale0` rules that never decided
+anything; Install now removes those (only rules carrying the two comments above)
+and the summary says the tailnet's ACL is the filter.
 
 ### The remote screen
 
@@ -205,13 +231,34 @@ names the fork commit this core was tested against and the archive's sha256,
 and for this release it resolves to
 
 ```
-https://github.com/omodachi/omodachi-sunshine/releases/download/sunshine-328d231/omodachi-sunshine-328d231-x86_64.tar.zst
+https://github.com/omodachi/omodachi-sunshine/releases/download/sunshine-e9f1b08/omodachi-sunshine-e9f1b08-x86_64.tar.zst
 ```
+
+That archive was built from the public commit
+`e9f1b089255e235b5e6aa13ed89b7dd3f569de87` of
+[`omodachi-sunshine`](https://github.com/omodachi/omodachi-sunshine), on a
+clean build machine and compiled so that none of that machine's paths is
+left in the binary; its release notes give the recipe and the sources of the
+libraries it links.
 
 `--sunshine-package <url|path>` overrides it and `--sunshine-package latest`
 asks for the newest release by name; either one needs `--sunshine-sha256 <hex>`
-(a `.sha256` published beside the archive is not accepted). `--sunshine-build
-<git-url> --sunshine-build-commit <sha>` builds the fork at exactly that commit;
+(a `.sha256` published beside the archive is not accepted). To build the fork
+from source instead, `--sunshine-build` with no argument fetches that same
+public commit from GitHub and builds it with the fork's own
+`scripts/package_release.sh` (it needs the build dependencies in the fork's
+`FORK.md`):
+
+```sh
+python3 -I -B ~/.local/share/omodachi/src/scripts/install_host.py --local --sunshine-build
+# the same, spelled out
+python3 -I -B ~/.local/share/omodachi/src/scripts/install_host.py --local \
+  --sunshine-build https://github.com/omodachi/omodachi-sunshine \
+  --sunshine-build-commit e9f1b089255e235b5e6aa13ed89b7dd3f569de87
+```
+
+and any other commit of that repository is built the same way, only ever at an
+exact 40-character `--sunshine-build-commit`, never a branch head.
 `--sunshine-build <path>` builds your own local tree as it stands. The git-URL
 checkout lives in `~/.cache/omodachi/sunshine-src`; the next build or `--purge`
 deletes it only while it is still exactly that commit (plus the build output
@@ -271,6 +318,15 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
   refused with a one-use `confirm_token`; only a second one for the same row
   from the same device within 30 seconds runs it (`service.py`). The plugin's
   panel is the person at the computer and is not asked twice.
+- **Over Tailscale, the tailnet decides who reaches the ports.** Tailscale
+  accepts everything on `tailscale0` before ufw sees it, so the tailnet's access
+  rules are the filter there; credentials and Approve still guard 8099 as
+  everywhere. With Tailscale SSH on, port 22 over the tailnet is answered by
+  Tailscale, not sshd, and Remove here does not end that access - the panel says
+  so (`tailnet.py`). A request from the tailnet shows the requesting node's
+  name and owner as this computer's own `tailscale whois` reports them, never
+  as proof of anything; a device that already holds a credential may ask
+  again, and approving it retires the old credential (`pairing.py`).
 - **The SSH lines are narrow.** Each one is
   `restrict,pty,expiry-time="…" <key> # omodachi:<device>`: no port, agent or
   X11 forwarding and no `~/.ssh/rc`, a terminal only, lapsing one day after the
@@ -279,6 +335,64 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
   `409 ssh_approval_required`, and its key waits ten minutes for
   `omodachi-host ssh approve <device>` on the computer (`ssh_keys.py`,
   `service.py`).
+- **You can always end a Remote session.** A device ends only its own; the
+  person at the computer ends anyone's, whether or not that device still
+  answers: `omodachi-host remote stop --all` from a terminal, a text console
+  or SSH (a Take over has the screen off), or End Remote session on the
+  panel's Overview. The authority is the Unix socket's own check that the
+  caller is you, the same as Approve; no device credential can do it over the
+  network, the panel's included (`remote/service.py`, `service.py`).
+- **Odomo is the computer's own page, and a smaller key.** `GET /odomo/*`
+  (and the two icons Safari asks the root for) needs no credential: it is a
+  web app, fixed bytes read once into memory from this package and served with
+  a strict CSP, and a page has to load before it can pair. It is built from
+  `odomo/` and committed; `scripts/verify_odomo.py` rebuilds it with the
+  hash-locked toolchain and compares byte for byte. A browser pairs through
+  the same card and Approve as the App, but gets a `web` credential that
+  reaches only the routes `browser_gate.WEB_ALLOWED` lists - the menu,
+  keybindings, notifications, its own push subscription and (ODOMO-2) what the
+  App's Herdr and Agent panels do: watch a pane (`observe`, never `control`),
+  keys and text into it, split / zoom / close, tabs, start or make a session;
+  the default agent's chat, its approvals and `/` commands - never Remote, SSH,
+  the clipboard, the microphone, approval keys, or the two Herdr calls that
+  move the computer's own screen (`pane.focus`, `workspace focus`). Its writes
+  are audited with its device id like the App's (`herdr-writes.jsonl`; agent
+  writes as `"omodachi":"web"` journal lines, never their words). ATTACH-1:
+  it may also send files - `POST /v1/uploads` and `DELETE /v1/uploads/{id}`,
+  the same as the App - and nothing reads one back. Anything carrying `Origin`
+  is held to that list too, must name this host in `Host` and come from
+  exactly `https://<that host>`, and opens a WebSocket only with a 30-second,
+  single-use ticket (`browser_gate.py`). Behind `tailscale serve` every request
+  comes from 127.0.0.1; only then are the forwarded address and
+  `Tailscale-User-Login` read, for the card and nothing else.
+- **A file from the phone is kept seven days, privately (ATTACH-1).**
+  `POST /v1/uploads` writes one file into `~/.local/state/omodachi/uploads/`
+  (0700; the file 0600) as `<agent|herdr|file>-<UTC>-<id>.<ext>`, so an agent
+  can read it by path. What is kept is decided by what the bytes are: PNG,
+  JPEG, GIF and WebP by their signature (HEIC is converted to JPEG with
+  libheif's `heif-dec`, else ImageMagick), PDF by `%PDF-`, text and code by
+  extension with every byte checked (UTF-8, no NUL or other control byte). SVG
+  is refused (markup that can carry script), and so is everything else, with
+  the reason. 25 MB at most, counted while the body streams in; nothing past
+  that is written. Files are swept seven days after they arrive, at start and
+  hourly; `DELETE /v1/uploads/{id}` takes one back before a send. No route
+  serves an upload back. The journal gets one line per upload -
+  `{"omodachi":"upload","event","device","kind","bytes"}` - never the name or
+  the content.
+- **Push goes out, and says little.** For a web device that turned
+  notifications on, the daemon makes outbound HTTPS requests to that
+  browser's push service - `*.push.apple.com`, `fcm.googleapis.com`,
+  `updates.push.services.mozilla.com` (or `*.notify.windows.com` for Edge) -
+  and to nothing else: a subscription for any other address is refused. Each
+  message is encrypted for that one browser (RFC 8291) and signed with the
+  host's VAPID key (`~/.config/omodachi/vapid.json`, 0600). It says which of
+  five things happened (the agent needs approval, is waiting, is done; an
+  agent in Herdr is blocked; a desktop notification) and links to this host's
+  own Odomo with ids only - no credential, no question text. Revoke, purge and
+  the push service's own "gone" (404/410) delete the subscription; the Devices
+  page can switch push off for one browser (`push.py`, `webpush.py`). The
+  sender is the one new dependency, `cryptography`, hash-locked like the rest
+  in `requirements/host.lock`.
 - **VNC has no port.** WayVNC listens only on a Unix socket in a 0700
   directory of its own, and the daemon's authenticated WSS connection is what
   dials it (`remote/vnc.py`).
@@ -309,6 +423,7 @@ draws it: **omodachi.app**.
 | `src/omodachi_core/` | the package: hub, catalog, routes, agent, audio, discovery |
 | `src/omodachi_core/remote/` | the remote screen: one session, two modes, two backends |
 | `contracts/` | JSON Schema documents and generated wire fixtures |
+| `odomo/` | Odomo's source; the committed build is `src/omodachi_core/data/odomo/` |
 | `scripts/` | host installer, contract verifier, host-side probes |
 | `tests/` | the unit, IPC, HTTPS/WSS and real-subprocess suites |
 | `docs/` | how the subsystems work |
@@ -342,7 +457,7 @@ with the implementation change that caused it.
 - [WayVNC backend](docs/wayvnc.md)
 - [microphone uplink](docs/audio-uplink-contract.md)
 - [voice: the uplink, Voxtype and the transcript](docs/voice.md)
-- [notification sync](docs/notifications.md)
+- [notification sync, and Web Push to Odomo](docs/notifications.md)
 - [LAN discovery](docs/lan-discovery.md)
 - [contract registry](contracts/README.md)
 

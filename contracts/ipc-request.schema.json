@@ -1008,6 +1008,34 @@
         "video_rect_points"
       ],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "op": {
+          "const": "remote.text"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^rs_[0-9a-f]{32}$"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "op",
+        "token",
+        "session_id",
+        "text"
+      ],
+      "additionalProperties": false
     }
   ]
 }

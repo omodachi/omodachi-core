@@ -25,7 +25,9 @@ Reports are read by the maintainer, Leo Zhang. There is no bug bounty.
 ## Scope
 
 This repository: the host daemon, its installer `scripts/install_host.py`,
-and what they write on the computer. The README's
+what they write on the computer, Odomo (the web app the daemon serves
+at `/odomo/`, its `tailscale serve` address and the Web Push it sends) and the
+outbound requests that push makes to the browsers' push services. The README's
 [Security model](README.md#security-model) says who can do what and which code
 decides it.
 

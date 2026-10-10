@@ -164,6 +164,10 @@ class FakeCompositor:
         if tail[:2] == ("-j", "getoption") and tail[2:] and tail[2] in self.wake_options:
             return CommandResult(0, json.dumps({"option": tail[2], "bool": self.wake_options[tail[2]],
                                                 "set": self.wake_options_set[tail[2]]}))
+        if tail[:2] == ("-j", "getoption") and tail[2:] and tail[2] in ("input:kb_layout", "input:kb_variant"):
+            # REMOTE-INPUT-1: the keymap the stream's key positions go through.
+            value = {"input:kb_layout": "us", "input:kb_variant": ""}[tail[2]]
+            return CommandResult(0, json.dumps({"option": tail[2], "str": value, "set": True}))
         if tail == ("-j", "devices"):
             return CommandResult(0, json.dumps(self.devices))
         if tail == ("repl", WORKSPACES_LUA):
@@ -285,8 +289,14 @@ class FakeSunshine:
         self.count = 0
         self.calls: list[str] = []
         self.available = True
+        # REMOTE-FIX-1: the fork's `encoder` field, which it derives from its
+        # configuration (`encoder=vaapi` on the command line), not its probe.
+        self.encoder = "vaapi"
         self.busy = False
         self.fail_stop = False
+        # REMOTE-ROTATE-1: the fork's answer for a stream that has not pinged
+        # yet, this many times before it lets the stream go.
+        self.not_stopped = 0
         # STREAM-1. `None` is today's fork: no `encoders` field, and a profile
         # whose codec is not H.264 is refused at `desktop.prepare`, as
         # `managed_desktop_geometry.h::valid_profile` does.
@@ -296,7 +306,7 @@ class FakeSunshine:
     def request(self, op, **fields):
         self.calls.append(op)
         if op == "desktop.status":
-            value = {"available": self.available, "backend": "wlr", "encoder": "vaapi"}
+            value = {"available": self.available, "backend": "wlr", "encoder": self.encoder}
             if self.encoders is not None:
                 value["encoders"] = list(self.encoders)
             return value
@@ -325,6 +335,9 @@ class FakeSunshine:
             result.update(identity=identity, prepared=True, session_count=0,
                           configured_output_id=fields["output_id"])
         if op == "desktop.stop":
+            if self.not_stopped > 0:
+                self.not_stopped -= 1
+                raise RemoteError("session_not_stopped")
             if self.fail_stop:
                 return {**result, "stopped": False, "session_count": 1}
             self.count = 0

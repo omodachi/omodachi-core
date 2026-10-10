@@ -16,6 +16,7 @@ import socket
 import subprocess
 import uuid
 
+from ..sunshine_package import fork_probed_encoder
 from .errors import RemoteError
 
 SUNSHINE_HTTPS_PORT = 47984
@@ -113,9 +114,11 @@ class SunshineBackend:
 
     name = "sunshine"
 
-    def __init__(self, ipc, *, certificate_resolver=None, address=lan_address, assets=managed_sunshine_assets):
+    def __init__(self, ipc, *, certificate_resolver=None, address=lan_address, assets=managed_sunshine_assets,
+                 probed_encoder=fork_probed_encoder):
         self.ipc, self.certificate_resolver, self.address = ipc, certificate_resolver, address
         self.assets = assets
+        self.probed_encoder = probed_encoder
         # What the fork said it encodes the last time it was asked. `status()`
         # runs right before every plan (`RemoteManager._backend`), so this is
         # never older than the session being planned.
@@ -145,8 +148,11 @@ class SunshineBackend:
             self.codecs = ("h264",)
             return {"available": False, "reason": "sunshine_control_unavailable"}
         self.codecs = self.served_codecs(result)
+        encoder = result.get("encoder")
         if result.get("available") is not True:
-            return {"available": False, "reason": "sunshine_desktop_unavailable"}
+            if not self._unpinned_vaapi(result):
+                return {"available": False, "reason": "sunshine_desktop_unavailable"}
+            encoder = "vaapi"
         # The fork answers for its own capture path; whether it will do it on
         # the GPU is decided by a directory next to the binary, which the fork
         # never complains about at this level. Say so here or nobody finds out
@@ -159,7 +165,34 @@ class SunshineBackend:
         # is not the place to guess.
         reason = "sunshine_assets_missing" if assets.get("present") is False else None
         return {"available": True, "reason": reason, "backend": result.get("backend"),
-                "encoder": result.get("encoder"), "codecs": list(self.codecs)}
+                "encoder": encoder, "codecs": list(self.codecs)}
+
+    def _unpinned_vaapi(self, result) -> bool:
+        """REMOTE-FIX-1: the fork's `available: false` that is not true.
+
+        The fork computes `encoder` from its *configuration*
+        (`config::video.encoder == "vaapi"`, `nvhttp.cpp`), not from its
+        encoder probe. A unit started without `encoder=vaapi` therefore says
+        `encoder: "unavailable"` for as long as it runs - at idle, during a
+        session and right after a restart alike - while its startup probe chose
+        VAAPI and every stream it serves is GPU-encoded; nothing in
+        `desktop.prepare` or the RTSP launch looks at that flag. Core used to
+        refuse Sunshine with 503 there and the app quietly used VNC, under a
+        red line saying Sunshine was not running.
+
+        So: capture is the managed `wlr` path, the only thing the fork said is
+        missing is the encoder, and the fork's own startup verdict in its log
+        is `vaapi`. Anything else - a software encoder (a VM: the fork then
+        really would stream on the CPU, and VNC is the better picture), no
+        verdict yet, a log we cannot read - stays unavailable. The codecs are
+        still the fork's own `encoders`: unpinned, it serves H.264 only.
+        """
+        if result.get("backend") != "wlr" or result.get("encoder") != "unavailable":
+            return False
+        try:
+            return self.probed_encoder() == "vaapi"
+        except Exception:
+            return False
 
     def preflight(self, device_id):
         """Refuse before any host mutation when this device never paired."""

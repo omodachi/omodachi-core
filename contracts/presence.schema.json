@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/presence.schema.json",
+  "title": "NOTIFY-2 what the App says about itself",
+  "description": "PUT /v1/presence {foreground, alerts} from a native client (a web credential is 403 by browser_gate; any other non-companion is 403 presence_native_only). `alerts` lists the kinds the App puts on screen by itself while it is in front. Odomo's quiet_when_native_connected holds a push back only for those kinds, only while this device is in front and holds a live /v1/events stream. Memory only: a daemon restart forgets it, and the App says it again on every connection. The reply echoes it, plus `quiets`: the kinds this device now holds back.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "device_id",
+    "foreground",
+    "alerts",
+    "quiets"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "foreground": {
+      "type": "boolean"
+    },
+    "alerts": {
+      "$ref": "#/$defs/kinds"
+    },
+    "quiets": {
+      "$ref": "#/$defs/kinds"
+    }
+  },
+  "$defs": {
+    "kinds": {
+      "type": "array",
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "agent_approval",
+          "agent_needs_input",
+          "agent_done",
+          "herdr_blocked",
+          "host_notification",
+          "herdr_done"
+        ]
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": [
+        "foreground"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "foreground": {
+          "type": "boolean"
+        },
+        "alerts": {
+          "$ref": "#/$defs/kinds"
+        }
+      }
+    }
+  }
+}

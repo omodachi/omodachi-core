@@ -401,6 +401,104 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "notification.updated"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "allOf": [
+              {
+                "$ref": "notifications.schema.json#/properties/notifications/items"
+              },
+              {
+                "properties": {
+                  "active": {
+                    "const": false
+                  }
+                }
+              }
+            ],
+            "description": "LITE-1b: a notification that left the desktop's screen (dismissed there or by a client, or timed out into history). The whole row, now inactive, so every client's list moves with it. Not a second notification.posted, which the App toasts. NOTIFY-3: with `withdrawn: true` the request it announced was decided and the row leaves every list."
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "herdr.layout.changed"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "required": [
+              "revision",
+              "session"
+            ],
+            "properties": {
+              "revision": {
+                "type": [
+                  "integer",
+                  "string"
+                ]
+              },
+              "session": {
+                "type": "string",
+                "minLength": 1
+              },
+              "stopped": {
+                "description": "NOTIFY-2: the session is no longer running, so it is no longer watched; `blocked` is then empty, which withdraws whatever was waiting in it.",
+                "const": true
+              },
+              "blocked": {
+                "description": "LITE-1b: the panes whose agent Herdr reports blocked, ids and the agent's name only. NOTIFY-2: published for every running session from daemon start, not only the ones a device opened.",
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "pane_id",
+                    "name"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "pane_id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "maxLength": 32
+                    }
+                  }
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
     }
   ]
 }

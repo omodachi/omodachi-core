@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/upload.schema.json",
+  "title": "Upload kept on the host",
+  "description": "ATTACH-1: the reply to `POST /v1/uploads[?name=<file name>&target=agent|herdr&session=&pane=]` with the file as the raw body (or `multipart/form-data`, one file part plus the same fields). Native and web credentials. The file is kept in `~/.local/state/omodachi/uploads/` (directory 0700, file 0600) as `<agent|herdr|file>-<UTC yyyymmddThhmmssZ>-<id>.<ext>` for seven days, then swept (at start and hourly). Accepted: images by their signature bytes (PNG, JPEG, GIF, WebP; HEIC is converted to JPEG on the host, because codex 0.154 silently drops a HEIC image input); PDF by `%PDF-`; text and code by extension, refused if any byte is NUL or another control byte (tab, line breaks and ESC are fine) or the bytes are not UTF-8. The cap is 25 MB (26,214,400 bytes), enforced while the body streams. Refusals are `http-error` documents: `413 upload_too_large`, `415 upload_svg_refused` (SVG is script-bearing markup), `415 upload_type_refused` (anything not listed - a `.zip`, an AVIF), `415 upload_not_text` (a text name over binary or non-UTF-8 bytes), `415 upload_heic_unconvertible`, `400 upload_empty`. `id` is what a send carries in `attachments`; `path` is absolute on the host and is what a Herdr pane receives in place of the chip's marker; `name` is the sanitised name the phone sent (a converted HEIC is named `.jpg`), shown on the chip only. `DELETE /v1/uploads/{id}` removes it before a send (`upload-removed.schema.json`).",
+  "type": "object",
+  "required": ["contract_revision", "id", "name", "kind", "bytes", "path", "media_type", "expires_at"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "id": {"type": "string", "pattern": "^[0-9a-f]{32}$"},
+    "name": {"type": "string", "minLength": 1, "maxLength": 121},
+    "kind": {"enum": ["image", "text", "pdf"]},
+    "bytes": {"type": "integer", "minimum": 1, "maximum": 26214400},
+    "path": {"type": "string", "pattern": "^/.+/uploads/(agent|herdr|file)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}\\.[a-z0-9]{1,10}$"},
+    "media_type": {"enum": ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain"]},
+    "expires_at": {"type": "string", "format": "date-time"}
+  }
+}

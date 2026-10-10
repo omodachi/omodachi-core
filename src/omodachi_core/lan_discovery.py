@@ -32,6 +32,12 @@ def _address(value):
     if address.version==6 and address.is_link_local:
         # Scope/interface-index aware IPv6 discovery is not silently guessed.
         raise DiscoveryError('discovery_ipv6_scope_required')
+    # TAIL-2 P1-3: a LAN record never carries a tailnet address (100.64/10,
+    # fd7a:115c:a1e0::/48). zeroconf also announces on exactly the interfaces
+    # named here, so this keeps the record off tailscale0 as well.
+    from .tailnet import is_tailnet_address
+    if is_tailnet_address(address):
+        raise DiscoveryError('discovery_address_tailnet')
     return address
 
 @dataclass(frozen=True)
@@ -146,7 +152,10 @@ def descriptor_for(config,listener):
     try:bound=[ipaddress.ip_address(address) for address,_ in listener.endpoints]
     except ValueError:raise DiscoveryError('discovery_listener_invalid') from None
     for configured in config.interface_addresses:
-        address=_address(configured)
+        try:address=_address(configured)
+        except DiscoveryError as error:
+            if error.code=='discovery_address_tailnet':continue
+            raise
         if any(address==endpoint or endpoint.is_unspecified and endpoint.version==address.version for endpoint in bound):
             matched.append(str(address))
     if not matched:raise DiscoveryError('discovery_no_lan_listener')

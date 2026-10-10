@@ -137,6 +137,15 @@ def daemon_main(argv=None) -> int:
         from .host_identity import HostIdentity, host_addresses
         identity = HostIdentity.load(Path(args.secret_file).parent,
                                      certificate=args.tls_cert, port=args.port)
+        # TAIL-2: the tailnet reading the claim, `/health` and the SSH target
+        # carry. Read once now and then on a worker every ten seconds, never
+        # on the event loop that answers `/health`.
+        from .tailnet import TailnetMonitor, is_tailnet_address
+        tailnet_monitor = TailnetMonitor()
+        if not args.demo:
+            tailnet_monitor.refresh()
+            identity.refresh_addresses()
+            identity.tailnet = tailnet_monitor.current
         discovery_config, discovery_reason = None, "off"
         explicit = any((args.discovery_name, args.discovery_server, args.discovery_address))
         if args.discovery != "off" and (explicit or args.listen):
@@ -148,8 +157,12 @@ def daemon_main(argv=None) -> int:
             # case; the explicit flags stay as an operator override. Whether the
             # record is actually published is still decided by the real bound
             # sockets, so a loopback listener never advertises.
+            # TAIL-2 P1-3: never a tailnet address. TAIL-1 §5.1 saw
+            # `['10.201.201.20', '100.64.12.11']` in the LAN record and the
+            # announcements going out on tailscale0 too.
             addresses = (tuple(args.discovery_address) if explicit
-                         else tuple(value for value in host_addresses() if ":" not in value))
+                         else tuple(value for value in host_addresses()
+                                    if ":" not in value and not is_tailnet_address(value)))
             try:
                 if not addresses: raise DiscoveryError("discovery_no_lan_address")
                 discovery_config = DiscoveryConfig(
@@ -169,8 +182,32 @@ def daemon_main(argv=None) -> int:
                                  remote_manager_factory=remote_manager_factory)
         from .pairing import PairingStore
         service.pairing = PairingStore(authority, Path(args.secret_file).parent / "pairing.json")
-        from .herdr_bridge import HerdrSessionChoices
+        from .herdr_bridge import HerdrSessionChoices, HerdrWriteAudit
         service.herdr_choices = HerdrSessionChoices(Path(args.secret_file).parent / "herdr-sessions.json")
+        # POLISH-U: the folders new workspaces were made in, kept across a
+        # restart (the "recent" list merges them with the live panes' folders).
+        from .herdr_bridge import HerdrFolders
+        service.herdr_folders_memory = HerdrFolders(path=Path(args.secret_file).parent / "herdr-folders.json")
+        # HERDR-3: who wrote into which pane, how much, never what.
+        service.herdr_audit = HerdrWriteAudit(Path(args.secret_file).parent / "herdr-writes.jsonl")
+        # HERDR-4: the operator's Quick / keys / commands rows, in Collie's
+        # format, read from this directory (else ~/.config/collie) on demand.
+        from .operator_rows import Launchers, OperatorRows
+        service.operator_rows = OperatorRows(Path(args.secret_file).parent)
+        # HERDR-11: what a new workspace may start (`launchers.toml`, same
+        # directories), the agents' own logs for a pane's latest reply, and
+        # Herdr's event stream as the poke for the layout poll.
+        service.herdr_launchers = Launchers(Path(args.secret_file).parent)
+        from .herdr_reply import AgentReplies
+        service.herdr_replies = AgentReplies()
+        from .herdr_events import HerdrEventWatches
+        service.herdr_events = HerdrEventWatches(service.herdr_poke)
+        # ATTACH-1: files sent to the Agent or a Herdr pane, kept seven days
+        # in ~/.local/state/omodachi/uploads (swept by the HTTPS app).
+        from .uploads import UploadStore
+        service.uploads = UploadStore()
+        if getattr(service, "agent_chat", None) is not None:
+            service.agent_chat.uploads = service.uploads
         # RELEASE-9 (B2): lines written before this release had no `restrict`
         # and no end; give every owned line both before anything can use it.
         service.ssh_keys_reconcile()
@@ -182,6 +219,44 @@ def daemon_main(argv=None) -> int:
         service.biometric = ApprovalBroker(
             hub, BiometricKeyStore(Path(args.secret_file).parent / "biometric-keys.json"),
             preferences=preferences_store, host_identity=identity)
+        # LITE-1b C7: Odomo's address is the installer's `tailscale serve`
+        # mapping, re-read whenever its record changes.
+        from . import odomo_serve
+        front_door = odomo_serve.Current()
+        service.odomo_front_door = front_door
+        identity.odomo = front_door.url
+        # LITE-1b C6: push to the web devices. The VAPID key is created the
+        # first time a browser asks for it, never at startup.
+        if not args.demo:
+            from .push import PushSender, PushStore
+            from . import webpush
+            import threading
+            config_dir = Path(args.secret_file).parent
+            vapid_lock, vapid_box = threading.Lock(), []
+
+            def vapid():
+                with vapid_lock:
+                    if not vapid_box:
+                        vapid_box.append(webpush.load_or_create(config_dir / "vapid.json"))
+                    return vapid_box[0]
+            service.vapid = vapid
+            service.push_store = PushStore(config_dir / "push-subscriptions.json")
+            service.push_sender = PushSender(hub, service.push_store, vapid, origin=front_door.origin,
+                                             host_name=lambda: identity.host_name,
+                                             host_id=lambda: identity.host_id,
+                                             native_alerts=service.native_alerts,
+                                             desk=service.desk_state)
+            # NOTIFY-1: whether the person is at the computer (Wayland idle,
+            # the screen locker, a live Remote session), and which finished
+            # agents nobody has looked at yet.
+            from .desk import DeskPresence
+            from .seen import SeenLedger
+            service.desk = DeskPresence()
+            service.desk.start()
+            service.install_seen(SeenLedger(config_dir / "seen.json"))
+        # LITE-1d: roads and the claim say how many web devices get pushes, so
+        # the native app stops offering Odomo once one does.
+        identity.odomo_push = service.odomo_push_devices
         service.install_host_identity(identity)
         server = JsonLineServer(hub, args.socket, local_handler=service.dispatch_local_async,
                                 compatibility_link=(legacy_socket_path()
@@ -218,6 +293,11 @@ def daemon_main(argv=None) -> int:
                         print(json.dumps({"log": hub.resources.line(reading),
                                           "level": "warning" if hub.resources.warnings(reading) else "info"}),
                               flush=True)
+                    if ticks % 8 == 4 and service.desk is not None:
+                        # NOTIFY-1: the desk, every two seconds; the locker
+                        # check reads /proc, so it runs off the loop.
+                        live = service.remote_live()
+                        service.apply_desk(await asyncio.to_thread(service.desk.evaluate, remote_live=live))
                     if ticks % 4 == 0:
                         # PERF-4 §0: one compositor probe a second, not two.
                         # Each is three `hyprctl -j` calls and it is not what
@@ -244,6 +324,11 @@ def daemon_main(argv=None) -> int:
                         service.schedule_herdr_layout_refresh()
                     if ticks % 20 == 0:
                         service.schedule_agent_refresh()
+                    if ticks % 40 == 0 and not args.demo:
+                        # TAIL-2: Tailscale comes up, goes down, changes its
+                        # name and its SSH switch while the daemon runs.
+                        await asyncio.to_thread(tailnet_monitor.refresh)
+                        await asyncio.to_thread(identity.refresh_addresses)
                     if ticks % 60 == 0 and service.remote.manager is None:
                         # INSTALL-1 §1.3. The daemon starts before the
                         # graphical session does, so the first attempt to build
@@ -279,6 +364,8 @@ def daemon_main(argv=None) -> int:
                 maintenance.cancel()
                 with suppress(asyncio.CancelledError):
                     await maintenance
+            if service.desk is not None:
+                service.desk.stop()
             try:
                 if network:
                     await network.close()
@@ -313,8 +400,7 @@ async def remote_request(args, token):
         if session is None:
             return {"ok": False, "error": "session_not_found", "message": "no live Remote session"}
         session_id = session["id"]
-    if operation == "stop":
-        return await client.request("remote.stop", session_id=session_id)
+    # `stop` never comes here: it is the local owner's operation (host_main).
     view = args.viewport
     payload = {"quality": DEFAULT_QUALITY, "decoder": DEFAULT_DECODER}
     if view is not None:
@@ -353,6 +439,18 @@ def host_main(argv=None) -> int:
     for name in ("health", "state", "capabilities", "catalog", "plugin-watch",
                  "theme-changed", "font-changed"):
         sub.add_parser(name)
+    # TAIL-2: read-only. What Tailscale on this computer means for Omodachi -
+    # the MagicDNS name, Tailscale SSH, routes that cover this LAN, and who
+    # really filters the tailnet. Needs no daemon and no credential.
+    sub.add_parser("tailnet", help="what Tailscale on this computer means for Omodachi (read-only)")
+    # LITE-1b C7: Odomo's `tailscale serve` mapping. Like `tailnet`,
+    # no daemon and no credential: it is this user's tailscaled.
+    odomo = sub.add_parser("odomo", help="Odomo's address on your tailnet (tailscale serve)")
+    odomo_sub = odomo.add_subparsers(dest="odomo_operation", required=True)
+    odomo_sub.add_parser("status", help="the address, or why there is none")
+    odomo_sub.add_parser("enable", help="add the tailscale serve mapping (443, else 8443); never "
+                                       "changes one that is not Omodachi's")
+    odomo_sub.add_parser("disable", help="remove the mapping, only if it is still Omodachi's own")
     # `omodachi-host herdr` still prints the agent/Herdr snapshot; HERDR-2's two
     # operations hang off it rather than becoming top-level commands.
     herdr = sub.add_parser("herdr", help="the Herdr snapshot, and the host's sessions")
@@ -433,6 +531,10 @@ def host_main(argv=None) -> int:
     devices_purge.add_argument("--older-than", type=float, metavar="DAYS", dest="older_than_days",
                                help="only purge devices whose media permission last changed more "
                                     "than DAYS ago; a device with no timestamp is never purged by age")
+    # LITE-1b: push to one web device, on or off, from this computer.
+    devices_push = devices_sub.add_parser("push", help="switch push to a web device on or off")
+    devices_push.add_argument("device_id")
+    devices_push.add_argument("state", choices=("on", "off"))
     devices_revoke = devices_sub.add_parser("revoke")
     devices_revoke.add_argument("device_id")
     # The plugin's own credential draws the page a revoke would be undone from,
@@ -498,7 +600,16 @@ def host_main(argv=None) -> int:
         help="also remove OMODACHI-* outputs no journal of this daemon accounts for; "
              "without it they are reported and left alone, because another daemon "
              "on this compositor may own them (CORE-2)")
-    remote_sub.add_parser("stop").add_argument("--session-id")
+    # REMOTE-STOP-1: the person at this computer ends any session, whoever's
+    # it is - from a TTY, over SSH, with the screen off. No credential: the
+    # authority is the verified same-UID Unix peer, like `devices revoke`.
+    remote_stop = remote_sub.add_parser(
+        "stop", help="end the Remote session on this computer, whichever device holds it")
+    remote_stop_target = remote_stop.add_mutually_exclusive_group()
+    remote_stop_target.add_argument("--session-id", help="end this session only")
+    remote_stop_target.add_argument("--all", action="store_true", dest="stop_all",
+                                    help="end every session; no session is not an error "
+                                         "(what a key bound to this should run)")
     for operation in ("start", "resize"):
         command = remote_sub.add_parser(operation)
         command.add_argument("--viewport", type=viewport, required=operation == "start")
@@ -527,6 +638,27 @@ def host_main(argv=None) -> int:
     explicit_socket = args.socket is not None
     if not explicit_socket:
         args.socket = client_socket_path()
+    if args.command == "tailnet":
+        from .tailnet import host_report
+        print(json.dumps({"ok": True, "result": host_report()}))
+        return 0
+    if args.command == "odomo":
+        from . import odomo_serve
+        messages = []
+        if args.odomo_operation == "status":
+            result = odomo_serve.status()
+            ok = True
+        elif args.odomo_operation == "enable":
+            result = odomo_serve.ensure(log=messages.append)
+            ok = result["state"] == "on"
+        else:
+            result = odomo_serve.remove(log=messages.append)
+            ok = result.get("removed") is True or result.get("reason") in ("no_record", "not_ours",
+                                                                            "already_gone", "changed")
+        if messages:
+            result["messages"] = messages
+        print(json.dumps({"ok": ok, "result": result}, indent=2))
+        return 0 if ok else 1
     if args.command == "plugin-action":
         from .plugin_actions import invoke_plugin_action, parameters, failure
         if args.token is not None:
@@ -614,6 +746,21 @@ def host_main(argv=None) -> int:
         print(json.dumps({"ok": ok, "result": result}))
         return 0 if ok else 1
     token = args.token or os.environ.get("OMODACHI_TOKEN")
+    if args.command == "remote" and args.remote_operation == "stop":
+        # REMOTE-STOP-1. Never the token path, even when one is set: a device
+        # credential could only end that device's own session, and the one
+        # thing this command must always be able to do is end *any* session
+        # (a stuck one on a phone whose panel will not open). The daemon checks
+        # the peer is this user; it gets the long local timeout a takeover's
+        # restore needs.
+        params = {"all": True} if args.stop_all else (
+            {"session_id": args.session_id} if args.session_id else {})
+        try:
+            result = asyncio.run(JsonLineClient(args.socket, timeout=90).request("local.remote.stop", **params))
+        except (OSError, asyncio.TimeoutError):
+            result = {"ok": False, "error": "setup_required", "message": "daemon_unavailable"}
+        print(json.dumps(result, indent=2))
+        return 0 if result.get("ok") and result["result"].get("released") is not False else 1
     if args.command == "remote":
         if not token:
             parser.error("OMODACHI_TOKEN or --token required")
@@ -679,6 +826,8 @@ def host_main(argv=None) -> int:
                   if hasattr(args, field)}
         if args.command == "devices" and operation == "revoke":
             params["force"] = args.force
+        if args.command == "devices" and operation == "push":
+            params["enabled"] = args.state == "on"
         if args.command == "devices" and operation == "list":
             params["all"] = args.all
             params["prune_ssh_keys"] = args.prune_ssh_keys

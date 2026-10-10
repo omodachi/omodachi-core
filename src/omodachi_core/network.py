@@ -15,12 +15,18 @@ from aiohttp import web, WSMsgType
 from .protocol import CONTRACT_REVISION
 from .clipboard import ClipboardError, LIMIT as CLIPBOARD_LIMIT
 from .service import CoreService, ServiceError, fields
+from .auth import CredentialStoreUnavailable
 from .audio_uplink import AudioUplinkError, AuthorizedAudioUplink, FORMAT
 from .voice import VoiceError
 from .notifications import NotificationsUnavailable
 from .lan_discovery import DiscoveryConfig, ListenerDiscovery
 from .network_discovery import NetworkDiscoveryBinding
 from .remote.errors import RemoteError
+from . import tailnet as tailnet_module
+from . import browser_gate
+from .odomo import OdomoBundle, IMMUTABLE, REVALIDATE, security_headers
+from .push import PushError
+from .uploads import REFUSALS, journal as journal_upload
 
 _RequestKey = getattr(web, "RequestKey", web.AppKey)
 DEVICE = _RequestKey("device", str)
@@ -48,6 +54,34 @@ def renewal_document(authority, renewed):
             "previous_credential_expires_at": renewed.issued_at + authority.grace_seconds}
 
 
+# HERDR-11 §4. A JSON read that compresses to a fraction of itself (the state
+# with its catalog was ~590 KB per event) and answers `304` to a client that
+# already holds exactly these bytes. Only a body this large is compressed: a
+# small reply costs more to deflate than it saves.
+COMPRESS_FROM = 1024
+CATALOG_HEADER = "X-Omodachi-Catalog"
+
+
+def matches_etag(request, etag: str) -> bool:
+    sent = request.headers.get("If-None-Match") or ""
+    return etag in {value.strip() for value in sent.split(",")} or sent.strip() == "*"
+
+
+def conditional_json(request, value, *, etag: str | None = None):
+    """`value` as JSON with an `ETag` (a hash of the body unless one is given),
+    `304` when the client's `If-None-Match` names it, and gzip when the client
+    takes it and the body is worth it."""
+    import hashlib
+    body = json.dumps(value).encode()
+    tag = etag or '"' + hashlib.sha256(body).hexdigest()[:24] + '"'
+    if matches_etag(request, tag):
+        return web.Response(status=304, headers={"ETag": tag})
+    response = web.Response(body=body, content_type="application/json", headers={"ETag": tag})
+    if len(body) >= COMPRESS_FROM and "gzip" in (request.headers.get("Accept-Encoding") or "").lower():
+        response.enable_compression(web.ContentCoding.gzip)
+    return response
+
+
 def error_response(code, message, status=400, detail=None, reason=None):
     """`detail` is the bounded, code-specific context remote-api.md promises.
 
@@ -66,27 +100,199 @@ def error_response(code, message, status=400, detail=None, reason=None):
     return web.json_response({"contract_revision": CONTRACT_REVISION, "error": error}, status=status)
 
 
-def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Application:
+def tailnet_tools(service):
+    """TAIL-2: the `tailnet` readings, replaceable by a test on the service."""
+    return getattr(service, "tailnet_tools", None) or tailnet_module
+
+
+def local_address(request):
+    """The host address this request arrived on - the road the client is using."""
+    try:
+        value = request.transport.get_extra_info("sockname") if request.transport else None
+        return str(ipaddress.ip_address(value[0].split("%", 1)[0])) if value else None
+    except (TypeError, ValueError, IndexError, AttributeError):
+        return None
+
+
+def on_this_road(document, request, tailnet=None):
+    """TAIL-2 P2-2: a Sunshine connection names the road this request used.
+
+    The backend answers with the address the host would use to reach its LAN,
+    which is unreachable for a client on the tailnet. Moonlight dials exactly
+    what it is given, so the connection document says how the client is
+    already reaching this host: its LAN address at home, and on the tailnet
+    the host's MagicDNS name. A loopback request (tests, the simulator
+    backend) keeps the backend's own answer.
+
+    REMOTE-FIX-2: on the tailnet it is the name, never the 100.x / fd7a:
+    literal. TAIL-3b's rule is that a Tailscale host *is* its MagicDNS name,
+    and the iOS app's Moonlight requests are NSURLSession loads under App
+    Transport Security, which treats a tailnet literal as neither local
+    networking nor the `*.ts.net` exception: it demands system trust for the
+    fork's self-signed certificate and fails every request with -1200
+    (-9802), whatever the app's pinning answers. Leo's iPad hit exactly that
+    on 2026-10-04. `tailnet` is this node's cached Tailscale reading
+    (`tailnet.reading`); only when it names no MagicDNS name does the literal
+    go out, and the app says in its diagnostics why that one cannot work.
+    """
+    session = document.get("session") if isinstance(document, dict) else None
+    connection = session.get("connection") if isinstance(session, dict) else None
+    if not isinstance(connection, dict) or connection.get("backend") != "sunshine":
+        return document
+    address = local_address(request)
+    if address is None or ipaddress.ip_address(address).is_loopback or ipaddress.ip_address(address).is_unspecified:
+        return document
+    host = address
+    if tailnet_module.is_tailnet_address(address):
+        host = tailnet_name(tailnet) or address
+    return {**document, "session": {**session, "connection": {**connection, "host": host}}}
+
+
+def tailnet_name(reading):
+    """This node's MagicDNS name from a Tailscale reading, while it is up."""
+    if not isinstance(reading, dict) or reading.get("running") is not True:
+        return None
+    return tailnet_module._dns_name(reading.get("dns_name"))
+
+
+def apply_road(capabilities, kind, relayed):
+    """`remote/capabilities` for one requesting peer (TAIL-2 P2-2)."""
+    road = {"kind": kind, "relayed": relayed, "reason": None}
+    value = {**capabilities, "road": road}
+    vnc = (capabilities.get("backends") or {}).get("vnc") or {}
+    if relayed is True and vnc.get("available") is True:
+        value["default_backend"] = "vnc"
+        road["reason"] = "tailnet_relayed"
+    return value
+
+
+def web_journal(entry):
+    """ODOMO-2: one JSON line on the daemon's stdout (the journal), tagged
+    `"omodachi":"web"`, the shape `service._ssh_journal` uses."""
+    try:
+        print(json.dumps({"omodachi": "web", **entry}, separators=(",", ":"), default=str), flush=True)
+    except (OSError, ValueError):
+        pass
+
+
+# ATTACH-1: how often the uploads directory is swept (and once at start).
+SWEEP_INTERVAL = 3600.0
+
+# LITE-1a L4: seconds between `{"type": "heartbeat"}` on an opted-in event stream.
+HEARTBEAT = 15.0
+
+
+def _is_odomo(path):
+    return path == "/odomo" or path.startswith("/odomo/")
+
+
+# LITE-1c: the web app was called Lite and lived at /lite/. A tab still open
+# there, or a bookmark, is sent to the same place under /odomo/ (GET and HEAD
+# only, the query kept). An installed Home Screen app or a push subscription
+# from then belongs to the old scope and has to be added again.
+LEGACY_PREFIX = "/lite"
+
+
+def _is_legacy(path):
+    return path == LEGACY_PREFIX or path.startswith(LEGACY_PREFIX + "/")
+
+
+# LITE-1b (NEXT-1 §6.4): Safari asks the origin's root for these when a page
+# is added to the Home Screen, whatever the manifest says. They are Odomo's own
+# icons, unauthenticated like /odomo/*, instead of a 401 in the log.
+_ROOT_ICON = re.compile(r"/(favicon\.ico|apple-touch-icon(-[0-9]{2,3}x[0-9]{2,3})?(-precomposed)?\.png)\Z")
+
+
+def _is_root_icon(path):
+    return bool(_ROOT_ICON.match(path))
+
+
+def create_app(service: CoreService, *, auth_check_interval=1.0, odomo_bundle=None) -> web.Application:
+    # LITE-1a. The browser gates (`browser_gate`): which names are this host,
+    # the single-use WebSocket tickets, and the built Odomo app itself.
+    host_names = browser_gate.HostNames(service)
+    tickets = browser_gate.WsTickets()
+    if odomo_bundle is None:
+        odomo_bundle = getattr(service, "odomo_bundle", None)
+    odomo = odomo_bundle if odomo_bundle is not None else OdomoBundle()
+    # NOTIFY-1: streams that put a pane or the conversation on a screen (`seen.py`).
+    seen_watch = getattr(service, "seen_watch", None) or (lambda key, delta: None)
+
     @web.middleware
     async def boundary(request, handler):
+        response = await guarded(request, handler)
+        # ODOMO-2: what a web device makes the agent do is on the journal with
+        # the device that did it - which route and how it ended, never the
+        # words. (Its writes into Herdr panes are in `herdr-writes.jsonl`.)
+        device = request.get(DEVICE)
+        if (device and request.method == "POST" and request.path.startswith("/v1/agent/")
+                and device_role(device) == "web"):
+            web_journal({"event": "agent.write", "device": device, "route": request.path[:200],
+                         "status": response.status})
+        return response
+
+    async def guarded(request, handler):
         try:
+            # LITE-1a C2, before anything authenticates: a browser has to name
+            # this host, and say it is a page on this host. Native clients send
+            # no Origin and are not asked.
+            origin = request.headers.get("Origin")
+            odomo_path = _is_odomo(request.path) or _is_root_icon(request.path) or _is_legacy(request.path)
+            if odomo_path or origin is not None:
+                if not await host_names.allows(request.headers.get("Host"), browser_gate.local_port(request)):
+                    raise ServiceError("host_not_allowed", "this host does not answer to that name", 403)
+                if origin is not None and not browser_gate.origin_matches(request, origin):
+                    raise ServiceError("origin_not_allowed", "requests from another origin are refused", 403)
             pairing_path = request.method == "POST" and (request.path == "/v1/pairing/requests" or
                 bool(re.fullmatch(r"/v1/pairing/requests/pair_[0-9a-f]{32}/claim", request.path)))
-            if request.path not in {"/", "/health"} and not pairing_path:
-                authorization = request.headers.get("Authorization", "")
-                if not authorization.startswith("Bearer ") or len(authorization) > 4096:
-                    raise ServiceError("pairing_required", status=401)
-                token = authorization[7:]
+            open_path = request.path in {"/", "/health"} or pairing_path or (
+                odomo_path and request.method in {"GET", "HEAD"})
+            if not open_path:
+                authorization = request.headers.get("Authorization")
+                if (authorization is None and request.method == "GET" and "ticket" in request.query
+                        and browser_gate.ticket_path(request.path)):
+                    # LITE-1a C5: a browser's WebSocket. The ticket is spent
+                    # here, whatever happens next, and leaves the query before
+                    # the route's own strict query check sees it.
+                    try:
+                        minted_for, token = tickets.take(request.query.get("ticket"), request.path)
+                    except browser_gate.TicketRefused:
+                        raise ServiceError("ws_ticket_invalid", "unknown, spent or expired ticket", 401) from None
+                    kept = [(key, value) for key, value in request.rel_url.query.items() if key != "ticket"]
+                    request = request.clone(rel_url=request.rel_url.with_query(kept))
+                else:
+                    minted_for = None
+                    authorization = authorization or ""
+                    if not authorization.startswith("Bearer ") or len(authorization) > 4096:
+                        raise ServiceError("pairing_required", status=401)
+                    token = authorization[7:]
                 try:
-                    request[DEVICE] = service.hub.authenticate(token)
+                    device = service.hub.authenticate(token)
+                except CredentialStoreUnavailable:
+                    raise ServiceError("auth_unavailable", "this host could not check credentials just now", 503) from None
                 except ValueError as error:
                     raise credential_refused(error)
+                if minted_for is not None and device != minted_for:
+                    raise credential_refused()
+                request[DEVICE] = device
                 request[TOKEN] = token
+                # LITE-1a C4: a web credential, and anything a browser sends,
+                # reaches only the routes `WEB_ALLOWED` lists.
+                if (origin is not None or device_role(device) == "web") and \
+                        not browser_gate.web_allows(request.method, request.path):
+                    raise ServiceError("web_client_forbidden", "not available to the web app", 403)
             response = await handler(request)
-            response.headers["Cache-Control"] = "no-store"
+            if odomo_path and response.status in (200, 304) and "Cache-Control" in response.headers:
+                pass  # the Odomo handler chose immutable or no-cache itself
+            else:
+                response.headers["Cache-Control"] = "no-store"
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
             return response
+        except CredentialStoreUnavailable:
+            # `credential_info`/`renew` reach the registry again on their own.
+            return error_response("auth_unavailable", "this host could not check credentials just now", 503)
         except (ServiceError, AudioUplinkError, VoiceError, NotificationsUnavailable, RemoteError,
-                ClipboardError) as exc:
+                ClipboardError, PushError) as exc:
             return error_response(exc.code, str(exc), exc.status, getattr(exc, "detail", None),
                                   getattr(exc, "reason", None))
         except PermissionError:
@@ -98,6 +304,15 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
             return error_response(code, code, 409 if code.startswith("stale") else 400)
         except web.HTTPException as exc:
             return error_response("request_rejected", exc.reason, exc.status)
+
+    def device_role(device):
+        role = getattr(service.hub.auth, "device_role", None) if hasattr(service.hub, "auth") else None
+        try:
+            return role(device) if callable(role) else "companion"
+        except (ValueError, OSError):
+            # An unreadable registry already failed `authenticate`; this is
+            # the narrow race after it, and it fails closed.
+            return "web"
 
     app = web.Application(middlewares=[boundary], client_max_size=65536)
 
@@ -139,7 +354,26 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
             # PAIR-2: an invitation-less request is bounded per source, so the
             # peer address the socket already knows travels with it. It is
             # shown to whoever approves; it authorizes nothing.
-            result = service.pairing_request(payload, remote_addr=request.remote)
+            # LITE-1a C3: behind `tailscale serve` that address is 127.0.0.1
+            # for everyone, so for a loopback peer only it is the forwarded
+            # client instead. C4: a request a browser sent is a web client,
+            # whatever it says it is.
+            remote_addr, served = browser_gate.forwarded_peer(request)
+            # TAIL-2 P1-6: over the tailnet, this computer's own tailscaled
+            # says who the peer is, so the card never has to show a 100.x.
+            # One `via` for both clients (NEXT-1): the road of the real peer -
+            # the forwarded one behind serve - and whois on it; serve's
+            # `Tailscale-User-Login` only fills a login whois could not give.
+            kind = tailnet_module.address_kind(remote_addr)
+            via = {"kind": kind, "peer_name": None, "login": None}
+            if kind == "tailnet":
+                with suppress(Exception):
+                    via = await asyncio.wait_for(asyncio.to_thread(
+                        tailnet_tools(service).whois, remote_addr), 4.0)
+            if served is not None and isinstance(via, dict) and not via.get("login"):
+                via = {**via, "login": served.get("login")}
+            result = service.pairing_request(payload, remote_addr=remote_addr, via=via,
+                                             browser="Origin" in request.headers)
         return web.json_response(result)
 
     async def pairing_credential(request):
@@ -193,24 +427,140 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
         return web.json_response(service.resource(renewal_document(service.hub.auth, renewed)))
 
     async def root(request):
-        # The companion API and the public Web draft are separate surfaces.
-        # Keep this route unauthenticated so opening the API origin in a browser
-        # explains the boundary instead of looking like a failed pairing flow.
+        # LITE-1a: a browser opening the host's address gets Odomo.
+        # Everything else still gets the description of the surface, so the
+        # API origin explains itself instead of looking like a failed pairing.
+        if odomo and "text/html" in (request.headers.get("Accept") or ""):
+            return web.Response(status=302, headers={"Location": "/odomo/"})
         return web.json_response({
             "service": "omodachid",
             "contract_revision": CONTRACT_REVISION,
-            "message": "This is the Omodachi host API, not the Web UI.",
+            "message": "This is the Omodachi host API. Odomo is at /odomo/.",
             "health": "/health",
             "authenticated_api": "/v1/*",
-            "web_ui": "run omodachi-web with npm run dev",
+            "web_ui": "/odomo/",
         })
+
+    async def odomo_redirect(request):
+        return web.Response(status=301, headers={"Location": "/odomo/"})
+
+    async def legacy_redirect(request):
+        # The still-encoded path and query, so nothing decoded reaches a header.
+        tail = request.rel_url.raw_path[len(LEGACY_PREFIX):].lstrip("/")
+        location = "/odomo/" + tail
+        if request.rel_url.raw_query_string:
+            location += "?" + request.rel_url.raw_query_string
+        return web.Response(status=301, headers={"Location": location})
+
+    async def odomo_file(request):
+        """LITE-1a C1: one file of the built Odomo app, from memory."""
+        if not odomo:
+            raise ServiceError("odomo_unavailable", "Odomo is not built into this core", 503)
+        asset = odomo.get(request.match_info.get("path", ""))
+        if asset is None:
+            raise ServiceError("not_found", status=404)
+        headers = {**security_headers(odomo.build), "ETag": '"' + asset.sha256 + '"',
+                   "Cache-Control": IMMUTABLE if asset.immutable else REVALIDATE}
+        if headers["ETag"] in {value.strip() for value in (request.headers.get("If-None-Match") or "").split(",")}:
+            return web.Response(status=304, headers=headers)
+        response = web.Response(body=asset.body, headers=headers)
+        response.headers["Content-Type"] = asset.content_type
+        return response
+
+    async def root_icon(request):
+        """LITE-1b: `/favicon.ico` and `/apple-touch-icon*.png` are Odomo's icon."""
+        if not odomo:
+            raise ServiceError("not_found", status=404)
+        asset = odomo.get("apple-touch-icon.png" if "apple" in request.path else "icon-192.png")
+        if asset is None:
+            raise ServiceError("not_found", status=404)
+        headers = {**security_headers(odomo.build), "ETag": '"' + asset.sha256 + '"', "Cache-Control": REVALIDATE}
+        if headers["ETag"] in {value.strip() for value in (request.headers.get("If-None-Match") or "").split(",")}:
+            return web.Response(status=304, headers=headers)
+        response = web.Response(body=asset.body, headers=headers)
+        response.headers["Content-Type"] = asset.content_type
+        return response
+
+    # ── LITE-1b C6: Web Push, for web credentials only ──────────────────
+    def push_store(request):
+        store = getattr(service, "push_store", None)
+        if store is None:
+            raise ServiceError("push_unavailable", "push is not available on this host", 503)
+        # A subscription belongs to a browser. The App has its own
+        # notifications and holds no web credential, so it has nothing here.
+        if device_role(request[DEVICE]) != "web":
+            raise ServiceError("push_web_only", "push subscriptions belong to the web app", 403)
+        return store
+
+    async def push_vapid_key(request):
+        if request.query or request.can_read_body:
+            raise ServiceError("invalid_request")
+        push_store(request)
+        vapid = await asyncio.to_thread(service.vapid)
+        return web.json_response(service.resource({"vapid_public_key": vapid.public_b64u}))
+
+    async def push_subscriptions(request):
+        if request.query:
+            raise ServiceError("invalid_request")
+        store = push_store(request)
+        if request.method == "DELETE":
+            if request.can_read_body:
+                fields(await body(request))
+            removed = await asyncio.to_thread(store.unsubscribe, request[DEVICE])
+            return web.json_response(service.resource({"device_id": request[DEVICE], "removed": removed}))
+        payload = await body(request)
+        record = await asyncio.to_thread(store.subscribe, request[DEVICE], payload)
+        vapid = await asyncio.to_thread(service.vapid)
+        from .push import endpoint_host
+        return web.json_response(service.resource({
+            "subscription_id": record["subscription_id"], "device_id": request[DEVICE],
+            "created_at": record["created_at"], "endpoint_host": endpoint_host(record["endpoint"]),
+            "vapid_public_key": vapid.public_b64u}), status=201)
+
+    # ── NOTIFY-2: the App says whether it is in front, and what it alerts ──
+    async def presence(request):
+        if request.query:
+            raise ServiceError("invalid_request")
+        payload = await body(request)
+        return web.json_response(service.set_presence(request[DEVICE], payload))
+
+    async def notification_prefs(request):
+        if request.query:
+            raise ServiceError("invalid_request")
+        store = push_store(request)
+        if request.method == "GET":
+            if request.can_read_body:
+                raise ServiceError("invalid_request")
+            return web.json_response(service.resource(await asyncio.to_thread(store.prefs, request[DEVICE])))
+        payload = await body(request)
+        fields(payload, ("expected_revision", "changes"))
+        return web.json_response(service.resource(await asyncio.to_thread(
+            store.set_prefs, request[DEVICE], payload["expected_revision"], payload["changes"])))
+
+    async def ws_ticket(request):
+        """LITE-1a C5: one 30-second, single-use ticket for one WebSocket path."""
+        if request.query:
+            raise ServiceError("invalid_request")
+        payload = await body(request)
+        fields(payload, ("path",))
+        path = payload["path"]
+        if not browser_gate.ticket_path(path):
+            raise ServiceError("invalid_request", "not a WebSocket path")
+        # A ticket can only open what its credential could open itself.
+        if (device_role(request[DEVICE]) == "web" or "Origin" in request.headers) and \
+                not browser_gate.web_allows("GET", path):
+            raise ServiceError("web_client_forbidden", "not available to the web app", 403)
+        return web.json_response(service.resource(tickets.mint(request[DEVICE], request[TOKEN], path)))
 
     async def health(request):
         return web.json_response(service.resource(service.hub.dispatch("health", {})))
 
     async def read(request):
         name = request.match_info["name"]
-        values = {"state": lambda: service.state(request[DEVICE]),
+        # HERDR-11 §4: the catalog revision this client already holds.
+        known = request.headers.get(CATALOG_HEADER)
+        known = known if known and len(known) <= 128 else None
+        values = {"state": lambda: service.state(request[DEVICE], known_catalog=known),
                   "capabilities": service.hub.capabilities_snapshot,
                   "herdr": service.hub.herdr_snapshot,
                   "catalog": lambda: service.search_catalog(request.query.get("q", ""))}
@@ -218,7 +568,7 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
             raise ServiceError("invalid_request")
         if name not in values:
             raise ServiceError("route_unavailable", status=404)
-        return web.json_response(service.resource(values[name]()))
+        return conditional_json(request, service.resource(values[name]()))
 
     async def action(request):
         payload = await body(request)
@@ -287,6 +637,20 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
         result=await chat_service().commands.execute(request.match_info['command'],await body(request),chat_authority(request))
         return web.json_response(service.resource(result))
 
+    async def chat_new(request):
+        """AGENT-NEW-1: a fresh default conversation. One audit line either
+        way: the device, its role, the thread it left and the one it got."""
+        from .agent_chat_service import journal as journal_agent
+        device=request[DEVICE];payload=await body(request)
+        previous=payload.get('expected_provider_session_id')
+        entry={'event':'agent.conversation.new','device':device,'role':device_role(device),
+               'previous_thread_id':previous[:128] if isinstance(previous,str) else None}
+        try:result=await chat_service().new_conversation(payload,chat_authority(request))
+        except ServiceError as error:
+            journal_agent({**entry,'outcome':error.code});raise
+        journal_agent({**entry,'outcome':'started','thread_id':result['provider_session_id']})
+        return web.json_response(service.resource(result))
+
     async def chat_recover_empty(request):
         return web.json_response(service.resource(await chat_service().recover_empty(await body(request),chat_authority(request))))
 
@@ -306,8 +670,29 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
     async def chat_interrupt(request):
         return web.json_response(service.resource(await chat_service().cancel(await body(request),chat_authority(request))))
 
+    async def chat_mode(request):
+        return web.json_response(service.resource(await chat_service().set_mode(await body(request),chat_authority(request))))
+
     async def chat_steer(request):
         return web.json_response(service.resource(await chat_service().steer(await body(request),chat_authority(request))))
+
+    async def chat_queue_add(request):
+        # AGENT-QUEUE-1: Send while a turn runs - codex's own queue.
+        if request.query:raise ServiceError('invalid_request')
+        return web.json_response(service.resource(await chat_service().queue_add(await body(request),chat_authority(request))))
+
+    async def chat_queue_item(request):
+        # AGENT-QUEUE-1: a waiting message's Send now / Edit / Delete.
+        if request.query:raise ServiceError('invalid_request')
+        result=await chat_service().queue_item(request.match_info['queue_id'],request.match_info['action'],
+                                               await body(request),chat_authority(request))
+        return web.json_response(service.resource(result))
+
+    async def chat_history(request):
+        # AGENT-QUEUE-1: earlier rows, a page at a time.
+        if request.can_read_body or set(request.query)-{'before','limit'}:raise ServiceError('invalid_request')
+        result=await chat_service().history(request.query.get('before'),request.query.get('limit'),chat_authority(request))
+        return web.json_response(service.resource(result))
 
     async def chat_approvals(request):
         if request.query or request.can_read_body:raise ServiceError('invalid_request')
@@ -336,7 +721,7 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
         """
         chat=chat_service();authorize=chat_authority(request)
         await chat.require(authorize)
-        queue=asyncio.Queue(maxsize=256);chat.subscribers.add(queue)
+        queue=asyncio.Queue(maxsize=1024);chat.subscribers.add(queue)
         ws=web.WebSocketResponse(heartbeat=20,max_msg_size=65536)
         async def pump(snapshot):
             await ws.send_json({'type':'snapshot','snapshot':snapshot})
@@ -354,9 +739,12 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
             async for message in ws:
                 if message.type in (WSMsgType.TEXT,WSMsgType.BINARY):
                     await ws.close(code=1008,message=b'read-only event stream');return
+        watched=False
         try:
             snapshot=await chat.snapshot(authorize)
             await ws.prepare(request);sockets.add(ws)
+            # NOTIFY-1: the conversation on a device's screen is seen (`seen.py`).
+            seen_watch('agent:default',+1);watched=True
             tasks=[asyncio.create_task(pump(snapshot)),asyncio.create_task(reader())]
             try:
                 finished,_=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
@@ -369,7 +757,9 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
         except (ServiceError,ConnectionError):
             if ws.prepared:await ws.close(code=1008)
             else:raise
-        finally:chat.subscribers.discard(queue);sockets.discard(ws)
+        finally:
+            chat.subscribers.discard(queue);sockets.discard(ws)
+            if watched:seen_watch('agent:default',-1)
         return ws
 
     async def media_pairing(request):
@@ -656,7 +1046,27 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
 
     async def herdr_layout(request):
         _no_query(request)
-        return web.json_response(await asyncio.to_thread(service.herdr_layout, request[DEVICE]))
+        layout = await asyncio.to_thread(service.herdr_layout, request[DEVICE])
+        # HERDR-11 §4: the session and its revision are the projection's
+        # identity; a client holding that revision is answered 304.
+        etag = '"%s:%s"' % (layout.get("session"), layout.get("revision"))
+        return conditional_json(request, layout, etag=etag)
+
+    async def herdr_pane_reply(request):
+        """HERDR-11 §2: the latest reply of the agent in a pane, from its own log."""
+        if request.query or request.can_read_body:
+            raise ServiceError("invalid_request")
+        from .herdr_reply import etag as reply_etag
+        reply = await asyncio.to_thread(service.herdr_pane_reply, request.match_info["pane"], request[DEVICE])
+        return conditional_json(request, reply, etag=reply_etag(reply))
+
+    async def herdr_folder_favourite(request):
+        """HERDR-11 §1: star or un-star a folder on the New workspace card."""
+        if request.query:
+            raise ServiceError("invalid_request")
+        payload = await body(request)
+        result = await asyncio.to_thread(service.herdr_folder_favourite, request[DEVICE], payload)
+        return web.json_response(result)
 
     async def herdr_sessions(request):
         """Every Herdr session on the host, and which one this device is on."""
@@ -669,10 +1079,64 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
                                          request.match_info["name"])
         return web.json_response(result)
 
+    async def herdr_start_session(request):
+        """HERDR-5: bring a stopped session up headless, and land in it."""
+        await body(request)
+        result = await asyncio.to_thread(service.herdr_start_session, request[DEVICE],
+                                         request.match_info["name"])
+        return web.json_response(result)
+
+    async def herdr_create_session(request):
+        """HERDR-5: a new named session in $HOME, started the same way."""
+        if request.query:
+            raise ServiceError("invalid_request")
+        payload = await body(request)
+        result = await asyncio.to_thread(service.herdr_create_session, request[DEVICE], payload)
+        return web.json_response(result)
+
+    async def herdr_create_workspace(request):
+        """HERDR-6: a new workspace in a running session, in a folder the
+        device picked, without moving the computer's screen."""
+        if request.query:
+            raise ServiceError("invalid_request")
+        payload = await body(request)
+        result = await asyncio.to_thread(service.herdr_create_workspace, request[DEVICE],
+                                         request.match_info["name"], payload)
+        return web.json_response(result)
+
+    async def herdr_folders(request):
+        """HERDR-6: recent and common folders, or one folder's folders."""
+        if request.can_read_body:
+            raise ServiceError("invalid_request")
+        result = await asyncio.to_thread(service.herdr_folders, request[DEVICE], dict(request.query))
+        return web.json_response(result)
+
     async def herdr_pane_action(request):
         payload = await body(request)
         result = await asyncio.to_thread(service.herdr_pane_action, request.match_info["pane"],
                                          request.match_info["action"], payload, request[DEVICE])
+        return web.json_response(result)
+
+    async def herdr_pane_keys(request):
+        """HERDR-3: keys into a pane without taking it (`pane.send_keys`)."""
+        payload = await body(request)
+        result = await asyncio.to_thread(service.herdr_pane_keys, request.match_info["pane"],
+                                         payload, request[DEVICE])
+        return web.json_response(result)
+
+    async def herdr_pane_text(request):
+        """HERDR-3: text into a pane, submitted only with proof on screen."""
+        payload = await body(request)
+        result = await asyncio.to_thread(service.herdr_pane_text, request.match_info["pane"],
+                                         payload, request[DEVICE])
+        return web.json_response(result)
+
+    async def herdr_operator_rows(request):
+        """HERDR-4: the Quick dock, key presets and harness segment for one
+        kind of pane, with the operator's own TOML rows applied."""
+        if request.can_read_body:
+            raise ServiceError("invalid_request")
+        result = await asyncio.to_thread(service.herdr_operator_rows, dict(request.query))
         return web.json_response(result)
 
     async def herdr_workspace_select(request):
@@ -737,9 +1201,14 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
         except HerdrUnavailable as error:
             raise service._herdr_error(error) from None
         channel = "herdr-" + uuid.uuid4().hex
+        # HERDR-3: `?takeover=1` also takes the pane from another device's
+        # stream on this bridge; that stream is told to end with `taken_over`.
+        loop = asyncio.get_running_loop()
+        evicted = asyncio.Event()
         if mode == "control":
             try:
-                bridge.claim_control(pane, channel)  # 409 before the upgrade
+                bridge.claim_control(pane, channel, takeover=takeover,
+                                     evict=lambda: loop.call_soon_threadsafe(evicted.set))  # 409 before the upgrade
             except HerdrUnavailable as error:
                 raise service._herdr_error(error) from None
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=262144, compress=False)
@@ -750,6 +1219,9 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
                 bridge.release_control(pane, channel)
             raise
         herdr_sockets.add(ws)
+        # NOTIFY-1: a pane on a device's screen is a pane seen (`seen.py`).
+        seen_key = f"herdr:{bridge.session}:{pane}"
+        seen_watch(seen_key, +1)
         state = {"argv": argv, "process": None, "restart": False}
 
         async def spawn():
@@ -821,11 +1293,15 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
                 await asyncio.sleep(1.0)
                 authorize()
 
+        async def taken_over():
+            await evicted.wait()
+            return "taken_over"
+
         reason = "disconnected"
         tasks: list[asyncio.Task] = []
         try:
             state["process"] = await spawn()
-            tasks = [asyncio.create_task(job()) for job in (to_client, to_host, guard)]
+            tasks = [asyncio.create_task(job()) for job in (to_client, to_host, guard, taken_over)]
             finished, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             for task in finished:
                 if task.cancelled():
@@ -848,6 +1324,7 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
             await asyncio.gather(*tasks, return_exceptions=True)
             await stop()
             herdr_sockets.discard(ws)
+            seen_watch(seen_key, -1)
             if mode == "control":
                 bridge.release_control(pane, channel)
             if not ws.closed:
@@ -1095,6 +1572,117 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
             raise credential_refused(error) from None
         return web.json_response(service.resource(result))
 
+    def upload_store():
+        store = getattr(service, "uploads", None)
+        if store is None:
+            raise ServiceError("upload_unavailable", "uploads are not set up on this host", 503)
+        return store
+
+    UPLOAD_QUERY = {"name", "target", "session", "pane"}
+
+    def upload_target(values):
+        kind = values.get("target")
+        if kind is None:
+            return {}
+        if kind not in ("agent", "herdr"):
+            raise ServiceError("invalid_request", "target is agent or herdr")
+        target = {"kind": kind}
+        session, pane = values.get("session"), values.get("pane")
+        if session is not None:
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", session):
+                raise ServiceError("invalid_request")
+            target["session"] = session
+        if pane is not None:
+            if not re.fullmatch(r"w[0-9]{1,9}:p[0-9]{1,9}", pane):
+                raise ServiceError("invalid_request")
+            target["pane"] = pane
+        return target
+
+    async def stream_into(receiving, reader):
+        """The body, chunk by chunk, into the `.part` file; the cap is checked
+        on every chunk, so an oversize upload stops at 25 MB + one chunk."""
+        while True:
+            try:
+                chunk = await asyncio.wait_for(reader(), 30.0)
+            except asyncio.TimeoutError:
+                receiving.abort()
+                raise ServiceError("request_timeout", "upload stalled", 408) from None
+            if not chunk:
+                return
+            await asyncio.to_thread(receiving.write, chunk)
+
+    async def uploads(request):
+        """ATTACH-1. `POST /v1/uploads[?name=&target=agent|herdr&session=&pane=]`
+        with the file as the raw body, or `multipart/form-data` with one file
+        part (and the same fields as parts). Answers `upload.schema.json`."""
+        store = upload_store()
+        device = request[DEVICE]
+        if set(request.query) - UPLOAD_QUERY:
+            raise ServiceError("invalid_request")
+        values = dict(request.query)
+        length = request.content_length
+        if length is not None and length > store.max_bytes + 65536:
+            journal_upload({"event": "upload.refused", "device": device, "reason": "upload_too_large",
+                            "bytes": length})
+            raise ServiceError("upload_too_large", REFUSALS["upload_too_large"], 413)
+        receiving = await asyncio.to_thread(store.receive)
+        name = None
+        try:
+            kind = (request.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if kind == "multipart/form-data":
+                reader = await request.multipart()
+                found = False
+                while (part := await reader.next()) is not None:
+                    if part.filename is not None and part.name in (None, "file"):
+                        if found:
+                            raise ServiceError("invalid_request", "one file per upload")
+                        found = True
+                        name = values.get("name") or part.filename
+                        await stream_into(receiving, lambda: part.read_chunk(65536))
+                    elif part.name in UPLOAD_QUERY - {"name"} or part.name == "name":
+                        raw = await part.read(decode=True)
+                        if len(raw) > 256:
+                            raise ServiceError("invalid_request")
+                        values.setdefault(part.name, raw.decode("utf-8", "replace"))
+                    else:
+                        raise ServiceError("invalid_request", "unexpected multipart field")
+                if not found:
+                    raise ServiceError("invalid_request", "no file part")
+            else:
+                name = values.get("name")
+                await stream_into(receiving, lambda: request.content.read(65536))
+            if not isinstance(name, str) or not name or len(name) > 512:
+                raise ServiceError("invalid_request", "the upload needs a file name")
+            target = upload_target(values)
+            # The recheck `body()` does: a credential revoked while the body
+            # streamed in must not get to leave a file behind.
+            try:
+                if service.hub.authenticate(request[TOKEN]) != device:
+                    raise ValueError
+            except ValueError as error:
+                raise credential_refused(error, "credential revoked or expired") from None
+            upload = await asyncio.to_thread(receiving.finish, name, device=device, target=target)
+        except ServiceError as error:
+            receiving.abort()
+            if error.code.startswith("upload_"):
+                journal_upload({"event": "upload.refused", "device": device, "reason": error.code,
+                                "bytes": receiving.size})
+            raise
+        except BaseException:
+            receiving.abort()
+            raise
+        journal_upload({"event": "upload.saved", "device": device, "kind": upload.kind,
+                        "bytes": upload.bytes, "target": target.get("kind")})
+        return web.json_response(service.resource(upload.document(store.ttl)))
+
+    async def upload_delete(request):
+        """ATTACH-1: a chip taken off before Send - its file goes now."""
+        if request.query or request.can_read_body:
+            raise ServiceError("invalid_request")
+        result = await asyncio.to_thread(upload_store().delete, request.match_info["id"])
+        journal_upload({"event": "upload.removed", "device": request[DEVICE]})
+        return web.json_response(service.resource(result))
+
     async def clipboard(request):
         """CLIP-1. The host's clipboard, as text, both ways.
 
@@ -1140,7 +1728,49 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
     async def remote_capabilities(request):
         if request.query or request.can_read_body:
             raise ServiceError("invalid_request")
-        return web.json_response(await service.dispatch_remote_async("remote.capabilities", {}, request[DEVICE]))
+        result = await service.dispatch_remote_async("remote.capabilities", {}, request[DEVICE])
+        return web.json_response(await road_for(request, result))
+
+    async def road_for(request, capabilities):
+        """TAIL-2 P2-2: how this device reaches the host, and what that means.
+
+        TAIL-1 §5.4: over a relayed (DERP) tailnet path VNC moved ~2.8 MiB/s
+        with 1-2 s of lag and filled the relay queue. When Tailscale says this
+        peer has no direct path, the default backend becomes VNC (when it is
+        available) and `road.reason` says why, so the app can say it too.
+        """
+        if not isinstance(capabilities, dict):
+            return capabilities
+        kind = tailnet_module.address_kind(request.remote)
+        relayed = None
+        if kind == "tailnet":
+            tools = tailnet_tools(service)
+            status = None
+            with suppress(Exception):
+                status = await asyncio.wait_for(asyncio.to_thread(tools.status_json), 4.0)
+            relayed = tools.peer_path(status, request.remote)["relayed"]
+        return apply_road(capabilities, kind, relayed)
+
+    async def host_open(request):
+        """LINKS-1. `POST /v1/host/open {source, path | url, check?}`: a path or
+        an address the agent showed, opened on the computer with its default
+        handler (`host_open.py` has every rule). The bytes never leave."""
+        from .host_open import parse as parse_open
+        device = request[DEVICE]
+        open_request = parse_open(await body(request))
+        if open_request.source["kind"] == "agent":
+            haystack, cwd = service.host_open_agent_source(open_request.source["item"])
+        else:
+            haystack, cwd = await asyncio.to_thread(service.host_open_herdr_source, open_request.source, device)
+        result = await asyncio.to_thread(service.host_open, open_request, device=device,
+                                         role=device_role(device), haystack=haystack, cwd=cwd)
+        return web.json_response(result)
+
+    async def host_roads(request):
+        # TAIL-2 follow-up: authenticated, so `/health` can stay an anchor.
+        if request.query or request.can_read_body:
+            raise ServiceError("invalid_request")
+        return web.json_response(service.host_roads())
 
     async def shortcuts(request):
         return web.json_response(service.shortcuts_snapshot())
@@ -1177,7 +1807,9 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
             op = "remote." + operation
         if "id" in request.match_info:
             payload["session_id"] = request.match_info["id"]
-        return web.json_response(await service.dispatch_remote_async(op, payload, request[DEVICE]),
+        result = await service.dispatch_remote_async(op, payload, request[DEVICE])
+        reading = service.host_identity.tailnet_reading() if getattr(service, "host_identity", None) is not None else None
+        return web.json_response(on_this_road(result, request, reading),
                                  status=201 if op == "remote.start" else 200)
 
     sockets: set[web.WebSocketResponse] = set()
@@ -1186,8 +1818,17 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
     herdr_sockets: set[web.WebSocketResponse] = set()
 
     async def events(request):
-        if set(request.query) - {"since", "instance_id"}:
-            raise ServiceError("invalid_request", "event query may contain only since and instance_id")
+        if set(request.query) - {"since", "instance_id", "heartbeat"}:
+            raise ServiceError("invalid_request", "event query may contain only since, instance_id and heartbeat")
+        # LITE-1a L4. A browser cannot see WebSocket pings, so a path that died
+        # quietly looks exactly like a quiet host (TAIL-1 §5.5 found the native
+        # app stuck "Connected" that way). `heartbeat=1` asks for a small
+        # message every HEARTBEAT seconds; a client that hears nothing for two
+        # of them knows the socket is dead. Opt-in, so no existing client sees
+        # a message type it does not know.
+        if request.query.get("heartbeat", "1") != "1":
+            raise ServiceError("invalid_request", "heartbeat may only be 1")
+        heartbeat = "heartbeat" in request.query
         try:
             since = int(request.query.get("since", "0"))
             if since < 0:
@@ -1212,6 +1853,12 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
                                     "after_cursor": after_cursor})
                 after_cursor = event.seq
 
+        async def beat():
+            while not ws.closed and heartbeat:
+                await asyncio.sleep(HEARTBEAT)
+                await ws.send_json({"type": "heartbeat", "instance_id": service.instance_id})
+            await asyncio.Event().wait()
+
         async def check_auth():
             while not ws.closed:
                 await asyncio.sleep(auth_check_interval)
@@ -1231,7 +1878,7 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
                     await ws.close(code=1008, message=b"read-only event stream")
                     return
 
-        tasks = [asyncio.create_task(task()) for task in (pump, check_auth, receive)]
+        tasks = [asyncio.create_task(task()) for task in (pump, check_auth, receive, beat)]
         try:
             finished, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
             if tasks[0] in finished and not tasks[0].cancelled():
@@ -1277,9 +1924,22 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
         yield
         await service.remote.detach_transport()
     app.cleanup_ctx.append(remote_lifecycle)
+    async def push_lifecycle(app):
+        # LITE-1b C6: the sender lives as long as the HTTPS app does, on its loop.
+        sender = getattr(service, "push_sender", None)
+        if sender is not None:
+            sender.start(asyncio.get_running_loop())
+        yield
+        if sender is not None:
+            await sender.stop()
+    app.cleanup_ctx.append(push_lifecycle)
     async def voice_lifecycle(app):
         mirror = getattr(service, "notification_mirror", None)
         if mirror is not None:
+            # LITE-1b: the mirror's watch thread publishes on this loop, never
+            # into the hub's queues from its own thread.
+            loop = asyncio.get_running_loop()
+            mirror.dispatch = loop.call_soon_threadsafe
             await asyncio.to_thread(mirror.start)
         yield
         if mirror is not None:
@@ -1291,8 +1951,40 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
             with suppress(Exception):
                 await voice.close()
     app.cleanup_ctx.append(voice_lifecycle)
+    async def uploads_lifecycle(app):
+        # ATTACH-1: what was sent more than seven days ago goes, at start and
+        # every hour after.
+        store = getattr(service, "uploads", None)
+        async def sweep():
+            while True:
+                with suppress(Exception):
+                    removed = await asyncio.to_thread(store.sweep)
+                    if removed:
+                        journal_upload({"event": "upload.swept", "count": len(removed)})
+                await asyncio.sleep(SWEEP_INTERVAL)
+        task = asyncio.create_task(sweep()) if store is not None else None
+        yield
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+    app.cleanup_ctx.append(uploads_lifecycle)
     app.router.add_get("/", root)
     app.router.add_get("/health", health)
+    app.router.add_get("/odomo", odomo_redirect)
+    app.router.add_get("/odomo/", odomo_file)
+    app.router.add_get("/odomo/{path:.+}", odomo_file)
+    app.router.add_get(LEGACY_PREFIX, legacy_redirect)
+    app.router.add_get(LEGACY_PREFIX + "/{path:.*}", legacy_redirect)
+    app.router.add_get("/favicon.ico", root_icon)
+    app.router.add_get(r"/{name:apple-touch-icon(?:-[0-9]{2,3}x[0-9]{2,3})?(?:-precomposed)?\.png}", root_icon)
+    app.router.add_post("/v1/ws-ticket", ws_ticket)
+    app.router.add_get("/v1/push/vapid-public-key", push_vapid_key, allow_head=False)
+    app.router.add_post("/v1/push/subscriptions", push_subscriptions)
+    app.router.add_delete("/v1/push/subscriptions", push_subscriptions)
+    app.router.add_get("/v1/notifications/prefs", notification_prefs, allow_head=False)
+    app.router.add_put("/v1/notifications/prefs", notification_prefs)
+    app.router.add_put("/v1/presence", presence)
     app.router.add_get("/v1/events", events)
     app.router.add_post("/v1/pairing/requests", pairing_request)
     app.router.add_post("/v1/pairing/requests/{id}/claim", pairing_request)
@@ -1301,6 +1993,8 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
     app.router.add_post("/v1/actions/{id}:invoke", action)
     app.router.add_post("/v1/control/wake", control_wake)
     app.router.add_get("/v1/shortcuts", shortcuts)
+    app.router.add_get("/v1/host/roads", host_roads, allow_head=False)
+    app.router.add_post("/v1/host/open", host_open)
     app.router.add_post("/v1/workspaces/{id:-?[0-9]+}/select", workspace_select)
     app.router.add_post("/v1/workspaces/relative/{step:e[+-]1}/select", workspace_select_relative)
     app.router.add_post("/v1/agent/tasks", agent_task)
@@ -1308,6 +2002,7 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
     app.router.add_get("/v1/agent/default/chat/commands",chat_commands)
     app.router.add_post("/v1/agent/default/chat/commands/{command}:execute",chat_command_execute)
     app.router.add_post("/v1/agent/default/chat/recover-empty",chat_recover_empty)
+    app.router.add_post("/v1/agent/default/chat:new",chat_new)
     app.router.add_post("/v1/agent/default/chat/handoff:prepare",chat_handoff_prepare)
     app.router.add_post("/v1/agent/default/chat/handoff:confirm",chat_handoff_confirm)
     app.router.add_get("/v1/agent/default/chat",chat_snapshot)
@@ -1315,6 +2010,10 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
     app.router.add_post("/v1/agent/default/chat/messages",chat_send)
     app.router.add_post("/v1/agent/default/chat/interrupt",chat_interrupt)
     app.router.add_post("/v1/agent/default/chat/steer",chat_steer)
+    app.router.add_post("/v1/agent/default/chat/mode",chat_mode)
+    app.router.add_post("/v1/agent/default/chat/queue",chat_queue_add)
+    app.router.add_post(r"/v1/agent/default/chat/queue/{queue_id}:{action:(send|edit|delete)}",chat_queue_item)
+    app.router.add_get("/v1/agent/default/chat/history",chat_history,allow_head=False)
     app.router.add_get("/v1/agent/default/chat/approvals",chat_approvals,allow_head=False)
     app.router.add_post("/v1/agent/default/chat/approvals/{request_id}",chat_approval_resolve)
     app.router.add_get("/v1/agent/default/chat/usage",chat_usage,allow_head=False)
@@ -1335,9 +2034,18 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
     app.router.add_get("/v1/remote/sessions/{id}/vnc", vnc_socket, allow_head=False)
     app.router.add_get("/v1/herdr/layout", herdr_layout, allow_head=False)
     app.router.add_get("/v1/herdr/sessions", herdr_sessions, allow_head=False)
+    app.router.add_get("/v1/herdr/operator-rows", herdr_operator_rows, allow_head=False)
     app.router.add_post("/v1/herdr/sessions/{name:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}}/select", herdr_select_session)
+    app.router.add_post("/v1/herdr/sessions/{name:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}}/start", herdr_start_session)
+    app.router.add_post("/v1/herdr/sessions", herdr_create_session)
+    app.router.add_post("/v1/herdr/sessions/{name:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}}/workspaces", herdr_create_workspace)
+    app.router.add_get("/v1/herdr/folders", herdr_folders, allow_head=False)
+    app.router.add_post("/v1/herdr/folders/favourites", herdr_folder_favourite)
+    app.router.add_get("/v1/herdr/panes/{pane}/reply", herdr_pane_reply, allow_head=False)
     app.router.add_get("/v1/herdr/panes/{pane}/{mode:observe|control}", herdr_stream, allow_head=False)
     app.router.add_post("/v1/herdr/panes/{pane}/{action:split|zoom|focus|close}", herdr_pane_action)
+    app.router.add_post("/v1/herdr/panes/{pane}/keys", herdr_pane_keys)
+    app.router.add_post("/v1/herdr/panes/{pane}/text", herdr_pane_text)
     app.router.add_post("/v1/herdr/workspaces/{id}/select", herdr_workspace_select)
     app.router.add_post("/v1/herdr/workspaces/{id}/tabs", herdr_tabs)
     app.router.add_delete("/v1/herdr/workspaces/{id}/tabs/{tab}", herdr_tabs)
@@ -1355,13 +2063,15 @@ def create_app(service: CoreService, *, auth_check_interval=1.0) -> web.Applicat
     app.router.add_get("/v1/auth/approvals", auth_approvals, allow_head=False)
     app.router.add_post("/v1/auth/approvals/{id:appr_[0-9a-f]{32}}", auth_approvals)
     app.router.add_get("/v1/preferences", preferences, allow_head=False)
+    app.router.add_post("/v1/uploads", uploads)
+    app.router.add_delete(r"/v1/uploads/{id:[0-9a-f]{32}}", upload_delete)
     app.router.add_get("/v1/clipboard", clipboard, allow_head=False)
     app.router.add_put("/v1/clipboard", clipboard)
     app.router.add_get("/v1/remote/capabilities", remote_capabilities, allow_head=False)
     app.router.add_post("/v1/remote/sessions", remote_session)
     app.router.add_get("/v1/remote/sessions/{id}", remote_session, allow_head=False)
     app.router.add_delete("/v1/remote/sessions/{id}", remote_session)
-    app.router.add_post("/v1/remote/sessions/{id}/{operation:resize|backend|heartbeat|presented}", remote_session)
+    app.router.add_post("/v1/remote/sessions/{id}/{operation:resize|backend|heartbeat|presented|text}", remote_session)
     app.router.add_get("/v1/{name}", read)
     return app
 

@@ -52,7 +52,10 @@ class APITests(unittest.IsolatedAsyncioTestCase):
             data = await response.json()
         self.assertEqual(data["service"], "omodachid")
         self.assertEqual(data["authenticated_api"], "/v1/*")
-        self.assertIn("not the Web UI", data["message"])
+        # LITE-1a: a client that is not a browser still gets the description;
+        # the Web UI it names is Odomo, served by this daemon.
+        self.assertIn("host API", data["message"])
+        self.assertEqual(data["web_ui"], "/odomo/")
 
     async def test_authenticated_resources_without_sunshine(self):
         async with self.client.get(self.url + "/v1/state") as response:

@@ -133,9 +133,45 @@ class IdentityWireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["host_id"], "9" * 32)
         self.assertEqual(body["tls_fingerprint_sha256"], "c" * 64)
         self.assertEqual(body["contract_revision"], "omodachi.v1")
-        # Health is an anchor, not authorization: it carries no device data.
-        self.assertNotIn("endpoints", body)
+        # Health is an anchor, not authorization: it carries no device data,
+        # and (TAIL-2 follow-up) not where else this host can be reached.
         self.assertNotIn("devices", body)
+        self.assertNotIn("endpoints", body)
+        self.assertNotIn("tailnet", body)
+
+    async def test_health_never_names_the_roads_even_with_tailscale_running(self):
+        self.identity.tailnet = lambda: {"running": True, "dns_name": "omarchy.tail0000.ts.net",
+                                         "ips": ["100.64.0.9"], "ssh": True}
+        async with self.http.get(self.url + "/health") as response:
+            text = await response.text()
+        for secret in ("192.168.1.10", "ts.net", "100.64.0.9", "endpoints", "tailnet"):
+            self.assertNotIn(secret, text)
+
+    async def test_roads_need_a_credential_and_carry_the_tailnet_name_while_it_runs(self):
+        async with self.http.get(self.url + "/v1/host/roads") as response:
+            self.assertEqual(response.status, 401)
+        token = self.hub.register_device("ipad")
+        headers = {"Authorization": "Bearer " + token}
+        async with self.http.get(self.url + "/v1/host/roads", headers=headers) as response:
+            self.assertEqual(response.status, 200)
+            body = await response.json()
+        self.assertEqual(body["host_id"], "9" * 32)
+        self.assertEqual(body["endpoints"], [{"host": "192.168.1.10", "port": 8099, "kind": "lan"},
+                                             {"host": "omarchy.local", "port": 8099, "kind": "mdns"}])
+        self.assertNotIn("tailnet", body)
+        reading = {"running": True, "dns_name": "omarchy.tail0000.ts.net", "ips": ["100.64.0.9"], "ssh": True}
+        self.identity.tailnet = lambda: reading
+        async with self.http.get(self.url + "/v1/host/roads", headers=headers) as response:
+            body = await response.json()
+        self.assertEqual(body["tailnet"], {"dns_name": "omarchy.tail0000.ts.net", "ips": ["100.64.0.9"]})
+        self.assertEqual([row["kind"] for row in body["endpoints"]], ["lan", "mdns", "tailnet", "tailnet"])
+        self.assertEqual(body["endpoints"][2]["host"], "omarchy.tail0000.ts.net")
+        self.assertNotIn("ssh", json.dumps(body["tailnet"]))
+        reading["running"] = False
+        async with self.http.get(self.url + "/v1/host/roads", headers=headers) as response:
+            self.assertNotIn("tailnet", await response.json())
+        async with self.http.get(self.url + "/v1/host/roads?x=1", headers=headers) as response:
+            self.assertEqual(response.status, 400)
 
     async def test_ipc_health_reports_the_same_identity(self):
         self.assertEqual(self.hub.dispatch("health", {})["tls_fingerprint_sha256"], "c" * 64)
@@ -159,8 +195,26 @@ class IdentityWireTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(claimed["tls_fingerprint_sha256"], "c" * 64)
         self.assertEqual(claimed["host_id"], "9" * 32)
         self.assertEqual(claimed["host_name"], "omarchy")
-        self.assertEqual(claimed["endpoints"], [{"host": "192.168.1.10", "port": 8099}])
+        self.assertEqual(claimed["endpoints"], [{"host": "192.168.1.10", "port": 8099, "kind": "lan"},
+                                                {"host": "omarchy.local", "port": 8099, "kind": "mdns"}])
         self.assertEqual(self.hub.authenticate(claimed["credential"]), "ipad")
+        # TAIL-2 P0-4: the old `host` for old clients, typed `hosts` for new.
+        self.assertEqual(claimed["ssh"]["host"], "192.168.1.10")
+        self.assertEqual(claimed["ssh"]["hosts"], [{"host": "192.168.1.10", "kind": "lan"},
+                                                   {"host": "omarchy.local", "kind": "mdns"}])
+        self.assertFalse(claimed["ssh"]["tailscale_ssh"])
+        # P1-6: the request came over loopback here, and says so.
+        self.assertEqual(claimed["via"], {"kind": "loopback", "peer_name": None, "login": None})
+
+    async def test_the_ssh_target_follows_tailscale_ssh_and_the_tailnet_name(self):
+        self.identity.tailnet = lambda: {"running": True, "dns_name": "omarchy.tail0000.ts.net",
+                                         "ips": ["100.64.0.9"], "ssh": True}
+        target = self.service.ssh_target()
+        self.assertEqual(target["host"], "192.168.1.10")
+        self.assertIn({"host": "omarchy.tail0000.ts.net", "kind": "tailnet"}, target["hosts"])
+        self.assertTrue(target["tailscale_ssh"])
+        self.identity.tailnet = lambda: {"running": False, "ssh": True}
+        self.assertFalse(self.service.ssh_target()["tailscale_ssh"])
 
     async def test_a_daemon_without_an_installed_identity_reports_unknown(self):
         self.service.host_identity = None

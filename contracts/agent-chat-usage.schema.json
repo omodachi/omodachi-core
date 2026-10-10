@@ -36,6 +36,14 @@
             "string",
             "null"
           ]
+        },
+        "mode": {
+          "description": "AGENT-PLAN-1: the thread's codex collaboration mode (`thread/resume` and `thread/settings/updated`), null until codex has said. Changed with `POST /v1/agent/default/chat/mode` or `/plan`; an older client ignores it.",
+          "enum": [
+            "default",
+            "plan",
+            null
+          ]
         }
       },
       "required": [

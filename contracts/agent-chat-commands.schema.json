@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-commands.schema.json",
+  "title": "The reviewed slash command catalog",
+  "description": "`GET /v1/agent/default/chat/commands`: codex 0.154's own slash commands (less the three it marks developer-only), each `available` here or not. AGENT-NEW-1: an unavailable one names a `reason_code` the clients say as one sentence in the reader's language, with `reason` the same in English; `execution: native` opens the client's own UI (`model`, `new`, `clear`, `copy`, `export`).",
+  "type": "object",
+  "required": ["contract_revision", "revision", "provider", "provider_version", "commands"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "revision": {"type": "string"},
+    "provider": {"const": "codex"},
+    "provider_version": {"type": "string"},
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "aliases", "description", "argument_hint", "execution", "available", "reason",
+                     "reason_code", "turn_policy", "coverage"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "aliases": {"type": "array", "items": {"type": "string"}},
+          "description": {"type": "string"},
+          "argument_hint": {"type": "string"},
+          "execution": {"enum": ["rpc", "native", "unsupported"]},
+          "available": {"type": "boolean"},
+          "reason": {"type": ["string", "null"]},
+          "reason_code": {"enum": ["command_terminal_only", "command_settings_on_computer",
+                                   "command_sessions_on_computer", "command_not_on_phone_yet", null]},
+          "turn_policy": {"enum": ["allowed", "idle_required"]},
+          "coverage": {"type": "string"}
+        }
+      }
+    }
+  }
+}

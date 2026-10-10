@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/push-unsubscribe.schema.json",
+  "title": "LITE-1b removing a web device's push subscription",
+  "description": "DELETE /v1/push/subscriptions, web credential only: this device's subscription, if it had one. Its preferences stay.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "device_id",
+    "removed"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "removed": {
+      "type": "boolean"
+    }
+  }
+}

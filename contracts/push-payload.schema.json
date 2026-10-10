@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/push-payload.schema.json",
+  "title": "LITE-1b what a push carries (the decrypted message)",
+  "description": "Either a declarative Web Push message (WebKit, iOS 18.4+: shown by the system without running script; every other browser hands it to the service worker, which shows it) or, never to an Apple endpoint, a retraction that closes the notifications with that tag. At most 2700 bytes. `navigate` is a URL on this host's own Odomo carrying ids only - no credential, no question text. NOTIFY-2: it also carries `host`, this computer's host id (32 hex), so Odomo can hand the same place to the App (`/open/agent?host=`, `/open/herdr?host=&session=&pane=`).",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "web_push",
+        "notification"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "web_push": {
+          "const": 8030
+        },
+        "notification": {
+          "type": "object",
+          "required": [
+            "title",
+            "body",
+            "navigate",
+            "tag",
+            "lang",
+            "dir"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "body": {
+              "type": "string",
+              "maxLength": 160
+            },
+            "navigate": {
+              "type": "string",
+              "pattern": "^https://[a-z0-9.-]+(:[0-9]{1,5})?/odomo/\\?open=(agent|herdr|notifications)(&[a-z]{1,16}=[A-Za-z0-9_.:%-]{1,256}){0,4}$",
+              "maxLength": 1024
+            },
+            "tag": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,32}$"
+            },
+            "lang": {
+              "enum": [
+                "en",
+                "zh-Hans"
+              ]
+            },
+            "dir": {
+              "const": "ltr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "omodachi",
+        "tag"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "omodachi": {
+          "const": "retract"
+        },
+        "tag": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,32}$"
+        }
+      }
+    }
+  ]
+}

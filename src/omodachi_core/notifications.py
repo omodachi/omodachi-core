@@ -16,6 +16,18 @@ Two things follow from how the shell keeps it:
   remote request. A client sees `has_action` and nothing else; invoking maps
   onto the shell's own `invokeLast`, which is the same thing `SUPER+ALT+,`
   already does on the host.
+
+NOTIFY-3. The Omodachi plugin posts one notification per pairing request and
+per SSH-key request (`omarchy-notification-send --app-name Omodachi -u critical
+... --exec omarchy-shell shell summon com.omodachi.host {"view": "devices",
+...}`). The shell never expires a critical toast, and nothing took these down
+once the request was decided, so they stayed on the desktop - and in every
+client's list - for good. The mirror now recognises its own (the app name *and*
+the plugin's summon command, see `request_marker`), asks core which requests are
+still waiting, and withdraws the rest: they leave every client's list at once
+(`notification.updated` with `withdrawn: true`), the toast is taken off the
+desktop through the shell's own `dismiss`, and the file the shell keeps of it
+is removed. Nothing that is not ours is ever matched, dismissed or deleted.
 """
 from __future__ import annotations
 
@@ -48,6 +60,22 @@ DND_FILE_LIMIT = 64 * 1024
 # CORE-2 §3: `qs` is a Qt program; under LANG=C it logs four lines of "Detected
 # locale C ... switched to C.UTF-8" into the user journal on every spawn.
 UTF8_LOCALE = "C.UTF-8"
+
+# NOTIFY-3: what makes a notification ours. The plugin posts with this app name
+# and a click command that summons this plugin's Devices view; a pairing
+# request names its request id there. An SSH-key request names no request, so
+# it is known by its title and the device id its body starts with.
+OUR_APP = "Omodachi"
+PLUGIN_ID = "com.omodachi.host"
+SUMMON = ["omarchy-shell", "shell", "summon", PLUGIN_ID]
+REQUEST_ID = re.compile(r"pair_[0-9a-f]{32}\Z")
+DEVICE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+SSH_TITLE_END = "\u201d wants an SSH login"
+KINDS = ("pairing_request", "ssh_request")
+# How long a shell `dismiss` that answered "ok" may take to move the file
+# before the file is removed by hand instead.
+WITHDRAW_GRACE_SECONDS = 4.0
+WITHDRAWN_LIMIT = 2000
 
 
 def read_dnd_file(path: Path):
@@ -85,19 +113,68 @@ def _text(value, limit=MAX_TEXT):
     return value[:limit] if isinstance(value, str) else ""
 
 
+def request_marker(document: dict):
+    """NOTIFY-3. Which Omodachi request this notification announces, or None.
+
+    Both halves must hold: the app name is ours *and* the stored click command
+    is exactly the plugin's summon of its Devices view. A notification any other
+    sender posts - even one calling itself "Omodachi" - is never a marker, so
+    nothing here can withdraw it.
+    """
+    if not isinstance(document, dict) or document.get("app") != OUR_APP:
+        return None
+    raw = document.get("execArgv")
+    if not isinstance(raw, str) or len(raw) > 4096:
+        return None
+    try:
+        argv = json.loads(raw)
+    except ValueError:
+        return None
+    if not (isinstance(argv, list) and len(argv) == 5 and all(isinstance(item, str) for item in argv)
+            and argv[:4] == SUMMON):
+        return None
+    try:
+        payload = json.loads(argv[4])
+    except ValueError:
+        return None
+    if not isinstance(payload, dict) or payload.get("view") != "devices":
+        return None
+    request = payload.get("request_id")
+    if set(payload) == {"view", "request_id"} and isinstance(request, str) and REQUEST_ID.fullmatch(request):
+        return {"kind": "pairing_request", "request_id": request}
+    if set(payload) == {"view"}:
+        summary, body = document.get("summary"), document.get("body")
+        if isinstance(summary, str) and summary.endswith(SSH_TITLE_END) and isinstance(body, str):
+            device = body.split(" \u00b7 ", 1)[0]
+            if DEVICE_ID.fullmatch(device):
+                return {"kind": "ssh_request", "device_id": device}
+    return None
+
+
+def still_waiting(marker: dict, pending: dict) -> bool:
+    if marker["kind"] == "pairing_request":
+        return marker["request_id"] in pending.get("pair", ())
+    return marker["device_id"] in pending.get("ssh", ())
+
+
 def project(identifier: str, document: dict, *, active: bool) -> dict:
-    """The wire row. `execArgv` is read only to answer "is there an action"."""
+    """The wire row. `execArgv` is read only to answer "is there an action"
+    and, for Omodachi's own requests, which kind of request it is (NOTIFY-3)."""
     urgency = document.get("urgency")
     timestamp = document.get("timestamp")
-    return {"id": identifier,
-            "app": _text(document.get("app"), 200) or "unknown",
-            "summary": _text(document.get("summary")),
-            "body": _text(document.get("body")),
-            "glyph": _text(document.get("glyph"), 64),
-            "urgency": URGENCIES.get(urgency if type(urgency) is int else 1, "normal"),
-            "timestamp": timestamp if type(timestamp) is int else 0,
-            "has_action": bool(document.get("execArgv")),
-            "active": active}
+    row = {"id": identifier,
+           "app": _text(document.get("app"), 200) or "unknown",
+           "summary": _text(document.get("summary")),
+           "body": _text(document.get("body")),
+           "glyph": _text(document.get("glyph"), 64),
+           "urgency": URGENCIES.get(urgency if type(urgency) is int else 1, "normal"),
+           "timestamp": timestamp if type(timestamp) is int else 0,
+           "has_action": bool(document.get("execArgv")),
+           "active": active}
+    marker = request_marker(document)
+    if marker is not None:
+        row["kind"] = marker["kind"]
+    return row
 
 
 def _shell(arguments, *, runner=None, timeout=5.0):
@@ -115,11 +192,19 @@ def _shell(arguments, *, runner=None, timeout=5.0):
     return (result.stdout or "").strip()
 
 
+def journal_line(entry):
+    """One JSON line on stdout, which systemd keeps (the `_ssh_journal` shape)."""
+    try:
+        print(json.dumps({"omodachi": "notifications", **entry}, separators=(",", ":"), default=str), flush=True)
+    except (OSError, ValueError):
+        pass
+
+
 class NotificationMirror:
     """Watches the two directories and publishes what appears in them."""
 
     def __init__(self, hub=None, *, state_dir=None, runner=None, poll_seconds=POLL_SECONDS,
-                 clock=time.monotonic):
+                 clock=time.monotonic, pending_requests=None, journal=None):
         self.hub = hub
         self.state_dir = Path(state_dir) if state_dir is not None else STATE_DIR
         self.history_dir = self.state_dir / "history"
@@ -151,6 +236,36 @@ class NotificationMirror:
         self._thread = None
         self._stop = threading.Event()
         self._started = False
+        # LITE-1b. How the watch thread hands an event to the hub: None calls
+        # it right here (tests, the IPC-only daemon); the HTTPS daemon sets it
+        # to its loop's `call_soon_threadsafe`, so the hub - whose subscriber
+        # queues belong to that loop - is only ever touched on it.
+        self.dispatch = None
+        # NOTIFY-3. `pending_requests()` answers which of Omodachi's own
+        # requests are still waiting: `{"pair": {request_id}, "ssh":
+        # {device_id}}`, or None when core cannot tell - and then nothing is
+        # withdrawn, because a request nobody can see is not a decided one.
+        self.pending_requests = pending_requests
+        # Where a withdrawal is recorded: the daemon passes `journal_line`.
+        self.journal = journal or (lambda entry: None)
+        # Ours, decided, and not yet gone from the shell's files: identifier ->
+        # {"summary", "dismissed_at"}. Rows here never reach a client again.
+        self._withdrawn: dict[str, dict] = {}
+
+    def _emit(self, function, *arguments):
+        if self.hub is None:
+            return
+        dispatch = self.dispatch
+        if dispatch is None:
+            function(*arguments)
+            return
+        try:
+            dispatch(function, *arguments)
+        except RuntimeError:
+            pass  # the loop is closing; the next scan sees the same files
+
+    def _publish(self, event_type, payload):
+        self.hub.publish(event_type, payload)
 
     # --- reading -------------------------------------------------------------
     def _read_file(self, path: Path):
@@ -161,6 +276,16 @@ class NotificationMirror:
         except (OSError, ValueError):
             return None
         return document if isinstance(document, dict) else None
+
+    def _pending(self):
+        source = self.pending_requests
+        if source is None:
+            return None
+        try:
+            value = source()
+        except Exception:
+            return None
+        return value if isinstance(value, dict) else None
 
     def scan(self) -> list[dict]:
         """One pass over both directories; returns the rows that are new here."""
@@ -178,30 +303,164 @@ class NotificationMirror:
                 document = self._read_file(directory / name)
                 if document is None:
                     continue
-                found.append(project(identifier, document, active=active))
-        fresh = []
+                found.append((project(identifier, document, active=active), request_marker(document)))
+        # NOTIFY-3: which of our own requests have been decided (approved,
+        # rejected, expired, replaced by a retry, the device revoked - or the
+        # daemon restarted and the request is simply not there any more). Only
+        # asked when one of ours is on disk at all.
+        stale = set()
+        if any(marker is not None for _, marker in found):
+            pending = self._pending()
+            if pending is not None:
+                stale = {row["id"] for row, marker in found
+                         if marker is not None and not still_waiting(marker, pending)}
+        fresh, ended, withdrawn = [], [], []
         with self._lock:
-            for row in found:
-                previous = self._rows.get(row["id"])
+            on_disk = {row["id"] for row, _ in found}
+            for identifier in [key for key in self._withdrawn if key not in on_disk]:
+                del self._withdrawn[identifier]  # the shell's files no longer hold it
+            for row, _ in found:
+                identifier = row["id"]
+                if identifier in stale or identifier in self._withdrawn:
+                    if identifier not in self._withdrawn:
+                        self._withdrawn[identifier] = {"summary": row["summary"], "dismissed_at": None}
+                        while len(self._withdrawn) > WITHDRAWN_LIMIT:
+                            self._withdrawn.pop(next(iter(self._withdrawn)))
+                    previous = self._rows.pop(identifier, None)
+                    if previous is not None:
+                        self._order.remove(identifier)
+                        withdrawn.append({**previous, "active": False, "withdrawn": True})
+                    continue
+                previous = self._rows.get(identifier)
                 if previous is None:
-                    self._rows[row["id"]] = row
-                    self._order.append(row["id"])
+                    self._rows[identifier] = row
+                    self._order.append(identifier)
                     fresh.append(row)
                 elif previous["active"] and not row["active"]:
                     previous["active"] = False
+                    ended.append(dict(previous))
             # An active file that vanished between passes has been dismissed.
-            live = {row["id"] for row in found if row["active"]}
+            live = {row["id"] for row, _ in found if row["active"]}
             for identifier in self._order:
                 stored = self._rows[identifier]
                 if stored["active"] and identifier not in live:
                     stored["active"] = False
+                    ended.append(dict(stored))
             while len(self._order) > HISTORY_LIMIT:
                 self._rows.pop(self._order.pop(0), None)
         for row in fresh:
-            if self.hub is not None:
-                self.hub.publish("notification.posted", dict(row))
+            self._emit(self._publish, "notification.posted", dict(row))
+        # LITE-1b (NEXT-1 §6.1): a toast that left the screen - dismissed on
+        # the desktop, by a client, or timed out into history - says so, so
+        # every client's list moves with it. `notification.updated`, not a
+        # second `notification.posted`: the App toasts on `posted`.
+        for row in ended:
+            self._emit(self._publish, "notification.updated", row)
+        # NOTIFY-3: a decided request leaves every list - not "history", gone.
+        for row in withdrawn:
+            self.journal({"event": "notification.withdrawn", "id": row["id"], "kind": row.get("kind")})
+            self._emit(self._publish, "notification.updated", row)
         self.refresh_dnd()
         return fresh
+
+    # --- NOTIFY-3: withdrawing what was decided ------------------------------
+    def withdraw_stale(self) -> list[tuple[str, str]]:
+        """Take our decided requests off the desktop and out of the shell's files.
+
+        Runs on the watch thread after each pass, never on a request path. For
+        every withdrawn identifier still on disk, the file is read again and
+        must still be ours (`request_marker`) before anything is done to it:
+
+        - **On screen:** the shell's own `dismiss <title>` - the only way to take
+          a toast off the desktop from outside. It matches titles by substring,
+          so it is only sent when no other toast on screen contains the title.
+          When the other one is *ours and still waiting* (the same device asked
+          again: same title), this one waits and goes with it. When it is
+          anybody else's, the shell is not asked at all.
+        - **Fallback - remove our own file:** when the shell is not answering,
+          says it has no such toast, has not moved the file within
+          `WITHDRAW_GRACE_SECONDS`, or a stranger shares the title. Safe for
+          the shell: the file is only its restart backstop, a later archive of
+          it is `mv ... || exit 0`, and nothing else reads it. Not complete: a
+          toast that is still drawn stays drawn until it is clicked or the
+          shell restarts (it is gone from every client and is not restored).
+        - **In history:** our file is removed. A replayed history would
+          otherwise show the request again - as a critical toast that never
+          expires.
+        """
+        with self._lock:
+            targets = {key: dict(value) for key, value in self._withdrawn.items()}
+        if not targets:
+            return []
+        documents, others = {}, []
+        for directory, active in ((self.state_dir, True), (self.history_dir, False)):
+            try:
+                names = sorted(os.listdir(directory))
+            except OSError:
+                continue
+            for name in names:
+                if FILE_NAME.fullmatch(name) is None:
+                    continue
+                identifier = name[:-5]
+                if identifier not in targets and not active:
+                    continue
+                document = self._read_file(directory / name)
+                if document is None:
+                    continue
+                marker = request_marker(document)
+                if identifier in targets:
+                    if marker is not None:
+                        documents[identifier] = (directory / name, document, active)
+                else:
+                    others.append((_text(document.get("summary")), marker))
+        actions, dismissed = [], []
+        titles: dict[str, list[str]] = {}
+        for identifier, (path, document, active) in documents.items():
+            if active:
+                titles.setdefault(_text(document.get("summary")), []).append(identifier)
+            elif self._remove(path):
+                actions.append((identifier, "history_removed"))
+        now = self.clock()
+        for title, identifiers in titles.items():
+            sharing = [marker for text, marker in others if title and title in text]
+            if sharing and all(marker is not None for marker in sharing):
+                actions.extend((identifier, "deferred") for identifier in identifiers)
+                continue
+            if title and not sharing:
+                asked = [targets[identifier]["dismissed_at"] for identifier in identifiers]
+                if any(at is None for at in asked):
+                    try:
+                        result = _shell(("dismiss", title), runner=self.runner)
+                    except NotificationsUnavailable:
+                        result = "unavailable"
+                    if result == "ok":
+                        dismissed.extend(identifiers)
+                        actions.extend((identifier, "dismissed") for identifier in identifiers)
+                        continue
+                elif now - max(at for at in asked if at is not None) < WITHDRAW_GRACE_SECONDS:
+                    continue
+            for identifier in identifiers:
+                if self._remove(documents[identifier][0]):
+                    actions.append((identifier, "file_removed"))
+        if dismissed:
+            with self._lock:
+                for identifier in dismissed:
+                    if identifier in self._withdrawn:
+                        self._withdrawn[identifier]["dismissed_at"] = now
+        for identifier, how in actions:
+            if how != "deferred":
+                self.journal({"event": "notification.withdraw", "id": identifier, "how": how})
+        return actions
+
+    @staticmethod
+    def _remove(path: Path) -> bool:
+        try:
+            path.unlink()
+            return True
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return False
 
     # --- do not disturb ------------------------------------------------------
     def refresh_dnd(self, *, force=False):
@@ -239,6 +498,12 @@ class NotificationMirror:
         self._dnd = value
         if self.hub is None:
             return
+        if self.dispatch is not None:
+            self._emit(self._publish_dnd, value)
+            return
+        self._publish_dnd(value)
+
+    def _publish_dnd(self, value) -> None:
         current = (self.hub.state_view("notifications")["notifications"] or {}).get("dnd")
         if current == value:
             return
@@ -296,10 +561,14 @@ class NotificationMirror:
         else:
             raise NotificationsUnavailable("invalid_request", 400)
         if result == "ok":
+            ended = None
             with self._lock:
                 stored = self._rows.get(identifier)
-                if stored is not None:
+                if stored is not None and stored["active"]:
                     stored["active"] = False
+                    ended = dict(stored)
+            if ended is not None:
+                self._emit(self._publish, "notification.updated", ended)
         return {"id": identifier, "action": action, "result": result}
 
     def dnd(self) -> dict:
@@ -370,6 +639,10 @@ class NotificationMirror:
             while not self._stop.is_set():
                 try:
                     self.scan()
+                except Exception:
+                    pass
+                try:
+                    self.withdraw_stale()
                 except Exception:
                     pass
                 if fd is None:

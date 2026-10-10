@@ -7,6 +7,9 @@ running. The event loop alone publishes hub state and events.
 from __future__ import annotations
 
 import asyncio
+import collections
+import hashlib
+import re
 
 from ..audio_uplink import AudioUplinkError, AudioUplinkManager
 from .errors import RemoteError
@@ -34,12 +37,22 @@ RECONCILE_INTERVAL = 2.0
 # far more often than this, and a user who has just logged in waits at most
 # this long for Remote to come back by itself.
 MANAGER_RETRY_INTERVAL = 15.0
+# REMOTE-INPUT-2. A compose-field send id (the app's UUID, or any token of this
+# shape), and how many recent sends are remembered so a retry types nothing.
+SEND_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
+SEND_MEMORY = 64
 
 
 class RemoteService:
     def __init__(self, hub, *, manager=None, manager_factory=None, audio_session_factory=None,
-                 unavailable_reason="remote_runtime_unavailable"):
+                 unavailable_reason="remote_runtime_unavailable", host_text=None):
         self.hub, self.manager = hub, manager
+        # REMOTE-INPUT-1. Text the app has no key for (`remote.text`).
+        self._host_text = host_text
+        # REMOTE-INPUT-2. One press of Send in the app's compose field is typed
+        # once: `(device, session, send id)` -> the first answer, so a retry
+        # after a lost reply returns it instead of typing the text again.
+        self._text_sends: "collections.OrderedDict[tuple, dict]" = collections.OrderedDict()
         self.unavailable_reason = unavailable_reason
         # INSTALL-1 §1.3. The manager is built once at startup and used to stay
         # None for the life of the daemon when that failed. It fails for one
@@ -336,6 +349,7 @@ class RemoteService:
                                   "encoder_limits": None}
         else:
             self._capabilities = await self._job(self.manager.capabilities)
+            self._capabilities = {**self._capabilities, "text_input": await self._text_input()}
         available = any(row.get("available") for row in self._capabilities["backends"].values())
         current = self.hub.capabilities_snapshot()
         patch = {"desktop": available, "remote_backends": self._capabilities["backends"]}
@@ -400,15 +414,181 @@ class RemoteService:
         self._owned(device, session_id)
         return manager.presented(session_id, payload)
 
-    async def release(self, device, session_id):
+    # --- text (REMOTE-INPUT-1) --------------------------------------------
+
+    @property
+    def host_text(self):
+        if self._host_text is None:
+            from .text import HostText
+            self._host_text = HostText()
+        return self._host_text
+
+    async def _text_input(self):
+        """What a client needs to type here: whether `remote.text` can work,
+        and the keymap its key positions will be read through."""
+        from .text import LIMITS
+        # REMOTE-INPUT-2: the limits are published so the app can show a draft
+        # that is too long before Send; `compose` says this host takes a whole
+        # draft (line breaks and a send id) in one request.
+        reading = {"available": False, "layout": None, "variant": None, **LIMITS, "compose": True}
+        try:
+            reading["available"] = bool(await asyncio.to_thread(self.host_text.available))
+        except Exception:
+            reading["available"] = False
+        hyprland = getattr(self.manager, "hyprland", None)
+        reader = getattr(hyprland, "keyboard_layout", None)
+        if reader is not None:
+            try:
+                layout = await asyncio.to_thread(reader)
+                reading["layout"] = layout.get("layout") or None
+                reading["variant"] = layout.get("variant") or None
+            except Exception:
+                # A capabilities read never fails because the keymap could
+                # not be read; `null` says "unknown" and the app treats it
+                # as US, which is what it did before there was a reading.
+                pass
+        return reading
+
+    async def text(self, device, session_id, payload):
+        """Type text no key produces into the focused host window.
+
+        Only the device that holds the session, only while it is live, and
+        never the text back: the answer is a count.
+        """
+        manager = self._require()
+        if not isinstance(payload, dict) or "text" not in payload or not set(payload) <= {"text", "id"}:
+            raise RemoteError("invalid_request", 400)
+        send_id = payload.get("id")
+        if send_id is not None and (not isinstance(send_id, str) or not SEND_ID.fullmatch(send_id)):
+            raise RemoteError("invalid_request", 400)
+        from .text import validate_text
+        text = validate_text(payload["text"])
+        if send_id is None:
+            session = self._owned(device, session_id)
+            self._require_live(manager, session, device)
+            return await asyncio.to_thread(self.host_text.type, text)
+        return await self._send_once((device, session_id, send_id), text, manager, device)
+
+    def _require_live(self, manager, session, device):
+        if session.state != "ready" or manager.current() is not session:
+            raise RemoteError("session_not_ready", 409, state=session.state)
+        self._remote_allowed(device)
+
+    async def _send_once(self, key, text, manager, device):
+        """REMOTE-INPUT-2. Type a compose-field send at most once.
+
+        The same id again — the app retrying after its reply was lost — waits
+        for the first attempt if it is still typing and then answers what it
+        answered, with `replayed: true`; nothing is typed a second time. The
+        same id with different text is a client bug and is refused. Only an
+        attempt that reached `wtype` is remembered: a refusal before it (the
+        session mid-resize, no `wtype`) typed nothing, so a retry may type.
+        The memory is per device and session, and it is consulted before the
+        session is looked up, so a send that was typed just before its session
+        ended still answers "typed" to its retry rather than "not found".
+        """
+        digest = hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+        entry = self._text_sends.get(key)
+        if entry is not None:
+            if entry["digest"] != digest:
+                raise RemoteError("invalid_request", 400)
+            outcome = await asyncio.shield(entry["outcome"])
+            if isinstance(outcome, RemoteError):
+                raise outcome
+            return {**outcome, "replayed": True}
+        session = self._owned(device, key[1])
+        self._require_live(manager, session, device)
+        outcome = asyncio.get_running_loop().create_future()
+        self._text_sends[key] = {"digest": digest, "outcome": outcome}
+        while len(self._text_sends) > SEND_MEMORY:
+            self._text_sends.popitem(last=False)
+        # The typing runs to its end whatever happens to this request: an app
+        # that gave up waiting (its reply lost on a reconnect) retries with the
+        # same id and must learn what `wtype` actually did.
+        job = asyncio.ensure_future(asyncio.to_thread(self.host_text.type, text))
+
+        def settle(task):
+            error = RemoteError("remote_text_failed", 503) if task.cancelled() else task.exception()
+            if error is None:
+                outcome.set_result(task.result())
+                return
+            if not isinstance(error, RemoteError):
+                # Not knowing is not "nothing was typed": the id stays spent.
+                error = RemoteError("remote_text_failed", 503)
+            elif error.code != "remote_text_failed" and self._text_sends.get(key, {}).get("outcome") is outcome:
+                # Refused before `wtype` ran (no `wtype`, no graphical
+                # session): nothing was typed, so the id is free again.
+                self._text_sends.pop(key, None)
+            outcome.set_result(error)
+
+        job.add_done_callback(settle)
+        result = await asyncio.shield(outcome)
+        if isinstance(result, RemoteError):
+            raise result
+        return result
+
+    async def release(self, device, session_id, *, local_owner=False):
+        """End a session through the one restore path.
+
+        REMOTE-STOP-1. Who may end it:
+
+        * a paired device: only its own session (`permission_denied` for
+          anyone else's) - unchanged, on every transport;
+        * the local owner (`local_owner=True`): any session, whoever holds it.
+          That is the desktop user's own processes and nothing else - the
+          panel's credential or the CLI, both over the verified same-UID Unix
+          socket (`CoreService.dispatch_remote_async`, `stop_as_owner`). The
+          device that held the session is told `reason: "ended_on_computer"`;
+        * `device=None`: this daemon itself, on the owner's behalf (a revoke
+          taking the revoked device's session with it). Reason unchanged.
+
+        The journal line says which of the three it was, and never more than
+        the session id, its owner's device id, the mode and the reason.
+        """
         manager = self._require()
         session = manager.session
-        if session is not None and session.id == session_id and device is not None and session.device_id != device:
+        holder = session.device_id if session is not None and session.id == session_id else None
+        if not local_owner and holder is not None and device is not None and holder != device:
             raise RemoteError("permission_denied", 403)
-        result = await self._job(lambda: manager.release(session_id))
+        if local_owner:
+            reason, ended_by = "ended_on_computer", "local_owner"
+        else:
+            reason, ended_by = "released", ("local_owner" if device is None else device)
+        result = await self._job(lambda: manager.release(session_id, reason, ended_by=ended_by))
         await self.refresh_bar()
         self._sync_state()
         return result
+
+    async def stop_as_owner(self, *, session_id=None, every=False):
+        """REMOTE-STOP-1: the local owner ends a session, or every session.
+
+        Reached only through `local.remote.stop` on the verified same-UID Unix
+        socket (`omodachi-host remote stop`, the panel's End Remote session).
+        No session named and none live is `session_not_found`, so a bare
+        `remote stop` says so instead of guessing; `every` with none live is
+        simply nothing to do, which is what a key bound to it must answer. A
+        host has at most one session, so "every" is that one - the word is
+        the caller's promise not to care which.
+        """
+        await self.ensure_manager()
+        if self.manager is None and every and session_id is None:
+            return {"released": True, "errors": [], "sessions": [], "ended_by": "local_owner"}
+        manager = self._require()
+        if session_id is not None:
+            targets = [manager.get(session_id)]  # session_not_found for an id this host never had
+        else:
+            live = manager.current()
+            if live is None and not every:
+                raise RemoteError("session_not_found", 404)
+            targets = [live] if live is not None else []
+        rows = []
+        for session in targets:
+            row = {"session_id": session.id, "owner_device_id": session.device_id, "mode": session.mode}
+            row.update(await self.release(None, session.id, local_owner=True))
+            rows.append(row)
+        errors = [error for row in rows for error in row.get("errors", [])]
+        return {"released": all(row.get("released") for row in rows), "errors": errors,
+                "sessions": rows, "ended_by": "local_owner"}
 
     async def recover(self, *, orphans=False):
         """`orphans` is the operator's explicit say-so (CORE-2 §2); startup never passes it."""

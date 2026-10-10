@@ -2337,5 +2337,14 @@
   },
   "device_id": "device-fixture-redacted",
   "event_cursor": 11,
-  "instance_id": "daemon-instance-fixture"
+  "instance_id": "daemon-instance-fixture",
+  "overview": {
+    "rows": [],
+    "counts": {
+      "needs_you": 0,
+      "working": 0,
+      "done": 0
+    },
+    "sessions": []
+  }
 }

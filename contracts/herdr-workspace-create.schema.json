@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/herdr-workspace-create.schema.json",
+  "title": "Herdr workspace created",
+  "description": "HERDR-6: the reply to `POST /v1/herdr/sessions/{name}/workspaces {cwd, name?}`. A running session the host lists gets a new workspace, made as `herdr --session <name> workspace create --cwd <folder> [--label <name>] --no-focus`, so the computer's screen stays where it is (only a session with no workspace at all has Herdr focus its first). `cwd` was resolved and checked first: inside $HOME, not a private place, an existing folder. The session is now this device's selection; `workspace.pane` is the new workspace's first pane, which the client shows in its own view. `workspace.cwd` is where Herdr opened the shell. Native and web credentials. HERDR-11: the request may leave `cwd` out or empty (the home folder) and may name `launch`, a command that must equal one of `GET /v1/herdr/folders`'s `launchers` exactly (else `400 herdr_launch_not_allowed`, before anything is made). Then `launch` says whether it was typed into the new root pane - the text, then Enter, once the shell drew its prompt (`drawn`) or after four seconds - and nothing else is ever typed there. A launch that could not be typed leaves the workspace standing (`sent: false`, `reason`).",
+  "type": "object",
+  "required": ["contract_revision", "selected", "owned", "scope", "workspace"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "selected": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+    "owned": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+    "scope": {"enum": ["device", "host"]},
+    "launch": {
+      "type": "object",
+      "required": ["command", "pane", "sent", "drawn", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "command": {"type": "string", "minLength": 1, "maxLength": 200},
+        "pane": {"type": ["string", "null"], "pattern": "^w[0-9]{1,9}:p[0-9]{1,9}$"},
+        "sent": {"type": "boolean"},
+        "drawn": {"type": "boolean"},
+        "reason": {"type": ["string", "null"], "pattern": "^[a-z_]{1,64}$"}
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["id", "label", "number", "focused", "pane", "cwd", "display"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^w[0-9]{1,9}$"},
+        "label": {"type": ["string", "null"], "maxLength": 256},
+        "number": {"type": ["integer", "null"], "minimum": 0},
+        "focused": {"type": "boolean"},
+        "pane": {"type": ["string", "null"], "pattern": "^w[0-9]{1,9}:p[0-9]{1,9}$"},
+        "cwd": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "display": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    }
+  }
+}

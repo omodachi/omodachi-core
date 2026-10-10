@@ -202,6 +202,82 @@
     "bar_occlusion": {
       "description": "REMOTE-SAFE-1. True when this host accepts `bar_occlusion_points` on remote.create / remote.resize. A client sends the field only when this is true.",
       "type": "boolean"
+    },
+    "road": {
+      "description": "TAIL-2 P2-2: how the requesting device reaches this host. `relayed` is true when Tailscale has no direct path to that peer and carries it over a DERP relay (TAIL-1 §5.4: VNC ~2.8 MiB/s with 1-2 s of lag there), false on a direct path, null when unknown or not on the tailnet. When it is true and VNC is available, `default_backend` is `vnc` and `reason` is `tailnet_relayed`. Present on the HTTPS answer; the local IPC answer has no road.",
+      "type": "object",
+      "required": [
+        "kind",
+        "relayed",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "lan",
+            "tailnet",
+            "loopback",
+            "other"
+          ]
+        },
+        "relayed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "tailnet_relayed",
+            null
+          ]
+        }
+      }
+    },
+    "text_input": {
+      "description": "REMOTE-INPUT-1. How a client types on this host. The app sends US-ASCII as key positions down the stream; `layout`/`variant` are Hyprland's `input:kb_layout`/`input:kb_variant` (null when unset or unreadable), the keymap those positions are read through. `available` is whether `POST /v1/remote/sessions/{id}/text` can type here (`wtype` is installed). Absent on a host from before REMOTE-INPUT-1, and on a host with no Remote runtime. REMOTE-INPUT-2: `max_chars`/`max_bytes` are the text route's limits (a draft over them is refused, never truncated), published so the app shows a draft that is too long before Send; `compose: true` says the route takes a whole compose-field draft in one request - line breaks and tabs (typed by `wtype` as Return and Tab) and an `id` that makes a retry type nothing. Hosts from before REMOTE-INPUT-2 leave all three out.",
+      "type": "object",
+      "properties": {
+        "available": {
+          "type": "boolean"
+        },
+        "layout": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "variant": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64
+        },
+        "max_chars": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "compose": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "available",
+        "layout",
+        "variant"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [

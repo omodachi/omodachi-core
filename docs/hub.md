@@ -79,6 +79,14 @@ future cursors, or a previous process identity require resync. WSS sends a full
 snapshot on initial connection or when the process identity differs. A client
 must install the snapshot and cursor together before applying later events.
 
+Liveness (TAIL-2): `/v1/events` pings the client every 20 s and closes a socket
+whose pong does not come back, and it answers the client's own pings. The
+stream can be silent for minutes, so a client cannot tell a quiet host from a
+dead path by waiting for events: TAIL-1 watched an app say Connected for six
+minutes over a tailnet that was down. A client pings (the iOS app every 15 s),
+treats a missing pong (10 s) or 45 s without any frame as a dead socket, says
+so, reconnects with its backoff and re-reads what it may have missed.
+
 `catalog.changed` is shaped as:
 
 ```json

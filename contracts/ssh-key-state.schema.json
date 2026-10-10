@@ -27,7 +27,8 @@
       "maxItems": 64,
       "description": "Every owned line for this device, oldest first. More than one means a drift that `omodachi-host ssh list --prune` cleans up.",
       "items": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"}
-    }
+    },
+    "target": {"description": "TAIL-2 P0-4 / P1-1: where the terminal is now - the same object as the pairing claim's `ssh`, read fresh on every request, so a paired device learns a new road (the MagicDNS name) or that Tailscale SSH is on without pairing again.", "type": "object", "required": ["user", "host", "port"], "additionalProperties": false, "properties": {"user": {"type": ["string", "null"], "minLength": 1, "maxLength": 64}, "host": {"type": ["string", "null"], "minLength": 1, "maxLength": 255}, "port": {"type": "integer", "minimum": 1, "maximum": 65535}, "hosts": {"type": "array", "maxItems": 16, "items": {"type": "object", "required": ["host", "kind"], "additionalProperties": false, "properties": {"host": {"type": "string", "minLength": 1, "maxLength": 255}, "kind": {"enum": ["lan", "mdns", "tailnet"]}}}}, "tailscale_ssh": {"type": "boolean"}}}
   },
   "additionalProperties": false
 }

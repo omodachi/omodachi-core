@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/herdr-folders.schema.json",
+  "title": "Folders for a new Herdr workspace",
+  "description": "HERDR-6: `GET /v1/herdr/folders[?under=<folder>&hidden=1]`. Without `under`: `recent` - the folders the running sessions' panes are in, newest first (by when the daemon first saw a pane there), at most eight, never the home folder itself - and `common`, the ones of `~`, `~/Work`, `~/Projects`, `~/code`, `~/src`, `~/dev` this host has; `browse` is null. With `under` (`~`, `~/x`, absolute, or relative to the home folder): `browse` is that folder and the folders directly inside it - names starting with `.` only with `hidden=1`, never a private place (`~/.ssh`, `~/.gnupg`, credentials, browser profiles, Omodachi's own state), no link out of $HOME, sorted by name, at most 100 (`truncated`); `recent` and `common` are null. `path` is resolved (a link shows its own `display` and `name` and its target's `path`); `display` is the `~` form a person reads. Native and web credentials. HERDR-11: without `under`, also `favourites` - the folders a person starred, for every device of this host, in the order they were starred (at most 12; `POST /v1/herdr/folders/favourites {path, favourite}` stars or un-stars one and answers with this document) - and `launchers`, what a new workspace may start with: the operator's `launchers.toml` rows (Collie's format, `~/.config/omodachi/`, else `~/.config/collie/`), or without that file `codex` and `claude`, each only when installed. Both are null with `under`; a core from before HERDR-11 sends neither.",
+  "type": "object",
+  "required": ["contract_revision", "home", "recent", "common", "browse"],
+  "additionalProperties": false,
+  "$defs": {
+    "folder": {
+      "type": "object",
+      "required": ["path", "display", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "display": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "name": {"type": "string", "minLength": 1, "maxLength": 1024}
+      }
+    }
+  },
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "home": {"type": "string", "minLength": 1},
+    "recent": {"oneOf": [{"type": "null"}, {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/folder"}}]},
+    "common": {"oneOf": [{"type": "null"}, {"type": "array", "maxItems": 6, "items": {"$ref": "#/$defs/folder"}}]},
+    "favourites": {"oneOf": [{"type": "null"}, {"type": "array", "maxItems": 12, "items": {"$ref": "#/$defs/folder"}}]},
+    "launchers": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "required": ["command", "label"],
+            "additionalProperties": false,
+            "properties": {
+              "command": {"type": "string", "minLength": 1, "maxLength": 200},
+              "label": {"type": "string", "minLength": 1, "maxLength": 40}
+            }
+          }
+        }
+      ]
+    },
+    "browse": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["path", "display", "name", "parent", "hidden", "dirs", "truncated"],
+          "additionalProperties": false,
+          "properties": {
+            "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "display": {"type": "string", "minLength": 1, "maxLength": 4096},
+            "name": {"type": "string", "minLength": 1, "maxLength": 1024},
+            "parent": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/folder"}]},
+            "hidden": {"type": "boolean"},
+            "dirs": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/folder"}},
+            "truncated": {"type": "boolean"}
+          }
+        }
+      ]
+    }
+  }
+}

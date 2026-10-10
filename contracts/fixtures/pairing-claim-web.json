@@ -1,0 +1,93 @@
+{
+  "contract_revision": "omodachi.v1",
+  "request_id": "pair_11111111111111111111111111111111",
+  "device_id": "odomo-fixture-redacted",
+  "device_name": "Safari on iPhone",
+  "status": "claimed",
+  "expires_at": 1789430700,
+  "ssh_public_key": null,
+  "ssh_fingerprint": null,
+  "grants": {
+    "companion": true,
+    "media": false,
+    "ssh": false
+  },
+  "remote_addr": "100.64.0.7",
+  "via": {
+    "kind": "tailnet",
+    "peer_name": "fixture-iphone",
+    "login": "fixture@example.com"
+  },
+  "already_paired": false,
+  "client": {
+    "kind": "web",
+    "label": "Safari on iPhone"
+  },
+  "client_label": "Web app · Safari on iPhone",
+  "credential": "fixture-redacted-web-credential",
+  "issued_at": 1789430400,
+  "credential_expires_at": 1792022400,
+  "host_id": "00000000000000000000000000000000",
+  "host_name": "omarchy-fixture",
+  "tls_fingerprint_sha256": "abababababababababababababababababababababababababababababababab",
+  "endpoints": [
+    {
+      "host": "192.168.1.10",
+      "port": 8099,
+      "kind": "lan"
+    },
+    {
+      "host": "omarchy-fixture.local",
+      "port": 8099,
+      "kind": "mdns"
+    },
+    {
+      "host": "omarchy-fixture.tail0000.ts.net",
+      "port": 8099,
+      "kind": "tailnet"
+    },
+    {
+      "host": "100.64.0.35",
+      "port": 8099,
+      "kind": "tailnet"
+    },
+    {
+      "host": "fd7a:115c:a1e0::35",
+      "port": 8099,
+      "kind": "tailnet"
+    }
+  ],
+  "odomo_url": "https://omarchy-fixture.tail0000.ts.net/odomo/",
+  "odomo": {
+    "url": "https://omarchy-fixture.tail0000.ts.net/odomo/",
+    "push_devices": 1
+  },
+  "ssh": {
+    "user": "fixture-user",
+    "host": "192.168.1.10",
+    "port": 22,
+    "hosts": [
+      {
+        "host": "192.168.1.10",
+        "kind": "lan"
+      },
+      {
+        "host": "omarchy-fixture.local",
+        "kind": "mdns"
+      },
+      {
+        "host": "omarchy-fixture.tail0000.ts.net",
+        "kind": "tailnet"
+      },
+      {
+        "host": "100.64.0.35",
+        "kind": "tailnet"
+      },
+      {
+        "host": "fd7a:115c:a1e0::35",
+        "kind": "tailnet"
+      }
+    ],
+    "tailscale_ssh": false
+  }
+}

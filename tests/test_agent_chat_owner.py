@@ -119,6 +119,8 @@ class OwnerTests(unittest.IsolatedAsyncioTestCase):
             if method=='thread/read':raise AgentChatError('provider_thread_not_loaded')
             if method=='thread/resume':raise AgentChatError('provider_thread_rollout_missing')
             if method=='thread/start':return {'thread':{'id':'new-empty'}}
+            if method == 'thread/queue/list':  # AGENT-QUEUE-1: a codex without the queue
+                raise AgentChatError('provider_request_rejected')
             raise AssertionError(method)
         self.rpc.request=request
         result=await self.owner.recreate_empty_lost('empty-lost')

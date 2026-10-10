@@ -28,8 +28,10 @@ It survives as `pairing_mode = invite`, an administrator's lock, described below
 - self-signed, ECDSA P-256, valid ten years;
 - `CN=<hostname>`;
 - SAN covering `<hostname>`, `<hostname>.local` and every non-loopback address
-  the host holds at install time, so reaching the host by address, by mDNS name
-  or over Tailscale all present a matching certificate.
+  the host holds at install time. The SAN is a courtesy, not the trust: the
+  client pins the fingerprint, so the MagicDNS name (`*.ts.net`, which the SAN
+  does not carry) works the same way. On iOS that name needs the app's ATS
+  exception for `ts.net` (TAIL-2); a raw `100.x` address cannot be excepted.
 
 An existing pair is never replaced by an install. The daemon serves it with
 `--tls-cert`/`--tls-key`; the unit listens on `0.0.0.0:8099`.
@@ -395,3 +397,74 @@ in the claim). Nothing about it is silent any more:
 - `omodachid --credential-ttl SECONDS --credential-grace SECONDS` exist for
   walking the whole lifecycle in minutes on a throwaway daemon. They are test
   switches, not preferences; the installed unit never passes them.
+
+## One host, several roads (TAIL-2)
+
+TAIL-1 measured a phone that paired at home and could not come back over
+Tailscale without a revoke and a second Approve at the computer. What changed:
+
+- **Typed endpoints.** The claim's `endpoints` say which road each one is:
+  `lan` addresses first (what an older client dials first), then
+  `<hostname>.local` (`mdns`), then the MagicDNS name and the tailnet addresses
+  (`tailnet`). A paired device reads the same list, fresh, from the
+  authenticated `GET /v1/host/roads` (`host-roads.schema.json`), together with
+  `tailnet: {dns_name, ips}` while `tailscale status` says `Running` (absent
+  otherwise) - that is how an app paired at home learns the MagicDNS name it
+  dials away from home. Unauthenticated `/health` carries none of this: it stays
+  an anchor, and never tells a stranger who can reach port 8099 the host's LAN
+  addresses or its tailnet's name.
+- **Recognition, not re-pairing.** A client recognises a host it already holds
+  by `host_id` plus the pinned fingerprint on `/health` (all `/health` has), from any road, and
+  keeps its credential. Credentials were never bound to an address.
+- **Asking again.** A pairing request from a device that still holds a live
+  credential used to be `409 pairing_device_exists`. It now waits for the same
+  local Approve as any request, with `already_paired: true` on the card; the
+  claim issues a new credential and retires the device's older ones with the
+  renewal grace (24 h), so the device ends up with one.
+- **Who asked.** Pending rows and the claim carry `via: {kind, peer_name,
+  login}`. Over the tailnet `peer_name`/`login` come from this computer's own
+  `tailscale whois` of the source address; the panel shows
+  `"<name>" via Tailscale` instead of the raw `100.x`. It is context for the
+  person deciding, never authorization.
+- **The terminal.** The claim's `ssh` (and `GET /v1/ssh/key`'s new `target`)
+  keeps `host` = the first LAN address for older clients and adds `hosts` with
+  kinds and `tailscale_ssh`, true when Tailscale SSH answers port 22 on the
+  tailnet itself.
+
+## The same phone, paired again under a new id (REMOTE-PAIR-1)
+
+A device id is chosen by the App. Until REMOTE-PAIR-1 the App kept it in its
+defaults, while the credential, the Moonlight client certificate and the SSH
+key live in the Keychain - which outlives the app. A reinstall therefore came
+back holding the old credential (adopted without pairing) but a fresh id, and
+the next pairing went up as a stranger: a second "iPhone" row, a terminal key
+`public_key_owned_by_other_device`, and Remote refusing the phone's own
+certificate with `media_pairing_binding_mismatch` because it was bound to the
+older id. The App now keeps the id in the Keychain and settles it on the id
+its live credential names. The host side:
+
+- **Remote moves on proof.** `discover`/`submit` no longer refuse a
+  certificate that is bound to another device, as long as that binding is
+  `paired` and its owner was not denied on the computer. The binding moves
+  only when the fork reports `paired` for this request - after the client has
+  signed the server's challenge with the certificate's private key and the
+  fork verified it. A fingerprint alone never moves anything, and a
+  certificate whose owner was revoked (`revocation_pending`, or a media deny)
+  stays refused.
+- **The older identity is retired.** That proof says the older id is this
+  same phone, so the move retires it: its terminal line moves to the new id
+  when the new id offered the same key (`ssh.key.moved`), then the older id is
+  revoked like `devices revoke` would - credential, approval rows, push, any
+  other certificate it held - and purged when nothing is left unresolved
+  (`device.superseded` in the journal).
+- **The terminal can be moved by hand.** `ssh pending` names who holds the
+  offered key now (`held_by`, `held_by_name`), and `ssh approve` moves that
+  line to the approving device rather than failing with
+  `public_key_owned_by_other_device`. It is moved, never copied: one key, one
+  owner, and that owner's revoke still takes it back.
+- **Until then, the row says so.** `devices list` marks an older companion
+  whose SSH key a newer one also offered with `older_pairing_of: <newer id>`.
+  It is a label only.
+- **A registry fault is not a refusal.** A credential registry that cannot be
+  read is `503 auth_unavailable`, not `401`: an App throws its credential away
+  on a 401, and that is how a phone ends up pairing again.

@@ -16,7 +16,13 @@ requires explicit actual LAN interface addresses from installation/configuration
 this module does not guess an address from hostname resolution or advertise every
 interface automatically. Invalid, unspecified, multicast, loopback and reserved
 advertisement addresses are rejected. Scoped IPv6 link-local support is not
-implemented; it is explicitly rejected rather than dropping the scope.
+implemented; it is explicitly rejected rather than dropping the scope. Tailnet
+addresses (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`) are never advertised
+(`discovery_address_tailnet`, TAIL-2): TAIL-1 found the LAN record carrying the
+host's `100.x` and its announcements going out on `tailscale0`; zeroconf
+announces only on the interfaces of the advertised addresses, so dropping the
+address keeps the record off `tailscale0` as well. A listener bound only to a
+tailnet address advertises nothing (`discovery_no_lan_listener`).
 
 A public descriptor contains only:
 
@@ -115,7 +121,7 @@ listener exists.
 
 `omodachid` derives the advertisement from the host itself: with `--listen` on
 a non-loopback address it advertises the hostname, `<hostname>.local.` and the
-host's current non-loopback IPv4 addresses, carrying `host_id`, `host_name` and
+host's current non-loopback IPv4 addresses that are not on the tailnet, carrying `host_id`, `host_name` and
 `fp`. `--discovery off` disables it; the explicit `--discovery-name`,
 `--discovery-server` and `--discovery-address` flags remain as an operator
 override. Whether a record is actually published is still decided by the real

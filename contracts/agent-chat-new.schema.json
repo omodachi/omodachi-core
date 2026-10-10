@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-new.schema.json",
+  "title": "New default-agent conversation",
+  "description": "AGENT-NEW-1: the reply to `POST /v1/agent/default/chat:new {\"confirmed\": true, \"expected_provider_session_id\": <the conversation the client shows>}`. A fresh codex thread in the agent workspace becomes the default conversation; the old thread is kept by codex (`previous_kept`), never archived or deleted, and core's record keeps `previous_thread_id`. `snapshot` is the new, empty conversation. Every open event stream gets `{\"type\": \"resync_required\"}` and the state publishes `agent.changed` with an idle face. Refusals (409): `new_conversation_confirmation_required`, `agent_identity_changed` (the client is looking at a conversation that is no longer the default - another device started one), `agent_turn_active` (a turn is running), `agent_approval_pending` (a question waits for the person), `agent_conversation_changing` on other chat routes while it happens. Native and web credentials; one journal line `{\"omodachi\":\"agent\",\"event\":\"agent.conversation.new\",\"device\",\"role\",\"previous_thread_id\",\"outcome\",\"thread_id\"?}`.",
+  "type": "object",
+  "required": ["contract_revision", "agent_id", "status", "previous_provider_session_id", "provider_session_id",
+               "same_thread", "previous_kept", "identity", "snapshot"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "agent_id": {"const": "default"},
+    "status": {"const": "new_conversation_started"},
+    "previous_provider_session_id": {"type": "string", "minLength": 1},
+    "provider_session_id": {"type": "string", "minLength": 1},
+    "same_thread": {"const": false},
+    "previous_kept": {"const": true},
+    "identity": {
+      "type": "object",
+      "required": ["hostID", "agentID", "provider", "providerSessionID"],
+      "additionalProperties": false,
+      "properties": {
+        "hostID": {"type": "string"},
+        "agentID": {"const": "default"},
+        "provider": {"const": "codex"},
+        "providerSessionID": {"type": "string"}
+      }
+    },
+    "snapshot": {
+      "allOf": [
+        {"$ref": "https://omodachi.dev/contracts/v1/agent-chat-snapshot.schema.json"},
+        {"type": "object", "properties": {"rows": {"maxItems": 0}, "activeTurn": {"const": null}}}
+      ]
+    }
+  }
+}

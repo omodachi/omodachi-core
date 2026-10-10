@@ -21,12 +21,37 @@ import time
 import os
 from pathlib import Path
 import tempfile
-from .agent_chat_provider import AgentChatError, CodexWebSocketRPC, DefaultAgentBinding
+from .agent_chat_provider import AgentChatError, CodexWebSocketRPC, DefaultAgentBinding, resume_in_workspace
 
 
 AGENT_UNIT = "omodachi-agent.service"
+# AGENT-NEW-1 (the host lost its Agent after a reboot): where a person's own
+# `codex` usually lives when it is not under /usr/bin. omodachid can start
+# before the session has imported its PATH into the user manager, and then it
+# sees only /usr/local/bin:/usr/bin.
+USER_BIN_DIRS = (".local/bin", ".local/share/mise/shims", ".cargo/bin", ".bun/bin", ".npm-global/bin",
+                 ".volta/bin", ".local/share/pnpm", ".nix-profile/bin")
+
+
+def codex_search_path(own_path, manager_path, home):
+    """Our PATH, then the user manager's (what the login session imported -
+    it may have arrived after this daemon started), then the usual per-user
+    bin directories, then the system ones. Order kept, duplicates dropped."""
+    parts = []
+    for chunk in (own_path or "", manager_path or ""):
+        parts.extend(chunk.split(":"))
+    parts.extend(str(Path(home) / sub) for sub in USER_BIN_DIRS)
+    parts.extend(("/usr/local/bin", "/usr/bin", "/bin"))
+    seen, ordered = set(), []
+    for part in parts:
+        if part and part.startswith("/") and part not in seen:
+            seen.add(part); ordered.append(part)
+    return ":".join(ordered)
 WS_HOST = "127.0.0.1"
 TOKEN_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+# AGENT-NEW-1: the reason a record names when the person asked for a fresh
+# conversation (as opposed to the empty-thread recovery after a lost cgroup).
+NEW_CONVERSATION = "user_new_conversation"
 
 
 class OwnedCodexAgent:
@@ -53,6 +78,7 @@ class OwnedCodexAgent:
         self.endpoint = None
         self.token = None
         self.lock = asyncio.Lock()
+        self.started_settings = None
 
     # --- loopback endpoint ---------------------------------------------------
     def _ensure_token(self):
@@ -135,19 +161,27 @@ class OwnedCodexAgent:
         with suppress(FileNotFoundError):
             self.endpoint_file.unlink()
 
+    async def _manager_path(self):
+        code, output = await self._unit_command("systemctl", "--user", "show-environment")
+        if code:
+            return ""
+        return next((line[5:] for line in output.splitlines() if line.startswith("PATH=")), "")
+
     async def _spawn(self):
         token = self._ensure_token()
         if self.durable_unit:
             if await self._unit_active():
                 return None
-            executable = shutil.which("codex")
+            search = codex_search_path(os.environ.get("PATH"), await self._manager_path(), Path.home())
+            executable = shutil.which("codex", path=search)
             if not executable: raise AgentChatError("agent_owner_executable_missing")
             port = self._free_port()
             self._write_endpoint(port)
             code, _ = await self._unit_command("systemd-run", "--user", "--unit=" + self.unit,
                 "--collect", "--property=Type=exec", "--property=Restart=no",
                 "--property=WorkingDirectory=" + str(self.cwd),
-                "--setenv=PATH=" + os.environ.get("PATH", "/usr/bin:/bin"),
+                # The same search path, so a shim (mise, asdf) finds its tool.
+                "--setenv=PATH=" + search,
                 executable, "app-server", "--listen", self.endpoint_url(port),
                 "--ws-auth", "capability-token", "--ws-token-file", str(self.token_file))
             if code: raise AgentChatError("agent_owner_unit_start_failed")
@@ -181,7 +215,8 @@ class OwnedCodexAgent:
         return value
 
     def _migrate(self, value):
-        carried = {key: value[key] for key in ("previous_thread_id", "recovery_reason", "previous_metadata", "mode")
+        carried = {key: value[key] for key in ("previous_thread_id", "recovery_reason", "previous_metadata", "mode",
+                                               "new_conversation_at")
                    if key in value}
         migrated = self._record(value.get("thread_id"),
                                 creation_pending=bool(value.get("creation_pending")),
@@ -249,7 +284,14 @@ class OwnedCodexAgent:
                 "daemon_unit": self.unit if self.durable_unit else None, **extra}
 
     def _binding(self, thread):
-        return DefaultAgentBinding(self.host_id, thread, self.endpoint_url(), token=self.token or self._ensure_token())
+        return DefaultAgentBinding(self.host_id, thread, self.endpoint_url(), token=self.token or self._ensure_token(),
+                                   cwd=str(self.cwd))
+
+    def _ensure_workspace(self):
+        # The agent's working directory is the user's (never deleted by
+        # --purge). A thread pointed at a missing directory cannot start a
+        # single command, so it is recreated before any resume or start.
+        self.cwd.mkdir(parents=True, exist_ok=True)
 
     async def ensure_new_or_owned(self, *, existing_agent: bool = False):
         """Call only from the single existing default manager/probe lifecycle."""
@@ -260,11 +302,19 @@ class OwnedCodexAgent:
             if record is None and existing_agent:
                 raise AgentChatError("existing_thread_handoff_required")
             if record is not None and not record.get("thread_id"):
+                if self._new_conversation_pending(record):
+                    # The person asked for a fresh conversation and core went
+                    # away between the intent and the identity. Finishing it
+                    # is what they asked for; the old thread is untouched.
+                    self._ensure_workspace()
+                    await self._connect()
+                    return await self._start_new_thread(record)
                 raise AgentChatError("agent_thread_creation_unconfirmed")
+            self._ensure_workspace()
             await self._connect()
             if record:
                 try:
-                    response = await self.rpc.request("thread/resume", {"threadId": record["thread_id"]})
+                    response = await resume_in_workspace(self.rpc, record["thread_id"], str(self.cwd))
                 except AgentChatError as error:
                     if error.code != "provider_thread_rollout_missing":
                         raise
@@ -290,6 +340,7 @@ class OwnedCodexAgent:
             if not isinstance(thread, str) or not thread:
                 raise AgentChatError("agent_thread_creation_unconfirmed")
             self._save(self._record(thread, creation_pending=False))
+            self.started_settings = {"model": response.get("model"), "effort": response.get("reasoningEffort")}
             return self._binding(thread)
 
     async def ensure_result(self, *, existing_agent: bool = False):
@@ -316,12 +367,97 @@ class OwnedCodexAgent:
             record = self._read()
             if record and record.get("thread_id") not in (None, thread_id):
                 raise AgentChatError("agent_owner_metadata_conflict")
+            self._ensure_workspace()
             await self._connect()
-            response = await self.rpc.request("thread/resume", {"threadId": thread_id})
+            response = await resume_in_workspace(self.rpc, thread_id, str(self.cwd))
             if response.get("thread", {}).get("id") != thread_id:
                 raise AgentChatError("provider_identity_changed")
             self._save(self._record(thread_id, creation_pending=False))
             return self._binding(thread_id)
+
+    @staticmethod
+    def _new_conversation_pending(record):
+        return (bool(record.get("creation_pending")) and not record.get("thread_id")
+                and record.get("recovery_reason") == NEW_CONVERSATION
+                and isinstance(record.get("previous_thread_id"), str) and bool(record.get("previous_thread_id")))
+
+    async def _thread_busy(self, thread_id):
+        """What codex itself says about the old thread, for a caller that has
+        no attached chat to ask. `None` when it is not loaded here (nothing
+        can be running on it in this daemon) or the provider does not say."""
+        cursor = None
+        while True:
+            params = {"limit": 100}
+            if cursor is not None: params["cursor"] = cursor
+            page = await self.rpc.request("thread/loaded/list", params)
+            if thread_id in page.get("data", []): break
+            cursor = page.get("nextCursor")
+            if cursor is None: return None
+        try:
+            value = await self.rpc.request("thread/read", {"threadId": thread_id, "includeTurns": False})
+        except AgentChatError:
+            return None
+        status = (value.get("thread") or {}).get("status")
+        if not isinstance(status, dict) or status.get("type") != "active":
+            return None
+        flags = [flag for flag in status.get("activeFlags") or [] if isinstance(flag, str)]
+        return "agent_approval_pending" if ("waitingOnApproval" in flags or "waitingOnUserInput" in flags) \
+            else "agent_turn_active"
+
+    async def _start_new_thread(self, record):
+        """thread/start for a recorded new-conversation intent, then the identity."""
+        response = await self.rpc.request("thread/start", {"cwd": str(self.cwd)})
+        thread = response.get("thread", {}).get("id")
+        if not isinstance(thread, str) or not thread or thread == record["previous_thread_id"]:
+            raise AgentChatError("agent_thread_creation_unconfirmed")
+        carried = {key: record[key] for key in ("previous_thread_id", "recovery_reason", "previous_metadata",
+                                                "new_conversation_at") if key in record}
+        self._save(self._record(thread, creation_pending=False, **carried))
+        # What the thread starts with, so the phone's model control can show
+        # it before the first turn confirms anything (ThreadStartResponse).
+        self.started_settings = {"model": response.get("model"), "effort": response.get("reasoningEffort")}
+        return self._binding(thread)
+
+    async def start_new(self, expected_thread_id: str):
+        """AGENT-NEW-1: a fresh default conversation the person asked for.
+
+        The old thread is not deleted, archived or touched in codex: it stays in
+        `~/.codex/sessions` and can be resumed by id. Here only the manager's
+        record moves, under the owner lock, in the same crash-safe order as the
+        first creation: the old record is archived to its own file, the intent
+        (`creation_pending`, `previous_thread_id`) is saved, and only then is
+        `thread/start` called. A core that dies in between finishes the intent
+        on the next ensure instead of leaving the person without a conversation.
+        The caller has already refused a running turn or a pending approval it
+        can see; `_thread_busy` asks codex as well, for a chat not attached.
+        """
+        async with self.lock:
+            record = self._read()
+            if record is None or record.get("mode") == "legacy_handoff_rolled_back":
+                raise AgentChatError("agent_owner_metadata_conflict")
+            self._ensure_workspace()
+            await self._connect()
+            if self._new_conversation_pending(record):
+                if record["previous_thread_id"] != expected_thread_id:
+                    raise AgentChatError("agent_identity_changed")
+                return await self._start_new_thread(record)
+            if not record.get("thread_id") or record.get("thread_id") != expected_thread_id:
+                raise AgentChatError("agent_identity_changed")
+            busy = await self._thread_busy(expected_thread_id)
+            if busy:
+                raise AgentChatError(busy)
+            stamp = time.time_ns()
+            archive = self.root / ("owner-before-new-conversation-" + str(stamp) + ".json")
+            with archive.open("x") as stream:
+                os.chmod(archive, 0o600)
+                json.dump(record, stream)
+                stream.flush(); os.fsync(stream.fileno())
+            intent = {"previous_thread_id": expected_thread_id, "recovery_reason": NEW_CONVERSATION,
+                      "previous_metadata": archive.name,
+                      "new_conversation_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(stamp / 1e9))}
+            pending = self._record(creation_pending=True, **intent)
+            self._save(pending)
+            return await self._start_new_thread(pending)
 
     async def recreate_empty_lost(self, expected_thread_id: str):
         """Explicit recovery only. B verifies user confirmation + empty delivery
@@ -368,6 +504,7 @@ class OwnedCodexAgent:
                         "recovery_reason": "confirmed_empty_thread_lost_with_core_cgroup",
                         "previous_metadata": archive.name}
             self._save(self._record(creation_pending=True, **recovery))
+            self._ensure_workspace()
             response = await self.rpc.request("thread/start", {"cwd": str(self.cwd)})
             thread = response.get("thread", {}).get("id")
             if not isinstance(thread, str) or not thread or thread == expected_thread_id:

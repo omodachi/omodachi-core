@@ -1,0 +1,6 @@
+{
+  "ticket": "fixture-ticket-not-a-real-one-0123456789abc",
+  "path": "/v1/events",
+  "expires_in": 30,
+  "contract_revision": "omodachi.v1"
+}

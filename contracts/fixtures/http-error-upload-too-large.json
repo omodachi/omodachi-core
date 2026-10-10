@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "upload_too_large",
+    "message": "the file is larger than 25 MB"
+  },
+  "contract_revision": "omodachi.v1"
+}

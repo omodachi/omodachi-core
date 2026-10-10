@@ -357,6 +357,24 @@ class Hyprland:
             raise RemoteError("config_schema_invalid")
         return (value["bool"], value["set"])
 
+    def keyboard_layout(self) -> dict:
+        """REMOTE-INPUT-1. `input:kb_layout` and `input:kb_variant`, as set.
+
+        The app sends US-ASCII as key *positions* down the stream; the host's
+        keymap decides which character a position is. A client reads this to
+        know whether those positions spell what it meant.
+        """
+        reading = {}
+        for name, key in (("input:kb_layout", "layout"), ("input:kb_variant", "variant")):
+            try:
+                value = json.loads(self.run("-j", "getoption", name))
+            except (ValueError, TypeError):
+                raise RemoteError("config_schema_invalid") from None
+            if not isinstance(value, dict) or not isinstance(value.get("str"), str):
+                raise RemoteError("config_schema_invalid")
+            reading[key] = value["str"].strip()[:64]
+        return reading
+
     def input_devices(self) -> list[str]:
         """Physical keyboards and pointers only; emulated input stays untouched."""
         try:

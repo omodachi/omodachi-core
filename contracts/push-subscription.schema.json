@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/push-subscription.schema.json",
+  "title": "LITE-1b a web device's push subscription",
+  "description": "POST /v1/push/subscriptions (201) with the browser's PushSubscription.toJSON() - {endpoint, keys{p256dh, auth}, expirationTime?} - web credential only; one subscription per device, a new one replaces it. The endpoint must be https on a known push service (Apple, FCM, Mozilla autopush, WNS). The answer never repeats the endpoint or keys.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "subscription_id",
+    "device_id",
+    "created_at",
+    "endpoint_host",
+    "vapid_public_key"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "subscription_id": {
+      "type": "string",
+      "pattern": "^sub_[0-9a-f]{24}$"
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "endpoint_host": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253
+    },
+    "vapid_public_key": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{87}$"
+    }
+  }
+}

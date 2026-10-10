@@ -1,0 +1,11 @@
+{
+  "web_push": 8030,
+  "notification": {
+    "title": "The agent needs your approval",
+    "body": "Open Omodachi to answer it.",
+    "navigate": "https://omarchy-fixture.tail0000.ts.net/odomo/?open=agent&ref=approval&host=00000000000000000000000000000000",
+    "tag": "agent",
+    "lang": "en",
+    "dir": "ltr"
+  }
+}

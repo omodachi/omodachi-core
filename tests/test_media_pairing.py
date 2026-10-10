@@ -443,10 +443,14 @@ class PrivateSocketTests(unittest.TestCase):
                     {'ok':True,'clients':[{**row,'client_cert_sha256':'A'*64}],'unreadable':0,'truncated':False},
                     {'ok':True,'clients':[{**row,'name':'x'*81}],'unreadable':0,'truncated':False},
                     {'ok':True,'clients':[{**row,'enabled':'yes'}],'unreadable':0,'truncated':False},
-                    {'ok':True,'clients':[{**row,'cert':'-----BEGIN'}],'unreadable':0,'truncated':False},
-                    {'ok':True,'clients':[row,row],'unreadable':0,'truncated':False}):
+                    {'ok':True,'clients':[{**row,'cert':'-----BEGIN'}],'unreadable':0,'truncated':False}):
             with self.assertRaises(MediaPairingError):
                 self.exchange((json.dumps(bad)+'\n').encode(),request='pairing.clients',fields={})
+        # REMOTE-PAIR-1: the fork lists a re-paired certificate once per
+        # pairing. One certificate is one row, enabled if any record is.
+        twice={'ok':True,'clients':[{**row,'enabled':False},{**row,'name':''}],'unreadable':0,'truncated':False}
+        listed=self.exchange((json.dumps(twice)+'\n').encode(),request='pairing.clients',fields={})
+        self.assertEqual(listed['clients'],[{**row,'enabled':True}])
     def test_the_capability_flag_is_read_off_pairing_list_and_defaults_to_no(self):
         listed=self.exchange((json.dumps({'ok':True,'requests':[]})+'\n').encode(),request='pairing.list',fields={})
         self.assertFalse(listed['certificate_revocation_supported'])

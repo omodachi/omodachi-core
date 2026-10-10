@@ -1,0 +1,11 @@
+{
+  "web_push": 8030,
+  "notification": {
+    "title": "“QA companion” wants to connect",
+    "body": "Open Omodachi to approve or reject it.",
+    "navigate": "https://omarchy-fixture.tail0000.ts.net/odomo/?open=notifications&note=1789711988810-1",
+    "tag": "note-1789711988810-1",
+    "lang": "en",
+    "dir": "ltr"
+  }
+}

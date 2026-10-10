@@ -44,6 +44,17 @@
           },
           "active": {
             "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "pairing_request",
+              "ssh_request"
+            ],
+            "description": "NOTIFY-3: present only on Omodachi's own request notifications (app name and the plugin's summon command both match). A client explains rather than invokes: the decision is made on the computer. Absent for every other notification."
+          },
+          "withdrawn": {
+            "const": true,
+            "description": "NOTIFY-3: only on notification.updated. Core knows the request this notification announced was decided (approved, rejected, expired, replaced, device revoked, or gone after a restart) and took it off the desktop; drop the row - it is not history. Never on a listed row."
           }
         },
         "required": [

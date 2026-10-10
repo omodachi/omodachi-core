@@ -31,7 +31,8 @@ from .workspace_actions import (WORKSPACE_LAYOUT_ENTRY, WorkspaceActionContext, 
 
 
 REMOTE_OPERATIONS = ("remote.capabilities", "remote.status", "remote.start", "remote.get", "remote.resize",
-                     "remote.backend", "remote.heartbeat", "remote.presented", "remote.stop", "remote.recover")
+                     "remote.backend", "remote.heartbeat", "remote.presented", "remote.text", "remote.stop",
+                     "remote.recover")
 
 #: PERF-5. The three ways `RoutePolicy.resolve` says "this row is not the row
 #: the adapter was reviewed against any more" - the source action, the source
@@ -61,6 +62,40 @@ class ServiceError(ValueError):
         # as `error.detail`; most codes have none and carry an empty mapping.
         self.code, self.status, self.detail = code, status, detail
         super().__init__(message or code)
+
+
+def blocked_panes(layout) -> list[dict]:
+    """`[{pane_id, name}]` for every pane Herdr says has a blocked agent."""
+    rows = []
+    for workspace in (layout or {}).get("workspaces") or []:
+        for tab in (workspace or {}).get("tabs") or []:
+            for pane in (tab or {}).get("panes") or []:
+                if not isinstance(pane, dict) or not isinstance(pane.get("id"), str):
+                    continue
+                agent = pane.get("agent") if isinstance(pane.get("agent"), dict) else {}
+                if pane.get("agent_status") == "blocked" or agent.get("status") == "blocked":
+                    name = agent.get("name") if agent.get("name") not in (None, "default") else agent.get("kind")
+                    rows.append({"pane_id": pane["id"][:128],
+                                 "name": name[:32] if isinstance(name, str) else None})
+    return rows[:32]
+
+
+# NOTIFY-2: how often `notify_herdr_layout` re-reads `herdr session list`.
+# The snapshots themselves stay on the two-second poll; the listing is one
+# process per call, so a session that starts is watched within ten seconds and
+# one that stops is let go within the same.
+HERDR_WATCH_LISTING_SECONDS = 10.0
+# HERDR-11 §4: how often a session is read (`_herdr_due`), and how long a burst
+# of Herdr events is gathered into one read.
+HERDR_POLL_SECONDS = 2.0
+HERDR_IDLE_POLL_SECONDS = 10.0
+HERDR_POKE_SECONDS = 0.15
+# The kinds a native client may say it alerts (push.KINDS, without importing push).
+PRESENCE_KINDS = ("agent_approval", "agent_needs_input", "agent_done", "herdr_blocked", "host_notification",
+                  "herdr_done")
+# NOTIFY-1: a Remote session in these states drives the desktop from the phone,
+# so input the compositor sees is not somebody sitting there.
+REMOTE_LIVE = ("creating", "ready", "resizing")
 
 
 def fields(data: Mapping[str, Any], required=(), optional=()) -> None:
@@ -112,7 +147,17 @@ class CoreService:
         # no Omarchy shell writing notification files.
         self.voice = None
         self.notifications = None
+        # ATTACH-1: the UploadStore (`uploads.py`); the daemon sets it.
+        self.uploads = None
         self.notification_mirror = None
+        # LITE-1b C6/C7. The web devices' push subscriptions, the host's VAPID
+        # key (a callable that creates it on first use) and the sender; and the
+        # `tailscale serve` record Odomo's address comes from. None in demo and
+        # in tests that do not ask: push routes then answer push_unavailable.
+        self.push_store = None
+        self.push_sender = None
+        self.vapid = None
+        self.odomo_front_door = None
         self._media_jobs = set()
         self._media_maintenance = None
         self._media_closed = False
@@ -147,6 +192,53 @@ class CoreService:
         self._agent_probe = None
         self._agent_probe_task = None
         self._herdr_layout_task = None
+        # NOTIFY-2: every running session is watched for `blocked`, not only
+        # the ones a device opened. The listing is re-read on its own, slower
+        # clock (`HERDR_WATCH_LISTING_SECONDS`) inside the two-second poll.
+        self._herdr_watch_listed_at = None
+        # NOTIFY-2: the blocked panes each watched session had at its last
+        # poll, so a client that connects now has a first look to compare the
+        # next `herdr.layout.changed` against (`state.herdr.blocked`).
+        self._herdr_blocked: dict[str, list] = {}
+        # HERDR-11 §4: when each session was last read, the sessions Herdr's
+        # own event stream says moved since (`herdr_events.py`), and a poke
+        # that arrived while a read was running. `herdr_events` is wired by
+        # the daemon; without it the poll alone runs, as before.
+        self._herdr_read_at: dict[str, float] = {}
+        self._herdr_dirty: set[str] = set()
+        self._herdr_follow_up = False
+        self._herdr_loop = None
+        self._herdr_poke_handle = None
+        self.herdr_events = None
+        # HERDR-11 §2 / §1: the agents' own logs, and what a new workspace may start.
+        self.herdr_replies = None
+        self.herdr_launchers = None
+        # NOTIFY-2: what each native client says about itself - whether it is
+        # in front, and which kinds it alerts while it is (`PUT /v1/presence`).
+        # Memory only; it means something only while that device's event
+        # stream is live, and `native_alerts` checks both.
+        self._presence: dict[str, dict] = {}
+        # NOTIFY-1: is the person at the computer (`desk.DeskPresence`), and the
+        # done-not-seen ledger (`seen.SeenLedger`). Both optional: without them
+        # nothing is held and nothing is marked, as before.
+        self.desk = None
+        self._desk_value = None
+        self.seen_ledger = None
+        self._unseen_value = None
+        self._unseen_lock = threading.Lock()
+        # OVERVIEW-1: one "Needs you" list across the Agent and every Herdr
+        # pane (`overview.OverviewProjector`). `overview_screen` and
+        # `overview_reply` are how the poll reads a blocked pane's screen and
+        # a finished pane's latest reply; tests replace them.
+        from .overview import OverviewProjector
+        self.overview = OverviewProjector()
+        # Nothing to show is published as nothing: the state carries the
+        # empty list from `state()` until the first row (or session) exists.
+        self._overview_value = self.overview.value()
+        self._overview_lock = threading.Lock()
+        self.overview_screen = None
+        self.overview_reply = None
+        hub.add_observer(self._overview_observe)
         self._workspace_adapter = None
         self.wake_adapter = None
         self.bar_modules = None
@@ -185,8 +277,12 @@ class CoreService:
             hub.register_handler("herdr.select", lambda device, params: self.herdr_select_session(
                 params.get("device") or None, params.get("name")))
             hub.register_handler("control.wake", lambda device, params: self.wake_control(device, params))
+            # REMOTE-STOP-1: the Unix transport also says whether the caller is
+            # this host's own user; `remote.stop` is the one that acts on it.
             for operation in REMOTE_OPERATIONS:
-                hub.register_handler(operation, lambda device, params, op=operation: self.dispatch_remote_async(op, params, device))
+                hub.register_handler(operation, lambda device, params, op=operation, local=False:
+                                     self.dispatch_remote_async(op, params, device, local=local),
+                                     local_aware=True)
 
     async def _media_worker(self, callback, *args, **kwargs):
         if self._media_closed:
@@ -476,28 +572,351 @@ class CoreService:
         return self.resource({"selected": name, "owned": self.herdr_bridge.session,
                               "scope": "device" if device else "host"})
 
+    # --- HERDR-5: start a stopped session, or make a new one ------------------
+    def _herdr_starter(self):
+        starter = getattr(self, "herdr_starter", None)
+        if starter is None:
+            from .herdr_bridge import HerdrSessionStarter
+            starter = self.herdr_starter = HerdrSessionStarter(owned=self.herdr_bridge.session)
+        return starter
+
+    def _herdr_bring_up(self, device: str | None, name: str, *, created: bool) -> dict:
+        """Start `name` headless (`HerdrSessionStarter`), then select it for
+        this device, so one call lands the phone in it."""
+        from .herdr_bridge import HerdrUnavailable
+
+        def row():
+            return {entry["name"]: entry for entry in self.herdr_sessions_list()}.get(name)
+
+        def running():
+            entry = row()
+            return bool(entry and entry["running"])
+
+        kind = "session_create" if created else "session_start"
+        try:
+            started = self._herdr_starter().start(
+                name, running=running, snapshot=lambda: self._herdr_fresh_snapshot(name, (row() or {}).get("socket_path")))
+        except HerdrUnavailable as error:
+            self._herdr_session_audit(device, name, kind, error)
+            raise self._herdr_error(error) from None
+        self._herdr_session_audit(device, name, kind, None)
+        self.herdr_choices.choose(name, device)
+        return self.resource({"selected": name, "owned": self.herdr_bridge.session,
+                              "scope": "device" if device else "host",
+                              "started": started, "created": created})
+
+    def _herdr_fresh_snapshot(self, name: str, socket_path=None) -> dict:
+        """A just-started session's `api snapshot`. A bridge made before the
+        server was up may hold a socket path the listing has only now
+        reported, so it is dropped and read again."""
+        from .herdr_bridge import HerdrBridge
+        if self.herdr_bridge is not None and name == self.herdr_bridge.session:
+            return self.herdr_bridge.snapshot()
+        with self._herdr_lock:
+            self._herdr_bridges.pop(name, None)
+        return HerdrBridge(name, socket_path=socket_path).snapshot()
+
+    def _herdr_session_audit(self, device, name, kind, error) -> None:
+        outcome = "ok" if error is None else (error.args[0] if error.args else "herdr_unavailable")
+        self._herdr_audit().record(device=device, session=name, pane="-", kind=kind,
+                                   length=0, outcome=outcome)
+
+    def herdr_start_session(self, device: str | None, name: str) -> dict:
+        """`POST /v1/herdr/sessions/{name}/start`: a session the host lists,
+        running or stopped, is brought up with no window and selected for this
+        device. Already running is not an error (`started: false`); a name the
+        listing does not have is `invalid_session`, as for select."""
+        from .herdr_bridge import HerdrUnavailable, session_name
+        if self.herdr_bridge is None:
+            raise ServiceError("herdr_unavailable", status=503)
+        try:
+            name = session_name(name)
+            rows = {row["name"] for row in self.herdr_sessions_list()}
+        except HerdrUnavailable as error:
+            raise self._herdr_error(error) from None
+        if name not in rows:
+            raise ServiceError("invalid_session", status=400)
+        return self._herdr_bring_up(device, name, created=False)
+
+    def herdr_create_session(self, device: str | None, payload: dict) -> dict:
+        """`POST /v1/herdr/sessions {name}`: a new session, started the same
+        way, in `$HOME`. A name the host already has, running or not, is
+        `409 herdr_session_exists`: create never reuses or restarts one."""
+        from .herdr_bridge import HerdrUnavailable, new_session_name
+        if self.herdr_bridge is None:
+            raise ServiceError("herdr_unavailable", status=503)
+        fields(payload, ("name",))
+        try:
+            name = new_session_name(payload.get("name"))
+            rows = {row["name"] for row in self.herdr_sessions_list()}
+        except HerdrUnavailable as error:
+            raise self._herdr_error(error) from None
+        if name in rows:
+            raise ServiceError("herdr_session_exists", status=409)
+        return self._herdr_bring_up(device, name, created=True)
+
+    # --- HERDR-6: a new workspace, in a folder the phone picked ----------------
+    def _herdr_folders(self):
+        folders = getattr(self, "herdr_folders_memory", None)
+        if folders is None:
+            from .herdr_bridge import HerdrFolders
+            folders = self.herdr_folders_memory = HerdrFolders()
+        return folders
+
+    def _herdr_bridge_for(self, name: str, socket_path=None):
+        """The bridge for one named session, made once and kept, as the poll
+        and `GET /v1/herdr/sessions` keep theirs."""
+        from .herdr_bridge import HerdrBridge
+        if self.herdr_bridge is not None and name == self.herdr_bridge.session:
+            return self.herdr_bridge
+        with self._herdr_lock:
+            bridge = self._herdr_bridges.get(name)
+            if bridge is None:
+                bridge = self._herdr_bridges[name] = HerdrBridge(name, socket_path=socket_path)
+            return bridge
+
+    @staticmethod
+    def _folder_error(error) -> ServiceError:
+        code = error.args[0] if error.args else "invalid_folder"
+        return ServiceError(code, status=404 if code == "folder_not_found" else 400)
+
+    def herdr_folders(self, device: str | None, query: dict) -> dict:
+        """`GET /v1/herdr/folders[?under=<folder>&hidden=1]` (HERDR-6).
+
+        Without `under`: the recent folders (the running sessions' panes) and
+        the common ones. With it: the folders inside that one, one level - the
+        card's browser asks again for each folder it opens. Nothing here reads
+        a file or a name inside a private place (`host_paths`)."""
+        from .herdr_bridge import HerdrUnavailable
+        from .host_paths import FolderRefused
+        if self.herdr_bridge is None:
+            raise ServiceError("herdr_unavailable", status=503)
+        if set(query) - {"under", "hidden"} or query.get("hidden", "0") not in ("0", "1", "true", "false"):
+            raise ServiceError("invalid_request")
+        folders = self._herdr_folders()
+        home = str(folders.home)
+        if "under" in query:
+            try:
+                browse = folders.browse(query["under"], hidden=query.get("hidden") in ("1", "true"))
+            except FolderRefused as error:
+                raise self._folder_error(error) from None
+            return self.resource({"home": home, "recent": None, "common": None, "browse": browse,
+                                  "favourites": None, "launchers": None})
+        try:
+            rows = [row for row in self.herdr_sessions_list() if row["running"]]
+        except HerdrUnavailable:
+            # Herdr not answering takes the recent folders away, not the rest.
+            rows = []
+        selected = self.herdr_selected(device)
+        rows.sort(key=lambda row: row["name"] != selected)
+        paths = []
+        for row in rows:
+            try:
+                snapshot = self._herdr_bridge_for(row["name"], row.get("socket_path")).snapshot()
+            except HerdrUnavailable:
+                continue
+            # Herdr lists panes in the order it made them; the newest first.
+            cwds = [pane.get("cwd") for pane in reversed(snapshot.get("panes") or []) if isinstance(pane, dict)]
+            paths.extend(folders.note(row["name"], cwds))
+        return self.resource({"home": home, "recent": folders.recent(paths), "common": folders.common(),
+                              "browse": None, "favourites": folders.favourites(),
+                              "launchers": self._herdr_launchers().rows()})
+
+    # --- HERDR-11 §1: favourite folders, and what a new workspace starts ------
+    def _herdr_launchers(self):
+        launchers = getattr(self, "herdr_launchers", None)
+        if launchers is None:
+            # No config directory wired (a test service): the defaults only.
+            from .operator_rows import Launchers
+            nowhere = Path("/nonexistent/omodachi-launchers")
+            launchers = self.herdr_launchers = Launchers(nowhere, nowhere)
+        return launchers
+
+    def herdr_folder_favourite(self, device: str | None, payload: dict) -> dict:
+        """`POST /v1/herdr/folders/favourites {path, favourite}`: star or
+        un-star a folder for every device of this host; the reply is the
+        folders document, so the card redraws from one answer."""
+        from .host_paths import FolderRefused, folder
+        if self.herdr_bridge is None:
+            raise ServiceError("herdr_unavailable", status=503)
+        fields(payload, ("path", "favourite"))
+        if type(payload.get("favourite")) is not bool:
+            raise ServiceError("invalid_request")
+        folders = self._herdr_folders()
+        try:
+            path = folder(payload.get("path"), home=folders.home)
+        except FolderRefused as error:
+            raise self._folder_error(error) from None
+        folders.favourite(path, payload["favourite"])
+        return self.herdr_folders(device, {})
+
+    def herdr_create_workspace(self, device: str | None, name: str, payload: dict) -> dict:
+        """`POST /v1/herdr/sessions/{name}/workspaces {cwd, name?}` (HERDR-6).
+
+        A running session the host lists; a folder `host_paths.folder()`
+        allows; `--no-focus`, so the computer's screen stays where it is. The
+        session becomes this device's selection, so the phone lands in the new
+        workspace; which workspace it shows is its own business."""
+        from .herdr_bridge import HerdrUnavailable, session_name, workspace_label
+        from .host_paths import FolderRefused, display, folder
+        if self.herdr_bridge is None:
+            raise ServiceError("herdr_unavailable", status=503)
+        # HERDR-11: `cwd` may be left out or empty - that is the home folder -
+        # and `launch` names one of the operator's launchers, exactly.
+        fields(payload, (), ("cwd", "name", "launch"))
+        launch = payload.get("launch")
+        if launch is not None:
+            if self._herdr_launchers().allowed(launch) is None:
+                raise ServiceError("herdr_launch_not_allowed", status=400)
+        typed = payload.get("cwd")
+        if typed is None or (isinstance(typed, str) and not typed.strip()):
+            typed = "~"
+        try:
+            name = session_name(name)
+            label = workspace_label(payload.get("name"))
+            rows = {row["name"]: row for row in self.herdr_sessions_list()}
+        except HerdrUnavailable as error:
+            raise self._herdr_error(error) from None
+        row = rows.get(name)
+        if row is None or not row["running"]:
+            raise ServiceError("invalid_session", status=400)
+        folders = self._herdr_folders()
+        try:
+            cwd = folder(typed, home=folders.home)
+        except FolderRefused as error:
+            raise self._folder_error(error) from None
+        bridge = self._herdr_bridge_for(name, row.get("socket_path"))
+        try:
+            created = bridge.workspace_create(cwd, label)
+        except HerdrUnavailable as error:
+            self._herdr_session_audit(device, name, "workspace_create", error)
+            raise self._herdr_error(error) from None
+        self._herdr_audit().record(device=device, session=name, pane=created["id"], kind="workspace_create",
+                                   length=0, outcome="ok")
+        folders.touch(cwd)
+        self.herdr_choices.choose(name, device)
+        workspace = dict(created)
+        try:
+            workspace["display"] = display(Path(created["cwd"]), folders.home)
+        except (TypeError, ValueError):
+            workspace["display"] = created["cwd"]
+        launched = None
+        if launch is not None:
+            launched = self._herdr_launch(device, bridge, created.get("pane"), launch)
+        document = {"selected": name, "owned": self.herdr_bridge.session,
+                    "scope": "device" if device else "host", "workspace": workspace}
+        if launch is not None:
+            document["launch"] = launched
+        return self.resource(document)
+
+    def _herdr_launch(self, device, bridge, pane, command: str) -> dict:
+        """The launcher typed into the root pane just made. The workspace
+        stands whatever happens here; the reply says whether it was typed."""
+        from .herdr_bridge import HerdrUnavailable
+        if not isinstance(pane, str):
+            return {"command": command, "pane": None, "sent": False, "drawn": False,
+                    "reason": "herdr_pane_gone"}
+        try:
+            result = bridge.launch(pane, command)
+        except HerdrUnavailable as error:
+            code = error.args[0] if error.args else "herdr_unavailable"
+            self._herdr_audit().record(device=device, session=bridge.session, pane=pane, kind="launch",
+                                       length=len(command), outcome=code)
+            return {"command": command, "pane": pane, "sent": False, "drawn": False, "reason": code}
+        self._herdr_audit_line(device, bridge, pane, "launch", len(command), None)
+        return result
+
     @staticmethod
     def _herdr_error(error) -> ServiceError:
         code = error.args[0] if error.args else "herdr_unavailable"
         status = {"invalid_request": 400, "invalid_pane": 400, "invalid_workspace": 400,
+                  # HERDR-6: workspaces
+                  "invalid_workspace_name": 400,
+                  # HERDR-11
+                  "herdr_launch_not_allowed": 400,
+                  # HERDR-5: sessions
+                  "invalid_session": 400, "invalid_session_name": 400, "herdr_session_exists": 409,
                   "invalid_geometry": 400, "invalid_control_command": 400,
                   "herdr_control_in_use": 409, "herdr_action_unsupported": 400,
-                  "invalid_tab": 400, "herdr_request_failed": 409}.get(code, 503)
+                  "invalid_tab": 400, "herdr_request_failed": 409,
+                  # HERDR-3: keys and text
+                  "invalid_key": 400, "herdr_key_unsupported": 400, "herdr_too_many_keys": 413,
+                  "invalid_text": 400, "herdr_text_too_long": 413,
+                  "herdr_pane_gone": 404}.get(code, 503)
         return ServiceError(code, status=status)
 
     def herdr_layout(self, device: str | None = None) -> dict:
+        """HERDR-11 §4: the projection the poll has just read, when it is
+        still the newest one (`cached_layout`); otherwise a fresh read."""
         from .herdr_bridge import HerdrUnavailable
         try:
-            return self.resource(self._herdr(device).layout())
+            return self.resource(self._herdr(device).cached_layout())
         except HerdrUnavailable as error:
             raise self._herdr_error(error) from None
 
-    def herdr_pane_action(self, pane: str, action: str, payload: dict, device: str | None = None) -> dict:
-        from .herdr_bridge import HerdrUnavailable
+    def herdr_pane_reply(self, pane: str, device: str | None = None) -> dict:
+        """`GET /v1/herdr/panes/{pane}/reply` (HERDR-11 §2): the latest reply
+        of the codex or claude in this pane, read from its own log. Anything
+        that cannot be matched reliably is `available: false`, never an error:
+        the App then shows the mirror alone."""
+        from .herdr_bridge import HerdrUnavailable, pane_identifier
+        bridge = self._herdr(device)
         try:
-            return self.resource(self._herdr(device).pane_action(pane, action, payload))
+            pane = pane_identifier(pane)
         except HerdrUnavailable as error:
             raise self._herdr_error(error) from None
+        replies = self.herdr_replies
+        if replies is None:
+            from .herdr_reply import AgentReplies
+            replies = self.herdr_replies = AgentReplies()
+        try:
+            agent, agent_session, present = self._herdr_pane_agent(bridge, pane)
+        except HerdrUnavailable as error:
+            raise self._herdr_error(error) from None
+        if not present:
+            raise ServiceError("herdr_pane_gone", status=404)
+        if agent is None:
+            document = replies.unavailable("not_an_agent")
+        else:
+            try:
+                info = bridge.process_info(pane)
+            except HerdrUnavailable as error:
+                code = error.args[0] if error.args else "herdr_unavailable"
+                if code == "herdr_pane_gone":
+                    raise ServiceError(code, status=404) from None
+                info = None
+            document = replies.reply(session=bridge.session, pane=pane, agent=agent, process_info=info,
+                                     agent_session=agent_session)
+        return self.resource({"session": bridge.session, "pane": pane, **document})
+
+    @staticmethod
+    def _herdr_pane_agent(bridge, pane: str):
+        """(agent name, Herdr's agent session if it reports one, pane exists)."""
+        layout = bridge.cached_layout(max_age=5.0)
+        for workspace in layout.get("workspaces") or []:
+            for tab in workspace.get("tabs") or []:
+                for row in tab.get("panes") or []:
+                    if row.get("id") == pane:
+                        agent = row.get("agent") if isinstance(row.get("agent"), dict) else {}
+                        return (agent.get("kind") or agent.get("name"), bridge.agent_session(pane), True)
+        return None, None, False
+
+    def herdr_pane_action(self, pane: str, action: str, payload: dict, device: str | None = None) -> dict:
+        """ODOMO-2: a split, zoom or close made from a device is a write into
+        the session like a key is, so it gets the same audit line (who, where,
+        which; never more). A focus is not audited: it changes no pane."""
+        from .herdr_bridge import HerdrUnavailable
+        bridge = self._herdr(device)
+        audited = action in {"split", "zoom", "close"}
+        try:
+            result = self.resource(bridge.pane_action(pane, action, payload))
+        except HerdrUnavailable as error:
+            if audited:
+                self._herdr_audit_line(device, bridge, pane, action, 0, error)
+            raise self._herdr_error(error) from None
+        if audited:
+            self._herdr_audit_line(device, bridge, pane, action, 0, None)
+        return result
 
     def herdr_workspace_select(self, workspace_id: str, device: str | None = None) -> dict:
         from .herdr_bridge import HerdrUnavailable
@@ -508,17 +927,177 @@ class CoreService:
 
     def herdr_tab_create(self, workspace_id: str, payload: dict, device: str | None = None) -> dict:
         from .herdr_bridge import HerdrUnavailable
+        bridge = self._herdr(device)
+        where = workspace_id if isinstance(workspace_id, str) else "?"
         try:
-            return self.resource(self._herdr(device).tab_create(workspace_id, payload))
+            result = self.resource(bridge.tab_create(workspace_id, payload))
         except HerdrUnavailable as error:
+            self._herdr_audit_line(device, bridge, where, "tab_create", 0, error)
             raise self._herdr_error(error) from None
+        self._herdr_audit_line(device, bridge, where, "tab_create", 0, None)
+        return result
 
     def herdr_tab_close(self, workspace_id: str, tab_id: str, device: str | None = None) -> dict:
         from .herdr_bridge import HerdrUnavailable
+        bridge = self._herdr(device)
+        where = tab_id if isinstance(tab_id, str) else "?"
         try:
-            return self.resource(self._herdr(device).tab_close(workspace_id, tab_id))
+            result = self.resource(bridge.tab_close(workspace_id, tab_id))
         except HerdrUnavailable as error:
+            self._herdr_audit_line(device, bridge, where, "tab_close", 0, error)
             raise self._herdr_error(error) from None
+        self._herdr_audit_line(device, bridge, where, "tab_close", 0, None)
+        return result
+
+    # --- HERDR-3: keys and text without control --------------------------------
+    def _herdr_audit(self):
+        audit = getattr(self, "herdr_audit", None)
+        if audit is None:
+            from .herdr_bridge import HerdrWriteAudit
+            audit = self.herdr_audit = HerdrWriteAudit()
+        return audit
+
+    def herdr_pane_keys(self, pane: str, payload: dict, device: str | None = None) -> dict:
+        """`POST /v1/herdr/panes/{pane}/keys {keys}`: one `pane.send_keys`.
+
+        No controller is taken and nothing is resized, so the person at the
+        desk keeps their pane exactly as it was.
+        """
+        from .herdr_bridge import HerdrUnavailable
+        fields(payload, ("keys",))
+        bridge = self._herdr(device)
+        keys = payload.get("keys")
+        length = len(keys) if isinstance(keys, list) else 0
+        try:
+            result = bridge.send_keys(pane, keys)
+        except HerdrUnavailable as error:
+            self._herdr_audit_line(device, bridge, pane, "keys", length, error)
+            raise self._herdr_error(error) from None
+        self._herdr_audit_line(device, bridge, pane, "keys", result["sent"], None)
+        return self.resource(result)
+
+    def herdr_pane_text(self, pane: str, payload: dict, device: str | None = None) -> dict:
+        """`POST /v1/herdr/panes/{pane}/text {text, submit?}`: one `send_text`,
+        and Enter only with proof on screen (`HerdrBridge.send_text`)."""
+        from .herdr_bridge import HerdrUnavailable
+        fields(payload, ("text",), ("submit", "attachments"))
+        bridge = self._herdr(device)
+        text = payload.get("text")
+        attached = 0
+        if "attachments" in payload:
+            # ATTACH-1: each chip's marker becomes its file's path where it
+            # stood (Collie ADR 0060); the pane only ever receives text.
+            from .uploads import attachment_refs, compose_herdr
+            refs = attachment_refs(payload["attachments"])
+            if not isinstance(text, str):
+                raise ServiceError("invalid_request")
+            store = getattr(self, "uploads", None)
+            if refs and store is None:
+                raise ServiceError("upload_unavailable", status=503)
+            text = compose_herdr(text, [(marker, store.resolve(upload_id).path) for upload_id, marker in refs])
+            attached = len(refs)
+        length = len(text) if isinstance(text, str) else 0
+        try:
+            result = bridge.send_text(pane, text, submit=payload.get("submit", False))
+        except HerdrUnavailable as error:
+            self._herdr_audit_line(device, bridge, pane, "text", length, error)
+            raise self._herdr_error(error) from None
+        self._herdr_audit_line(device, bridge, pane, "text", length, None, submitted=result["submitted"],
+                               attachments=attached)
+        return self.resource(result)
+
+    # --- LINKS-1: open on the computer ------------------------------------------
+    def host_open_agent_source(self, item: str):
+        """What one agent row shows, for the "mentioned" rule, and the thread's
+        folder relative paths are read against. `(None, None)` when there is no
+        such row: an assistant message's words, or a tool row's own `paths`
+        (fileChange / imageView) - never a command's output, which can list
+        anything on the disk."""
+        chat_service = getattr(self, "agent_chat", None)
+        chat = getattr(chat_service, "chat", None) if chat_service is not None else None
+        row = getattr(chat, "rows", {}).get(item) if chat is not None else None
+        if not isinstance(row, dict):
+            return None, None
+        if row.get("kind") == "message" and row.get("role") == "assistant":
+            text = row.get("text") or ""
+        elif row.get("kind") == "tool" and row.get("paths"):
+            text = "\n".join(path for path in row["paths"] if isinstance(path, str))
+        else:
+            return None, None
+        cwd = getattr(getattr(chat, "binding", None), "cwd", None)
+        return text, Path(cwd) if isinstance(cwd, str) and cwd else None
+
+    def host_open_herdr_source(self, source: dict, device: str | None):
+        """The pane's visible screen now, and its folder. `(None, None)` when the
+        pane is gone or is not in the session this device is looking at."""
+        from .herdr_bridge import HerdrUnavailable
+        try:
+            bridge = self._herdr(device)
+        except ServiceError:
+            return None, None
+        if source.get("session") is not None and source["session"] != bridge.session:
+            return None, None
+        try:
+            text = bridge.read_visible(source["pane"])
+        except HerdrUnavailable:
+            return None, None
+        cwd = None
+        try:
+            for workspace in bridge.layout().get("workspaces") or []:
+                for tab in workspace.get("tabs") or []:
+                    for pane in tab.get("panes") or []:
+                        if pane.get("id") == source["pane"] and isinstance(pane.get("cwd"), str) and pane["cwd"]:
+                            cwd = Path(pane["cwd"])
+        except (HerdrUnavailable, AttributeError, TypeError):
+            cwd = None
+        return text, cwd
+
+    def remote_output(self):
+        """The running Remote session's own output, or None."""
+        manager = getattr(self.remote, "manager", None)
+        session = manager.current() if manager is not None else None
+        name = getattr(session, "output_name", None) if session is not None else None
+        return name if isinstance(name, str) and name else None
+
+    def host_open(self, request, *, device: str, role: str, haystack, cwd) -> dict:
+        opener = getattr(self, "host_opener", None)
+        if opener is None:
+            from .host_open import HostOpen
+            opener = self.host_opener = HostOpen()
+        return self.resource(opener.run(request, device=device, role=role, haystack=haystack, cwd=cwd,
+                                        output=self.remote_output()))
+
+    # --- HERDR-4: the operator's rows -------------------------------------------
+    OPERATOR_AGENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,39}")
+
+    def herdr_operator_rows(self, query: dict) -> dict:
+        """`GET /v1/herdr/operator-rows[?agent=<name>]`: one pane's Quick dock,
+        key presets and harness segment, after the operator's own
+        `quick-replies.toml` / `keys.toml` / `commands.toml` are applied
+        (`operator_rows.py`). No `agent` is a shell pane."""
+        if set(query) - {"agent"}:
+            raise ServiceError("invalid_request")
+        agent = query.get("agent")
+        if agent is not None and not self.OPERATOR_AGENT.fullmatch(agent):
+            raise ServiceError("invalid_request")
+        rows = getattr(self, "operator_rows", None)
+        if rows is None:
+            # No config directory wired (a test service): what ships, only.
+            from .operator_rows import OperatorRows
+            nowhere = Path("/nonexistent/omodachi-operator-rows")
+            rows = self.operator_rows = OperatorRows(nowhere, nowhere)
+        return self.resource(rows.resolve(agent))
+
+    def _herdr_audit_line(self, device, bridge, pane, kind, length, error, submitted=None,
+                          attachments=0) -> None:
+        outcome = "ok" if error is None else (error.args[0] if error.args else "herdr_unavailable")
+        if error is None and isinstance(pane, str):
+            # NOTIFY-1: keys or text sent to a pane from a device means it was seen.
+            self.seen_mark(bridge.session, pane)
+        extra = {"attachments": attachments} if attachments else {}
+        self._herdr_audit().record(device=device, session=bridge.session,
+                                   pane=pane if isinstance(pane, str) else "?", kind=kind,
+                                   length=length, outcome=outcome, submitted=submitted, **extra)
 
     def notify_herdr_layout(self) -> dict:
         """Poll-driven, because 0.8.2 event replay on subscribe is unverified.
@@ -531,26 +1110,80 @@ class CoreService:
         from .herdr_bridge import HerdrUnavailable
         if self.herdr_bridge is None:
             return {"published": False, "reason": "herdr_unavailable"}
-        # The owned session plus whichever others a device has chosen. A bridge
-        # is only created by a selection, so this stays the sessions somebody is
-        # actually looking at rather than every session on the machine.
+        # NOTIFY-2: the owned session plus every session that is running on the
+        # host, from daemon start - a pane blocked in Leo's own session is news
+        # whether or not a device ever opened that session. A session that
+        # stopped is let go, and its last word is "nothing is blocked here".
+        stopped = self._watch_running_sessions()
+        published, revisions, reason = [], {}, None
+        for bridge in stopped:
+            self.overview.forget_session(bridge.session)
+            if self.seen_ledger is not None:
+                self.seen_ledger.forget_session(bridge.session)
+            with self._herdr_lock:
+                self._herdr_blocked.pop(bridge.session, None)
+            self._herdr_folders().forget(bridge.session)
+            if bridge.revision:
+                self.hub.publish("herdr.layout.changed",
+                                 {"revision": bridge.revision, "session": bridge.session,
+                                  "blocked": [], "stopped": True})
+                published.append(bridge.session)
+        for bridge in stopped:
+            if self.herdr_events is not None:
+                self.herdr_events.forget(bridge.session)
+            self._herdr_read_at.pop(bridge.session, None)
         with self._herdr_lock:
             bridges = [self.herdr_bridge, *self._herdr_bridges.values()]
-        published, revisions, reason = [], {}, None
+            dirty, self._herdr_dirty = self._herdr_dirty, set()
+        now = time.monotonic()
+        watched = self._herdr_watched()
         for bridge in bridges:
             before = bridge.revision
+            if not self._herdr_due(bridge.session, now, dirty, watched):
+                # HERDR-11 §4: not this session's turn - its last reading stands.
+                if before:
+                    revisions[bridge.session] = before
+                continue
+            self._herdr_read_at[bridge.session] = now
             try:
                 layout = bridge.layout()
             except HerdrUnavailable as error:
                 reason = error.args[0] if error.args else "herdr_unavailable"
                 continue
+            if self.herdr_events is not None:
+                # Herdr's own event stream for this session, kept subscribed to
+                # the panes it has now (`herdr_events.py`).
+                try:
+                    self.herdr_events.ensure(bridge.session, bridge.socket_path, layout)
+                except Exception:  # pragma: no cover - the poll is the fallback
+                    pass
             revisions[bridge.session] = layout["revision"]
             if layout["revision"] != before:
+                # HERDR-6: the folders panes are in, so "recent" knows which
+                # one a pane moved to last.
+                self._herdr_note_folders(bridge.session, layout)
+                blocked = blocked_panes(layout)
+                # OVERVIEW-1: every agent pane of this session, for the list.
+                self.overview.set_session(bridge.session, layout)
+                if self.seen_ledger is not None:
+                    # NOTIFY-1: working -> idle/done is "finished".
+                    self.seen_ledger.observe_herdr(bridge.session, layout)
+                with self._herdr_lock:
+                    self._herdr_blocked[bridge.session] = blocked
                 # `session` is what tells a device whether this is its own
                 # session moving or somebody else's; the revision alone cannot.
+                # LITE-1b: which panes' agents are blocked now, ids and the
+                # agent's own name only, so a push can say "codex is blocked"
+                # without anyone reading the layout again.
                 self.hub.publish("herdr.layout.changed",
-                                 {"revision": layout["revision"], "session": bridge.session})
+                                 {"revision": layout["revision"], "session": bridge.session,
+                                  "blocked": blocked})
                 published.append(bridge.session)
+        self.publish_unseen()
+        # OVERVIEW-1: what the blocked panes ask and what the finished ones
+        # said last, read here on the poll's worker, then the list.
+        self._overview_read(bridges)
+        self.publish_overview()
         owned = self.herdr_bridge.session
         if owned not in revisions:
             return {"published": bool(published), "sessions": published,
@@ -558,14 +1191,113 @@ class CoreService:
         return {"published": bool(published), "sessions": published,
                 "revision": revisions[owned], "revisions": revisions}
 
+    def _herdr_watched(self) -> set[str]:
+        """Sessions a device is looking at: the owned one, every device's
+        choice, and any with a pane on a screen right now."""
+        watched = {self.herdr_bridge.session}
+        try:
+            watched |= self.herdr_choices.chosen()
+        except (AttributeError, OSError, ValueError):
+            pass
+        with self._unseen_lock:
+            streams = dict(getattr(self, "_seen_watching", {}) or {})
+        for key, count in streams.items():
+            if count > 0 and isinstance(key, str) and key.startswith("herdr:"):
+                watched.add(key.split(":", 2)[1])
+        return watched
+
+    def _herdr_due(self, session: str, now: float, dirty: set, watched: set) -> bool:
+        """HERDR-11 §4. A session Herdr's events say moved is read at once.
+        Otherwise a watched session is read every two seconds - every ten
+        once its event stream is up, since then the read is only the
+        reconciliation - and one nobody is looking at every ten."""
+        if session in dirty:
+            return True
+        last = self._herdr_read_at.get(session)
+        if last is None:
+            return True
+        healthy = self.herdr_events is not None and self.herdr_events.healthy(session)
+        interval = HERDR_POLL_SECONDS if session in watched and not healthy else HERDR_IDLE_POLL_SECONDS
+        return now - last >= interval - 0.05
+
+    def herdr_poke(self, session: str, event: str | None = None) -> None:
+        """Herdr's event stream says `session` moved (an event-watch thread)."""
+        with self._herdr_lock:
+            self._herdr_dirty.add(session)
+        loop = self._herdr_loop
+        if loop is not None and not loop.is_closed():
+            try:
+                loop.call_soon_threadsafe(self._herdr_poke_soon)
+            except RuntimeError:  # pragma: no cover - the loop is shutting down
+                pass
+
+    def _herdr_poke_soon(self) -> None:
+        # Bursts (a workspace made: workspace, tab, pane, focus) are one read.
+        if self._herdr_poke_handle is not None:
+            return
+        self._herdr_poke_handle = asyncio.get_running_loop().call_later(HERDR_POKE_SECONDS, self._herdr_poke_fire)
+
+    def _herdr_poke_fire(self) -> None:
+        self._herdr_poke_handle = None
+        if not self.schedule_herdr_layout_refresh():
+            self._herdr_follow_up = True
+
+    def _herdr_note_folders(self, session: str, layout: dict) -> None:
+        try:
+            cwds = [pane.get("cwd") for workspace in layout.get("workspaces") or []
+                    for tab in workspace.get("tabs") or [] for pane in tab.get("panes") or []]
+            self._herdr_folders().note(session, list(reversed(cwds)))
+        except (AttributeError, OSError, TypeError, ValueError):
+            pass
+
+    def _watch_running_sessions(self, now: float | None = None) -> list:
+        """Make sure every running session has a bridge; return the ones that stopped.
+
+        Runs on the poll's worker thread. A listing that cannot be read changes
+        nothing - no session is dropped because `herdr` failed to answer once.
+        The owned session's bridge is never dropped: it is the one every device
+        starts on, running or not.
+        """
+        from .herdr_bridge import HerdrBridge, HerdrUnavailable
+        now = time.monotonic() if now is None else now
+        last = self._herdr_watch_listed_at
+        if last is not None and now - last < HERDR_WATCH_LISTING_SECONDS:
+            return []
+        self._herdr_watch_listed_at = now
+        try:
+            rows = self.herdr_sessions_list()
+        except (HerdrUnavailable, OSError):
+            return []
+        running = {row["name"]: row for row in rows if row.get("running")}
+        owned = self.herdr_bridge.session
+        stopped = []
+        with self._herdr_lock:
+            for name, row in running.items():
+                if name != owned and name not in self._herdr_bridges:
+                    self._herdr_bridges[name] = HerdrBridge(name, socket_path=row.get("socket_path"))
+            for name in list(self._herdr_bridges):
+                if name not in running:
+                    stopped.append(self._herdr_bridges.pop(name))
+        return stopped
+
     def schedule_herdr_layout_refresh(self) -> bool:
-        if self.herdr_bridge is None or self._herdr_layout_task is not None and not self._herdr_layout_task.done():
+        if self.herdr_bridge is None:
+            return False
+        try:
+            self._herdr_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        if self._herdr_layout_task is not None and not self._herdr_layout_task.done():
             return False
         async def run():
             try:
                 await asyncio.to_thread(self.notify_herdr_layout)
             finally:
                 self._herdr_layout_task = None
+                # HERDR-11: a poke that came in while this read ran gets its own.
+                if self._herdr_follow_up:
+                    self._herdr_follow_up = False
+                    self.schedule_herdr_layout_refresh()
         self._herdr_layout_task = asyncio.ensure_future(run())
         return True
 
@@ -610,6 +1342,16 @@ class CoreService:
             except Exception:
                 return {"approved": False, "outcome": "error", "approval_id": None,
                         "device_id": None, "device_name": None}
+        if operation == "local.remote.stop":
+            # REMOTE-STOP-1. The person at this computer can always end a
+            # Remote session, whoever's it is: `omodachi-host remote stop
+            # [--session-id ID | --all]` and the panel's End Remote session.
+            # Outside `_dispatch_local` because the release is async, runs on
+            # the Remote service's own serialized job lock, and must not wait
+            # behind a pairing decision holding `_local_lock`.
+            if not callable(local_authorize) or local_authorize() is not True:
+                raise ServiceError("permission_denied", status=403)
+            return await self.stop_remote_as_owner(payload)
         if operation == "local.preferences.set":
             async with self._preferences_policy_lock:
                 return await self._media_worker(self._dispatch_local, operation, payload, local_authorize)
@@ -678,6 +1420,11 @@ class CoreService:
                             result = pairing.public(row)
                     if action == "reject":
                         return result
+                    # LITE-1a C4: a web client is the companion credential and
+                    # nothing else - no Sunshine certificate, no SSH line (it
+                    # could not carry a key in the first place).
+                    if (result.get("client") or {}).get("kind") == "web":
+                        return result
                     # One approval, three grants. The credential is the claim's
                     # own; these two land here, and each records what really
                     # happened so the claim reports it instead of promising it.
@@ -708,7 +1455,10 @@ class CoreService:
                     now = time.time()
                     return {"requests": [{"device_id": device, "fingerprint": row["fingerprint"],
                                           "device_name": self.hub.auth.device_name(device),
-                                          "expires_at": int(row["expires_at"])}
+                                          "expires_at": int(row["expires_at"]),
+                                          # REMOTE-PAIR-1: approving moves the key
+                                          # from this device, so the card says so.
+                                          **self._ssh_holder(device, row)}
                                          for device, row in sorted(self._ssh_pending.items())
                                          if row["expires_at"] > now]}
                 if action in {"approve", "reject"}:
@@ -748,6 +1498,20 @@ class CoreService:
                 if older is not None and (type(older) not in (int, float) or not 0 <= older <= 3650):
                     raise ServiceError("invalid_request")
                 return self._purge_devices(None if older is None else float(older), local_authorize)
+            if operation == "local.devices.push":
+                # LITE-1b: the person at the computer switches push off (or
+                # back on) for one web device, whatever the browser asked for.
+                fields(payload, ("device_id", "enabled"))
+                if type(payload["enabled"]) is not bool:
+                    raise ServiceError("invalid_request")
+                device = identifier(payload["device_id"])
+                if self.push_store is None:
+                    raise ServiceError("push_unavailable", status=503)
+                if self.hub.auth.device_role(device) != "web":
+                    raise ServiceError("push_web_only", status=409)
+                prefs = self.push_store.set_host_enabled(device, payload["enabled"])
+                return {"device_id": device, "push": {"subscribed": prefs["subscribed"],
+                                                      "enabled": prefs["host_enabled"]}}
             if operation == "local.devices.revoke":
                 fields(payload, ("device_id",), ("force",))
                 force = payload.get("force", False)
@@ -759,49 +1523,7 @@ class CoreService:
                 # the revoke, so it takes an explicit --force.
                 if device == PLUGIN_DEVICE_ID and not force:
                     raise ServiceError("plugin_credential", status=409)
-                if self.media_pairing is None:
-                    raise ServiceError("media_pairing_unavailable", status=503)
-                media = self.media_pairing.revoke_device(device, local_authorize=local_authorize)
-                revoked = self.hub.auth.revoke_device(device)
-                # PAIR-3: the durable approval is part of what a revoke takes
-                # back. Leaving it behind would keep a grant source alive for a
-                # device that no longer has a credential.
-                pairing = getattr(self, "pairing", None)
-                if pairing is not None:
-                    try:
-                        pairing.forget_device(device)
-                    except (ServiceError, OSError, ValueError):
-                        pass
-                with self._candidate_lock:
-                    self._media_candidates = {k: v for k, v in self._media_candidates.items() if k[2] != device}
-                # A revoked device keeps nothing: its credential, its Sunshine
-                # certificate and the authorized_keys line SPEC-F3's terminal
-                # opens with all go in the same call. A file we cannot write is
-                # reported, never silently treated as one fewer way in.
-                # AUTH-1: an enrolled approval key is one more thing a revoked
-                # device keeps nothing of. A key left behind would let a device
-                # with no credential still be named in an approval's audience.
-                if self.biometric is not None:
-                    try:
-                        self.biometric.revoke(device)
-                    except (ServiceError, OSError, ValueError):
-                        pass
-                from .ssh_keys import SshKeyError
-                try:
-                    ssh = self.ssh_keys.revoke(device)
-                except SshKeyError as error:
-                    ssh = {"revoked": False, "removed": 0, "device": device, "error": error.code}
-                except OSError:
-                    ssh = {"revoked": False, "removed": 0, "device": device, "error": "authorized_keys_unreadable"}
-                result = {"device_id": device, "revoked": revoked, "media": media, "ssh": ssh}
-                # PLUG-4 §2.3: when the fork really took the certificate back
-                # there is nothing left to chase, so the device leaves the
-                # registry instead of becoming another "revoked" row nobody can
-                # act on. A fork that cannot revoke still leaves the row, and
-                # `certificate_revocation_supported: false` says why.
-                if media.get("certificate_revocation_supported") and media.get("pending_media_revocations") == 0:
-                    result["purged"] = self._purge_device(device, local_authorize)
-                return result
+                return self._revoke_device(device, local_authorize)
             if not operation.startswith("local.media-pairing.") or self.media_pairing is None:
                 raise ServiceError("route_unavailable", status=404)
             action = operation.removeprefix("local.media-pairing.")
@@ -838,9 +1560,134 @@ class CoreService:
                     row = state["requests"].get(payload["source_request_id"])
                     if not row or row["device_id"] != payload["device_id"] or row["status"] not in {"approved", "claimed"}:
                         raise ServiceError("pairing_approval_required", status=403)
+                    # LITE-1a C4: a browser has no Remote to repair.
+                    if (row.get("client") or {}).get("kind") == "web":
+                        raise ServiceError("web_client_no_remote", status=409)
                 return self.media_pairing.grant_remote(payload["device_id"], remote_allowed=True,
                     source_request_id=payload["source_request_id"], local_authorize=local_authorize)
             raise ServiceError("route_unavailable", status=404)
+
+    def _revoke_device(self, device, local_authorize):
+        """`devices revoke`: every grant one device holds, taken back in one call."""
+        if self.media_pairing is None:
+            raise ServiceError("media_pairing_unavailable", status=503)
+        media = self.media_pairing.revoke_device(device, local_authorize=local_authorize)
+        revoked = self.hub.auth.revoke_device(device)
+        # PAIR-3: the durable approval is part of what a revoke takes
+        # back. Leaving it behind would keep a grant source alive for a
+        # device that no longer has a credential.
+        pairing = getattr(self, "pairing", None)
+        if pairing is not None:
+            try:
+                pairing.forget_device(device)
+            except (ServiceError, OSError, ValueError):
+                pass
+        with self._candidate_lock:
+            self._media_candidates = {k: v for k, v in self._media_candidates.items() if k[2] != device}
+        # A revoked device keeps nothing: its credential, its Sunshine
+        # certificate and the authorized_keys line SPEC-F3's terminal
+        # opens with all go in the same call. A file we cannot write is
+        # reported, never silently treated as one fewer way in.
+        # AUTH-1: an enrolled approval key is one more thing a revoked
+        # device keeps nothing of. A key left behind would let a device
+        # with no credential still be named in an approval's audience.
+        if self.biometric is not None:
+            try:
+                self.biometric.revoke(device)
+            except (ServiceError, OSError, ValueError):
+                pass
+        # LITE-1b: and no push subscription. A revoked browser is not
+        # told anything about this computer again.
+        self._forget_push(device)
+        from .ssh_keys import SshKeyError
+        try:
+            ssh = self.ssh_keys.revoke(device)
+        except SshKeyError as error:
+            ssh = {"revoked": False, "removed": 0, "device": device, "error": error.code}
+        except OSError:
+            ssh = {"revoked": False, "removed": 0, "device": device, "error": "authorized_keys_unreadable"}
+        result = {"device_id": device, "revoked": revoked, "media": media, "ssh": ssh}
+        # PLUG-4 §2.3: when the fork really took the certificate back
+        # there is nothing left to chase, so the device leaves the
+        # registry instead of becoming another "revoked" row nobody can
+        # act on. A fork that cannot revoke still leaves the row, and
+        # `certificate_revocation_supported: false` says why.
+        if media.get("certificate_revocation_supported") and media.get("pending_media_revocations") == 0:
+            result["purged"] = self._purge_device(device, local_authorize)
+        return result
+
+    def media_rebound(self, event):
+        """REMOTE-PAIR-1. A Moonlight certificate moved to the identity that proved it.
+
+        `media_pairing` moves a certificate from an older device id to a newer
+        one only after the fork verified the new request's GameStream
+        handshake - a signature made with the certificate's private key, which
+        lives in one phone's Keychain and nowhere else. So the older identity
+        is this same phone, paired before under another id, and nothing it
+        still holds serves anybody: it is retired here, with its terminal line
+        carried over first when the new identity offered the same key.
+        """
+        if not isinstance(event, dict):
+            return None
+        old, new = event.get("from_device_id"), event.get("device_id")
+        try:
+            identifier(old), identifier(new)
+        except ServiceError:
+            return None
+        if old == new or PLUGIN_DEVICE_ID in (old, new):
+            return None
+        return self._supersede_device(old, new, proof="media_certificate")
+
+    def _offered_ssh_key(self, device):
+        """The public key this device last offered: a waiting request, else its claim."""
+        row = self._ssh_pending.get(device)
+        if isinstance(row, dict) and row.get("expires_at", 0) > time.time():
+            return row.get("public_key")
+        pairing = getattr(self, "pairing", None)
+        if pairing is None:
+            return None
+        try:
+            return pairing.offered_ssh_key(device)
+        except (ServiceError, OSError, ValueError):
+            return None
+
+    def _supersede_device(self, old, new, *, proof):
+        """Retire `old` in favour of `new`, which is provably the same phone."""
+        from .ssh_keys import SshKeyError
+        role = getattr(self.hub.auth, "device_role", None)
+        try:
+            if callable(role) and (role(new) == "web" or role(old) == "web"):
+                return None
+        except (ValueError, OSError):
+            return None
+        ssh = None
+        offered = self._offered_ssh_key(new)
+        if offered:
+            try:
+                if self.ssh_keys.owner_of(offered) == old:
+                    ssh = self.ssh_keys.replace(offered, new, self._ssh_expiry(new), take_from=old)
+                    pending = self._ssh_pending.get(new)
+                    if pending and pending.get("public_key") == offered:
+                        self._ssh_pending.pop(new, None)
+                    grants = self._ssh_grants(new)
+                    if grants is not None:
+                        self.pairing.grant(grants["request_id"], ssh=True)
+                    _ssh_journal({"event": "ssh.key.moved", "device_id": new, "from_device_id": old,
+                                  "fingerprint": ssh["fingerprint"], "proof": proof})
+            except (SshKeyError, ServiceError, OSError, ValueError):
+                ssh = None
+        try:
+            retired = self._revoke_device(old, lambda: True)
+        except (ServiceError, OSError, ValueError) as error:
+            retired = {"device_id": old, "revoked": 0, "error": getattr(error, "code", "retire_failed")}
+        line = {"omodachi": "devices", "event": "device.superseded", "device_id": new,
+                "from_device_id": old, "proof": proof, "ssh_moved": bool(ssh),
+                "purged": bool((retired.get("purged") or {}).get("purged"))}
+        try:
+            print(json.dumps(line, separators=(",", ":")), flush=True)
+        except (OSError, ValueError):
+            pass
+        return {"device_id": new, "superseded": old, "ssh": ssh, "retired": retired}
 
     def _grant_remote(self, device, request_id, local_authorize):
         """The streaming half of one approval, reported rather than assumed."""
@@ -907,6 +1754,7 @@ class CoreService:
                 pairing.forget_device(device)
             except (ServiceError, OSError, ValueError):
                 pass
+        self._forget_push(device)
         with self._candidate_lock:
             self._media_candidates = {k: v for k, v in self._media_candidates.items() if k[2] != device}
         return {"device_id": device, "purged": True,
@@ -940,6 +1788,244 @@ class CoreService:
                 "removed_credentials": sum(row.get("removed_credentials", 0) for row in purged),
                 "older_than_days": older_than_days}
 
+    def _forget_push(self, device):
+        self._presence.pop(device, None)
+        if self.push_store is not None:
+            try:
+                self.push_store.forget(device)
+            except (OSError, ValueError):
+                pass
+
+    # --- NOTIFY-2: what the native app says about itself ---------------------
+    def set_presence(self, device: str | None, payload) -> dict:
+        """`PUT /v1/presence {foreground, alerts}` from a native client.
+
+        `alerts` is the kinds this device puts on screen by itself while it is
+        in front - the App's own banners, toasts and cards. Odomo's "quiet while
+        the App is open" holds a push back only for those kinds and only while
+        this is in front, so a kind the App does not alert always reaches the
+        phone in the pocket.
+        """
+        role = getattr(self.hub.auth, "device_role", None)
+        try:
+            kind = role(device) if callable(role) and device else "companion"
+        except (ValueError, OSError):
+            kind = None
+        if not device or device == PLUGIN_DEVICE_ID or kind != "companion":
+            raise ServiceError("presence_native_only", status=403)
+        if not isinstance(payload, dict) or set(payload) - {"foreground", "alerts"} \
+                or type(payload.get("foreground")) is not bool:
+            raise ServiceError("invalid_request", "presence is {foreground, alerts}")
+        alerts = payload.get("alerts", [])
+        if not isinstance(alerts, list) or len(alerts) > len(PRESENCE_KINDS) \
+                or any(value not in PRESENCE_KINDS for value in alerts) or len(set(alerts)) != len(alerts):
+            raise ServiceError("invalid_request", "alerts must be distinct notification kinds")
+        record = {"foreground": payload["foreground"], "alerts": sorted(alerts), "at": time.time()}
+        self._presence[device] = record
+        return self.resource({"device_id": device, "foreground": record["foreground"],
+                              "alerts": record["alerts"],
+                              "quiets": record["alerts"] if record["foreground"] else []})
+
+    def native_alerts(self, kind: str) -> bool:
+        """NOTIFY-2: is a native client of this host in front *and* alerting `kind`?
+
+        Both halves, live: the device holds an event stream right now, its last
+        presence said foreground, and that presence listed the kind. A native
+        client that never said anything (an App from before NOTIFY-2) alerts
+        nothing as far as this is concerned, so Odomo is never muted for it.
+        """
+        role = getattr(self.hub.auth, "device_role", None)
+        for device in self.hub.connected_devices():
+            record = self._presence.get(device)
+            if device == PLUGIN_DEVICE_ID or not record or not record["foreground"] \
+                    or kind not in record["alerts"]:
+                continue
+            try:
+                if (role(device) if callable(role) else "companion") == "companion":
+                    return True
+            except (ValueError, OSError):
+                continue
+        return False
+
+    # --- NOTIFY-1: the desk, and done-but-not-seen ---------------------------
+    def remote_live(self) -> bool:
+        remote = (self.hub.state_view("remote").get("remote") or {})
+        return remote.get("state") in REMOTE_LIVE
+
+    def apply_desk(self, value) -> None:
+        """`state.desk` / `desk.changed` when the reading changes."""
+        if not isinstance(value, dict) or value == self._desk_value:
+            return
+        self._desk_value = value
+        self.hub.update_state({"desk": dict(value)}, event_type="desk.changed")
+
+    def desk_state(self):
+        return self._desk_value
+
+    def install_seen(self, ledger) -> None:
+        self.seen_ledger = ledger
+        self.hub.add_observer(self._seen_observe)
+        self.publish_unseen()
+
+    def _seen_observe(self, event) -> None:
+        """The Agent's turn ending (`agent.changed`'s activity phase)."""
+        if event.type != "agent.changed" or self.seen_ledger is None:
+            return
+        chat = ((event.payload or {}).get("agent") or {}).get("chat")
+        activity = chat.get("activity") if isinstance(chat, dict) else None
+        if not isinstance(activity, dict):
+            return
+        self.seen_ledger.observe_agent(activity.get("phase"))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        # Not from inside the hub's own publish: the next turn of the loop.
+        if loop is not None:
+            loop.call_soon(self.publish_unseen)
+        else:
+            self.publish_unseen()
+
+    def publish_unseen(self) -> None:
+        ledger = self.seen_ledger
+        if ledger is None:
+            return
+        with self._unseen_lock:
+            value = ledger.value()
+            changed = value != self._unseen_value
+            if changed:
+                self._unseen_value = value
+                self.hub.update_state({"unseen": value}, event_type="unseen.changed")
+        ledger.save()
+        if changed:
+            # OVERVIEW-1: a pane seen (or newly finished) moves its row.
+            self.publish_overview()
+
+    # --- OVERVIEW-1 ----------------------------------------------------------
+    OVERVIEW_READS_PER_POLL = 8
+    OVERVIEW_REPLIES_PER_POLL = 4
+
+    def _overview_default_pane(self, agent=None):
+        if agent is None:
+            agent = self.hub.state_view("agent")["agent"]
+        pane = ((agent or {}).get("default_agent") or {}).get("pane_id") if isinstance(agent, dict) else None
+        return pane if isinstance(pane, str) else None
+
+    def _overview_read(self, bridges) -> None:
+        """Runs on the poll's worker. A blocked pane's screen is read once per
+        pane revision (`pane.read visible`, the same read HERDR-3's text proof
+        uses - never `recent`, never a resize), a finished pane's latest reply
+        once (a few retries while its agent is still writing it). A read that
+        fails is remembered as "nothing to say": the row then says "Waiting
+        for you" / "Finished"."""
+        from .herdr_bridge import HerdrUnavailable
+        by_name = {bridge.session: bridge for bridge in bridges}
+        default_pane = self._overview_default_pane()
+        reader = self.overview_screen or (lambda bridge, pane: bridge.read_visible(pane))
+        for session, pane in self.overview.blocked_needing_a_read(default_pane=default_pane)[
+                :self.OVERVIEW_READS_PER_POLL]:
+            bridge = by_name.get(session)
+            if bridge is None:
+                continue
+            try:
+                screen = reader(bridge, pane)
+            except (HerdrUnavailable, OSError, ValueError, TypeError):
+                screen = None
+            self.overview.note_screen(session, pane, screen)
+        with self._unseen_lock:
+            unseen = (self._unseen_value or {}).get("herdr") or []
+        for session, pane in self.overview.unread_moves(unseen)[:self.OVERVIEW_REPLIES_PER_POLL]:
+            bridge = by_name.get(session)
+            text = None
+            if bridge is not None:
+                try:
+                    text = (self.overview_reply or self._overview_reply_text)(bridge, pane)
+                except (HerdrUnavailable, OSError, ValueError, TypeError):
+                    text = None
+            self.overview.note_reply(session, pane, text)
+
+    def _overview_reply_text(self, bridge, pane: str):
+        """The agent's own latest reply in this pane (HERDR-11 §2), when it is
+        complete; None for anything that cannot be matched reliably."""
+        replies = self.herdr_replies
+        if replies is None:
+            return None
+        agent, agent_session, present = self._herdr_pane_agent(bridge, pane)
+        if not present or agent is None:
+            return None
+        document = replies.reply(session=bridge.session, pane=pane, agent=agent,
+                                 process_info=bridge.process_info(pane), agent_session=agent_session)
+        if not document.get("available") or document.get("complete") is False:
+            return None
+        return document.get("text")
+
+    def _overview_observe(self, event) -> None:
+        """The Agent's own changes (an approval, a turn) move its row."""
+        if event.type != "agent.changed":
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        # Not from inside the hub's own publish: the next turn of the loop.
+        if loop is not None:
+            loop.call_soon(self.publish_overview)
+        else:
+            self.publish_overview()
+
+    def overview_value(self) -> dict:
+        agent = self.hub.state_view("agent")["agent"]
+        with self._unseen_lock:
+            unseen = self._unseen_value
+        return self.overview.value(agent=agent, unseen=unseen, default_pane=self._overview_default_pane(agent))
+
+    def publish_overview(self) -> None:
+        """`state.overview` and `overview.changed`, only when the list moved."""
+        if getattr(self, "overview", None) is None:
+            return   # a service built without __init__ (a unit test's stub)
+        with self._overview_lock:
+            value = self.overview_value()
+            if value == self._overview_value:
+                return
+            self._overview_value = value
+            self.hub.update_state({"overview": value}, event_type="overview.changed")
+
+    def seen_mark(self, session: str, pane: str) -> None:
+        if self.seen_ledger is not None:
+            self.seen_ledger.seen(self.seen_ledger.herdr_key(session, pane))
+            self.publish_unseen()
+
+    def seen_watch(self, key: str, delta: int) -> None:
+        """A device's stream that shows `key` opened (+1) or closed (-1)."""
+        if isinstance(key, str) and key.startswith("herdr:"):
+            # HERDR-11 §4: a session with a pane on a screen is a watched one.
+            with self._unseen_lock:
+                streams = self.__dict__.setdefault("_seen_watching", {})
+                streams[key] = max(0, streams.get(key, 0) + delta)
+                if not streams[key]:
+                    del streams[key]
+        if self.seen_ledger is not None:
+            self.seen_ledger.watch(key, delta)
+            if delta > 0:
+                self.publish_unseen()
+
+    def native_connected(self) -> bool:
+        """LITE-1b: is the App (any companion, not a browser, not the panel) listening now?
+
+        A host has one person; a web device's "quiet while the App is open"
+        means any of that person's native clients holding a live event stream.
+        """
+        role = getattr(self.hub.auth, "device_role", None)
+        for device in self.hub.connected_devices():
+            if device == PLUGIN_DEVICE_ID:
+                continue
+            try:
+                if (role(device) if callable(role) else "companion") == "companion":
+                    return True
+            except (ValueError, OSError):
+                continue
+        return False
+
     def _devices_with_media(self):
         """The credential registry, with the streaming grant beside it.
 
@@ -958,8 +2044,16 @@ class CoreService:
                 # off entirely rather than tell the panel every device lost its
                 # streaming grant.
                 return devices
+        pushes = self.push_store.summary() if self.push_store is not None else None
         for row in devices:
             device = row["device_id"]
+            if row.get("role") == "web":
+                # LITE-1a C4: Remote is not something a web app can hold, so
+                # there is no streaming state to report or repair.
+                # LITE-1b: push is what a web app has instead.
+                if pushes is not None:
+                    row["push"] = dict(pushes.get(device) or {"subscribed": False, "enabled": True})
+                continue
             row["media_authorized"] = device in allowed
             source = allowed.get(device) or ""
             if not source and pairing is not None:
@@ -993,6 +2087,43 @@ class CoreService:
             row["ssh_keys"] = keys
             # The one fact a panel acts on: more than one line for one device.
             row["ssh_key_duplicates"] = len(keys) > 1
+        self._decorate_older_pairings(devices)
+
+    def _decorate_older_pairings(self, devices):
+        """REMOTE-PAIR-1 §5: "this phone, older pairing", said on the row.
+
+        A phone that paired again under a new id used to leave two "iPhone"
+        rows with nothing telling them apart. When an older companion row and
+        a newer one offered the same SSH key, the older one carries
+        `older_pairing_of: <newer id>`. It is a label for the person reading
+        the page and authorizes nothing: the retirement itself only happens on
+        proof (`media_rebound`) or by `devices revoke`.
+        """
+        pairing = getattr(self, "pairing", None)
+        offered = {}
+        if pairing is not None:
+            try:
+                offered = pairing.ssh_fingerprints()
+            except (ServiceError, OSError, ValueError):
+                offered = {}
+        prints, claimed = {}, {}
+        for row in devices:
+            if row.get("role", "companion") != "companion":
+                continue
+            device = row["device_id"]
+            found = {key for key in row.get("ssh_keys") or [] if isinstance(key, str)}
+            if device in offered:
+                found.add(offered[device][0])
+                claimed[device] = offered[device][1]
+            prints[device] = {value for value in found if value}
+        for row in devices:
+            device = row["device_id"]
+            if device not in prints:
+                continue
+            newer = [other for other in prints if other != device and prints[other] & prints[device]
+                     and claimed.get(other, 0) > claimed.get(device, 0)]
+            if newer:
+                row["older_pairing_of"] = max(newer, key=lambda other: claimed.get(other, 0))
 
     def ssh_key(self, device: str, payload: dict) -> dict:
         """UX-4 §2. The device replaces the key this host holds for it.
@@ -1070,8 +2201,11 @@ class CoreService:
             raise ServiceError("authorized_keys_unreadable", "authorized_keys could not be read", 503) from None
         # In file order, so the last one is the newest (see `AuthorizedKeys.prune`).
         mine = [row["fingerprint"] for row in rows if row["device"] == device]
+        # TAIL-2 P0-4 / P1-1: where the terminal is *now*, read fresh, so a
+        # paired device learns a new road or Tailscale SSH without re-pairing.
         return self.resource({"device_id": device, "authorized": bool(mine),
-                              "fingerprint": mine[-1] if mine else None, "fingerprints": mine})
+                              "fingerprint": mine[-1] if mine else None, "fingerprints": mine,
+                              "target": self.ssh_target()})
 
     def ssh_key_prune(self, device=None) -> dict:
         """UX-4 §3. Keep the newest owned line per device, drop the older ones."""
@@ -1174,6 +2308,40 @@ class CoreService:
             _ssh_journal({"event": "ssh.key.reconciled", **result})
         return result
 
+    def pending_request_markers(self):
+        """NOTIFY-3. What the notification watcher may keep on the desktop.
+
+        `{"pair": request ids still pending, "ssh": devices whose offered key
+        still waits}`, or None when there is no pairing store to ask. The SSH
+        half lives in this process only, so after a restart it is empty and a
+        notification about it is stale - which is the truth: the device offers
+        its key again and a new one is posted.
+        """
+        pairing = getattr(self, "pairing", None)
+        if pairing is None:
+            return None
+        ids = pairing.pending_request_ids()
+        if ids is None:
+            return None
+        try:
+            waiting = dict(self._ssh_pending)
+        except RuntimeError:
+            return None
+        now = time.time()
+        return {"pair": ids, "ssh": {device for device, row in waiting.items()
+                                     if isinstance(row, dict) and row.get("expires_at", 0) > now}}
+
+    def _ssh_holder(self, device, row):
+        """`held_by` / `held_by_name`: another device whose line carries this key."""
+        from .ssh_keys import SshKeyError
+        try:
+            holder = self.ssh_keys.owner_of(row["public_key"])
+        except (SshKeyError, OSError, KeyError):
+            holder = None
+        if holder in (None, device):
+            return {"held_by": None, "held_by_name": None}
+        return {"held_by": holder, "held_by_name": self.hub.auth.device_name(holder)}
+
     def _decide_ssh(self, device, *, approve):
         row = self._ssh_pending.pop(device, None)
         if row is None or row["expires_at"] <= time.time():
@@ -1183,17 +2351,32 @@ class CoreService:
             return {"device_id": device, "authorized": False, "fingerprint": row["fingerprint"]}
         from .ssh_keys import SshKeyError
         try:
-            result = self.ssh_keys.replace(row["public_key"], device, self._ssh_expiry(device))
+            # REMOTE-PAIR-1: the person at the computer approved exactly this
+            # fingerprint for exactly this device. A line another Omodachi
+            # device holds for the same key - the same phone, paired before
+            # under another id - moves here rather than leaving the terminal
+            # refused for good. It moves, it is not copied: the key keeps one
+            # owner, so that owner's revoke still takes it back. `ssh pending`
+            # names the current holder before the approval.
+            holder = self.ssh_keys.owner_of(row["public_key"])
+            result = self.ssh_keys.replace(row["public_key"], device, self._ssh_expiry(device),
+                                           take_from=holder if holder not in (None, device) else None)
         except SshKeyError as error:
             raise ServiceError(error.code, error.code, 409) from None
         except OSError:
             raise ServiceError("authorized_keys_unreadable", status=503) from None
+        if result.get("moved_from"):
+            _ssh_journal({"event": "ssh.key.moved", "device_id": device, "from_device_id": result["moved_from"],
+                          "fingerprint": result["fingerprint"], "proof": "local_approval"})
         grants = self._ssh_grants(device)
         if grants is not None:
             self.pairing.grant(grants["request_id"], ssh=True)
         _ssh_journal({"event": "ssh.key.approved", "device_id": device, "fingerprint": result["fingerprint"]})
-        return {"device_id": device, "authorized": True, "fingerprint": result["fingerprint"],
-                "grant_recorded": grants is not None}
+        answer = {"device_id": device, "authorized": True, "fingerprint": result["fingerprint"],
+                  "grant_recorded": grants is not None}
+        if result.get("moved_from"):
+            answer["moved_from"] = result["moved_from"]
+        return answer
 
     def _authorize_ssh(self, public_key, device, expires_at=None):
         """Land one companion's public key, reporting failure instead of hiding it."""
@@ -1332,6 +2515,35 @@ class CoreService:
                     "tls_fingerprint_sha256": None, "endpoints": []}
         return self.host_identity.descriptor()
 
+    def odomo_push_devices(self):
+        """LITE-1d: how many web devices of this host get a push on a locked
+        screen - a live subscription, push not switched off at the computer,
+        and a credential that still works. `None` when there is no push here
+        (demo, tests) or the files cannot be read.
+
+        Per host, not per person: core knows devices, not who holds them. The
+        only hint of a person is the Tailscale login a claim over the tailnet
+        carried (`pairing` `via`), which is for the approval card and never
+        authorization, is missing for anything paired on the LAN, and is the
+        same for every device on a one-person tailnet. So the native app says
+        "on for this computer", never "on for you".
+        """
+        store = getattr(self, "push_store", None)
+        if store is None:
+            return None
+        try:
+            live = {row["device_id"] for row in self.hub.auth.list_devices()
+                    if row.get("role") == "web" and row.get("active_credentials", 0) > 0}
+            return store.live_count(live)
+        except (OSError, ValueError, KeyError, AttributeError):
+            return None
+
+    def host_roads(self) -> dict:
+        """`GET /v1/host/roads`: what the claim said about roads, read fresh."""
+        if self.host_identity is None:
+            return self.resource({"host_id": None, "tls_fingerprint_sha256": None, "endpoints": []})
+        return self.resource(self.host_identity.roads())
+
     def ssh_target(self) -> dict:
         """Where this host's terminal is, so no one has to type it in."""
         import getpass
@@ -1341,8 +2553,17 @@ class CoreService:
             user = None
         descriptor = self.host_descriptor()
         endpoints = descriptor.get("endpoints") or []
-        host = endpoints[0]["host"] if endpoints else descriptor.get("host_name")
-        return {"user": user, "host": host, "port": 22}
+        # TAIL-2 P0-4: `host` stays the first LAN address, which is what a
+        # client from before TAIL-2 dials; `hosts` is every road with its
+        # kind, so a client on the tailnet dials the MagicDNS name instead.
+        lan = [row["host"] for row in endpoints if row.get("kind", "lan") == "lan"]
+        host = lan[0] if lan else (endpoints[0]["host"] if endpoints else descriptor.get("host_name"))
+        hosts = [{"host": row["host"], "kind": row.get("kind", "lan")} for row in endpoints]
+        reading = self.host_identity.tailnet_reading() if self.host_identity is not None else None
+        # P1-1: with Tailscale SSH on, port 22 over the tailnet is tailscaled,
+        # not sshd, and nothing Omodachi granted or revoked applies there.
+        tailscale_ssh = bool(isinstance(reading, dict) and reading.get("running") and reading.get("ssh"))
+        return {"user": user, "host": host, "port": 22, "hosts": hosts, "tailscale_ssh": tailscale_ssh}
 
     def pairing_mode(self) -> str:
         """`open` unless this host has been locked to invitations (PAIR-2 §1)."""
@@ -1357,15 +2578,20 @@ class CoreService:
             return "open"
         return value if value in PAIRING_MODES else "open"
 
-    def pairing_request(self, payload: dict, *, remote_addr=None) -> dict:
+    def pairing_request(self, payload: dict, *, remote_addr=None, via=None, browser=False) -> dict:
         pairing = getattr(self, "pairing", None)
         if pairing is None:
             raise ServiceError("pairing_unavailable", status=503)
         # PAIR-2: the invitation is optional. In `open` mode a request without
         # one becomes pending and waits for the same local Approve; in `invite`
         # mode its absence is `pairing_invitation_required`.
-        fields(payload, ("device_id", "device_name"), ("invitation", "ssh_public_key"))
-        return self.resource(pairing.request(**payload, remote_addr=remote_addr,
+        fields(payload, ("device_id", "device_name"), ("invitation", "ssh_public_key", "client"))
+        # LITE-1a C4: `client` says what is asking. A browser is a web client
+        # whatever it says (`browser` is "the request carried Origin"); saying
+        # `web` without being a browser only ever gets less.
+        client = payload.pop("client", None)
+        return self.resource(pairing.request(**payload, remote_addr=remote_addr, via=via,
+                                             client=client, browser=browser,
                                              mode=self.pairing_mode()))
 
     def pairing_claim(self, request_id: str, payload: dict) -> dict:
@@ -1529,12 +2755,34 @@ class CoreService:
             self.hub.update_state({"workspace":{"layout_binding":binding}},event_type="workspace.layout_binding_changed")
         return binding
 
-    def state(self, device_id: str) -> dict:
+    def state(self, device_id: str, known_catalog: str | None = None) -> dict:
         # PERF-4 §0: this is read straight onto the wire and never mutated, and
         # deep-copying the catalog inside it for every poll was most of what
         # the daemon's CPU went on.
         snapshot = self.hub.state_snapshot(device_id, copy_state=False)
-        return self.resource({**snapshot, "event_cursor": self.hub.event_cursor, "instance_id": self.instance_id})
+        extra = {}
+        if "overview" not in snapshot and getattr(self, "overview", None) is not None:
+            # OVERVIEW-1: the list is on the state from the first read, even
+            # before the first poll or agent event has published it.
+            extra["overview"] = self.overview_value()
+        catalog = snapshot.get("catalog")
+        if (isinstance(known_catalog, str) and known_catalog and isinstance(catalog, dict)
+                and catalog.get("revision") == known_catalog):
+            # HERDR-11 §4: the client already holds this catalog - most of the
+            # ~590 KB a state read used to be. It is told "unchanged" instead
+            # of being sent the rows again. A client that names no revision
+            # (every one from before HERDR-11) gets the rows, as before.
+            extra["catalog"] = {key: catalog[key] for key in ("contract_revision", "revision", "source_revision")
+                                if key in catalog}
+            extra["catalog"].update({"entries": [], "unchanged": True})
+        if self.herdr_bridge is not None and isinstance(snapshot.get("herdr"), dict):
+            # NOTIFY-2: what is blocked right now, per watched session - the
+            # baseline a client's next `herdr.layout.changed` is news against.
+            with self._herdr_lock:
+                blocked = {name: [dict(row) for row in rows] for name, rows in self._herdr_blocked.items()}
+            extra["herdr"] = {**snapshot["herdr"], "blocked": blocked}
+        return self.resource({**snapshot, **extra, "event_cursor": self.hub.event_cursor,
+                              "instance_id": self.instance_id})
 
     def register_executor(self, entry_id: str, executor: Callable[[tuple[str, ...]], Any], *, requires_target=False,
                           requires_workspace=False, workspace_preflight=None, with_device=False):
@@ -1791,8 +3039,32 @@ class CoreService:
         }, event_type="agent.changed")
         self.refresh_catalog()
 
-    async def dispatch_remote_async(self, op, params, device):
-        """One entry point for every Remote operation, on IPC and on HTTPS."""
+    async def stop_remote_as_owner(self, payload):
+        """`local.remote.stop`: `{}` the live session, `{session_id}` that one, `{all: true}` every one."""
+        from .remote.errors import RemoteError
+        fields(payload, (), ("session_id", "all"))
+        every = payload.get("all", False)
+        session_id = payload.get("session_id")
+        if type(every) is not bool or (session_id is not None and not isinstance(session_id, str)):
+            raise ServiceError("invalid_request")
+        if session_id is not None:
+            identifier(session_id)
+            if every:
+                raise ServiceError("invalid_request", "name one session or all of them, not both")
+        try:
+            return await self.remote.stop_as_owner(session_id=session_id, every=every)
+        except RemoteError as error:
+            raise ServiceError(error.code, error.code, error.status, **error.detail) from None
+
+    async def dispatch_remote_async(self, op, params, device, *, local=False):
+        """One entry point for every Remote operation, on IPC and on HTTPS.
+
+        `local` is True only from the verified same-UID Unix socket (see
+        `Hub.dispatch`). It matters to exactly one thing: `remote.stop` with
+        the panel's own credential there is the local owner (REMOTE-STOP-1),
+        who may end any device's session. The same credential over HTTPS, and
+        every device credential anywhere, keeps the device rule.
+        """
         from .remote.errors import RemoteError
         if not isinstance(device, str) or not device:
             raise ServiceError("pairing_required", status=401)
@@ -1840,10 +3112,13 @@ class CoreService:
                 return self.resource(await self.remote.heartbeat(device, session_id))
             if op == "remote.presented":
                 return self.resource(await self.remote.presented(device, session_id, payload))
+            if op == "remote.text":
+                return self.resource(await self.remote.text(device, session_id, payload))
             if op == "remote.stop":
                 if payload:
                     raise ServiceError("invalid_request")
-                return self.resource(await self.remote.release(device, session_id))
+                owner = local is True and device == PLUGIN_DEVICE_ID
+                return self.resource(await self.remote.release(device, session_id, local_owner=owner))
         except RemoteError as error:
             # The Remote subsystem's detail is documented in remote-api.md; it
             # only reaches a client if it survives this translation.

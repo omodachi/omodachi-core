@@ -1,0 +1,22 @@
+{
+  "contract_revision": "omodachi.v1",
+  "selected": "work",
+  "owned": "omodachi",
+  "scope": "device",
+  "workspace": {
+    "id": "w3",
+    "label": "home",
+    "number": 3,
+    "focused": false,
+    "pane": "w3:p1",
+    "cwd": "/home/user",
+    "display": "~"
+  },
+  "launch": {
+    "command": "codex",
+    "pane": "w3:p1",
+    "sent": true,
+    "drawn": true,
+    "reason": null
+  }
+}

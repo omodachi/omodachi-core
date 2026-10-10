@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "upload_type_refused",
+    "message": "only images, PDFs and text or code files are accepted"
+  },
+  "contract_revision": "omodachi.v1"
+}

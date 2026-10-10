@@ -29,3 +29,11 @@ typing-extensions==4.16.0 ; python_version < "3.13"
 
 # zeroconf's
 ifaddr==0.2.0
+
+# LITE-1b: Web Push (`webpush.py`). AES-128-GCM and P-256 ECDH/ECDSA have no
+# path in the standard library; `cryptography` is the one new dependency, and
+# its own two come with it. cryptography's wheels are abi3 (one wheel serves
+# 3.11-3.14); cffi's are per interpreter; pycparser is pure Python.
+cryptography==50.0.2
+cffi==2.1.1
+pycparser==3.0

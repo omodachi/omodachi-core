@@ -275,7 +275,8 @@ class AuthorizedKeys:
         return {"authorized": True, "changed": True, "device": owner, "reason": "added",
                 "fingerprint": fingerprint(body)}
 
-    def replace(self, public_key: str, device: str, expires_at: int | None = None) -> dict:
+    def replace(self, public_key: str, device: str, expires_at: int | None = None,
+                take_from: str | None = None) -> dict:
         """One device, one line: the key it offers now replaces what it had.
 
         UX-4. `authorize` appends, which is right for a pairing - the device is
@@ -294,32 +295,61 @@ class AuthorizedKeys:
         that for the lines Omodachi owns, file order is the order they were
         landed in - which is what makes "the newest one" a fact rather than a
         guess (see `prune`).
+
+        REMOTE-PAIR-1: `take_from` names the one other device whose line for
+        exactly this key may move here instead of refusing - the same phone
+        that paired again under a new id (proven by its Moonlight certificate),
+        or a key the person at the computer approved for this device by its
+        fingerprint. The line moves; it is never copied, so the key still has
+        exactly one owner and that owner's revoke still takes it back. A line
+        the user wrote by hand is never taken.
         """
         kind, body = parse_public_key(public_key)
         owner = device_name(device)
+        donor = device_name(take_from) if take_from is not None else None
         lines = self._read()
+        moved = []
         for line in lines:
             if self._body(line) != (kind, body):
                 continue
             existing = self._owner(line)
             if existing == owner:
                 continue
+            if existing is not None and existing == donor:
+                moved.append(line)
+                continue
             # This key body is on somebody else's line, or on one the user
             # wrote by hand. Taking it over would let one device's revoke
             # silently disarm another's access, or edit a line we do not own.
             raise SshKeyError("public_key_not_owned" if existing is None else "public_key_owned_by_other_device")
+        if moved:
+            lines = [line for line in lines if line not in moved]
         mine = [line for line in lines if self._owner(line) == owner]
         dropped = [fingerprint(found[1]) for line in mine
                    if (found := self._body(line)) is not None and found != (kind, body)]
-        if len(mine) == 1 and self._body(mine[0]) == (kind, body) and self._hardened(mine[0], expires_at):
+        if (not moved and len(mine) == 1 and self._body(mine[0]) == (kind, body)
+                and self._hardened(mine[0], expires_at)):
             return {"authorized": True, "changed": False, "device": owner,
                     "reason": "already_authorized", "fingerprint": fingerprint(body),
                     "removed": 0, "replaced": []}
         kept = [line for line in lines if self._owner(line) != owner]
         self._write(kept + [owned_line(kind, body, owner, expires_at)])
-        return {"authorized": True, "changed": True, "device": owner,
-                "reason": "replaced" if mine else "added", "fingerprint": fingerprint(body),
-                "removed": len(mine), "replaced": dropped}
+        result = {"authorized": True, "changed": True, "device": owner,
+                  "reason": "moved" if moved else "replaced" if mine else "added", "fingerprint": fingerprint(body),
+                  "removed": len(mine), "replaced": dropped}
+        if moved:
+            result["moved_from"] = donor
+        return result
+
+    def owner_of(self, public_key: str) -> str | None:
+        """The device whose owned line carries exactly this key, if any."""
+        kind, body = parse_public_key(public_key)
+        for line in self._read():
+            if self._body(line) == (kind, body):
+                owner = self._owner(line)
+                if owner is not None:
+                    return owner
+        return None
 
     def prune(self, device: str | None = None) -> dict:
         """Keep the newest owned line per device and delete the older ones.

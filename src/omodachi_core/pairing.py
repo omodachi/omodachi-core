@@ -85,6 +85,52 @@ def address(value):
     return value
 
 
+# TAIL-2 P1-6 + LITE-1a C3: the road a request came by. One shape for the App
+# and for a browser: behind `tailscale serve` the peer is the client serve
+# forwarded for, so a browser on the tailnet is `tailnet` like the App is.
+VIA_KINDS = ("lan", "tailnet", "loopback", "other")
+
+
+# LITE-1a C4. What kind of client is asking, and the words the card uses for
+# it. `native` is the App; `web` is Odomo in a browser, whose label
+# ("Safari on iPhone") is the browser's own guess and is cleaned like a name.
+CLIENT_KINDS = ("native", "web")
+
+
+def clean_client(value, *, browser=False):
+    """`{kind, label}` for the row. A browser is always `web`."""
+    if value is not None and (not isinstance(value, dict) or set(value) - {"kind", "label"}
+                              or value.get("kind") not in CLIENT_KINDS):
+        raise ServiceError("invalid_request")
+    value = value or {}
+    kind = "web" if browser else value.get("kind", "native")
+    label = clean_device_name(value.get("label")) if value.get("label") is not None else None
+    if value.get("label") is not None and label is None:
+        raise ServiceError("invalid_request")
+    return {"kind": kind, "label": label if kind == "web" else None}
+
+
+def client_label(client):
+    """What the approval card calls a web client, formatted here, once."""
+    if not isinstance(client, dict) or client.get("kind") != "web":
+        return None
+    return "Web app · " + client["label"] if client.get("label") else "Web app"
+
+
+def clean_via(value):
+    """`{kind, peer_name, login}` fit for the card, or None. Never authorization."""
+    if not isinstance(value, dict) or value.get("kind") not in VIA_KINDS:
+        return None
+    result = {"kind": value["kind"]}
+    for key, limit in (("peer_name", 64), ("login", 128)):
+        text = value.get(key)
+        if isinstance(text, str):
+            text = "".join(c for c in text if c.isprintable() and
+                           unicodedata.category(c) not in {"Cf", "Co", "Cn", "Cs"}).strip()[:limit]
+        result[key] = text or None
+    return result
+
+
 class PairingStore:
     TTL = 300
     # How many devices' approvals are kept as durable grant sources. It is the
@@ -155,6 +201,18 @@ class PairingStore:
         # thing that distinguishes "the iPad I am holding" from "something else
         # on this network", so the card and `pair pending` both show it.
         value["remote_addr"] = row.get("remote_addr")
+        # TAIL-2 P1-6: which road the request came by and, over the tailnet,
+        # who this computer's own tailscaled says the peer is. The card shows
+        # this instead of a raw 100.x address. Context, never authorization.
+        value["via"] = dict(row["via"]) if isinstance(row.get("via"), dict) else None
+        # TAIL-2 P0-2: the device already holds a live credential here (it
+        # forgot this host, or reinstalled). Approving replaces it.
+        value["already_paired"] = row.get("already_paired") is True
+        # LITE-1a. Which client is asking (a row from before it is the App)
+        # and the card's words for a web one.
+        client = row.get("client") if isinstance(row.get("client"), dict) else {"kind": "native", "label": None}
+        value["client"] = {"kind": client.get("kind", "native"), "label": client.get("label")}
+        value["client_label"] = client_label(client)
         return value
 
     def pending(self):
@@ -162,8 +220,38 @@ class PairingStore:
             return {"requests": [self.public(row) for row in state["requests"].values()
                                  if row["status"] in {"pending", "approved"}]}
 
+    def pending_request_ids(self):
+        """NOTIFY-3. The ids still waiting for a local decision, or None.
+
+        Read-only and lock-free on purpose: the notification watcher asks this
+        every pass while one of our requests is on the desktop, and
+        `transaction()` rewrites the file. The file is only ever replaced
+        whole (`os.replace`), so a read sees one complete state. None means
+        "cannot tell", which withdraws nothing.
+        """
+        try:
+            fd = _private_open(self.path, os.O_RDONLY)
+            with os.fdopen(fd, "rb") as stream:
+                raw = stream.read(262145)
+        except FileNotFoundError:
+            return set()
+        except OSError:
+            return None
+        if len(raw) > 262144:
+            return None
+        try:
+            requests = json.loads(raw).get("requests")
+        except (ValueError, AttributeError):
+            return None
+        if not isinstance(requests, dict):
+            return None
+        now = time.time()
+        return {key for key, row in requests.items()
+                if isinstance(row, dict) and row.get("status") == "pending"
+                and isinstance(row.get("expires_at"), (int, float)) and row["expires_at"] > now}
+
     def request(self, invitation=None, device_id=None, device_name=None, ssh_public_key=None,
-                remote_addr=None, mode="open"):
+                remote_addr=None, mode="open", client=None, browser=False, via=None):
         if mode not in PAIRING_MODES:
             raise ServiceError("invalid_request")
         if not isinstance(device_id, str) or not _DEVICE_ID.fullmatch(device_id):
@@ -174,6 +262,11 @@ class PairingStore:
         device_name = clean_device_name(device_name)
         if device_name is None:
             raise ServiceError("invalid_request")
+        client = clean_client(client, browser=browser)
+        if client["kind"] == "web" and ssh_public_key is not None:
+            # A browser cannot open an SSH session, so a key from one is a
+            # request for a grant nobody can use: refused, not dropped.
+            raise ServiceError("invalid_request", "a web client cannot offer an SSH key")
         key_type = key_body = None
         if ssh_public_key is not None:
             # Refuse a key sshd could not parse here, not at Approve: a request
@@ -213,14 +306,28 @@ class PairingStore:
             # never make the host refuse a new pairing.
             if sum(1 for v in state["requests"].values() if v["status"] != "claimed") >= 64:
                 raise ServiceError("pairing_capacity", status=429)
-            if any(d["device_id"] == device_id and d["active_credentials"] for d in self.authority.list_devices()):
-                raise ServiceError("pairing_device_exists", status=409)
+            # TAIL-2 P0-2. This used to be `409 pairing_device_exists`: a
+            # device that still held a credential could not ask again. TAIL-1
+            # §4.4 met the cost away from home - a phone that forgot its
+            # LAN-paired host could only come back over the tailnet after
+            # somebody revoked it *at the computer* and then approved it again.
+            # The request now waits for the same local Approve as any other;
+            # the card says the device is already paired, and the claim
+            # retires its older credentials, so the device ends with one.
+            already = any(d["device_id"] == device_id and d["active_credentials"]
+                          for d in self.authority.list_devices())
             request_id = "pair_" + secrets.token_hex(16)
             request = {"request_id": request_id, "device_id": device_id, "device_name": device_name,
                        "status": "pending", "expires_at": expires_at, "secret_hash": digest(secret),
                        "grants": dict(EMPTY_GRANTS)}
+            if already:
+                request["already_paired"] = True
             if source is not None:
                 request["remote_addr"] = source
+            request["client"] = client
+            via = clean_via(via)
+            if via is not None:
+                request["via"] = via
             if key_body is not None:
                 request["ssh_public_key"] = f"{key_type} {key_body}"
                 request["ssh_fingerprint"] = fingerprint(key_body)
@@ -267,6 +374,28 @@ class PairingStore:
             row = max(rows, key=lambda row: row.get("claimed_at", row["expires_at"]))
             return {"request_id": row["request_id"], **dict(row.get("grants") or EMPTY_GRANTS)}
 
+    def offered_ssh_key(self, device_id):
+        """REMOTE-PAIR-1: the SSH public key this device's latest approval carried."""
+        with self.transaction() as state:
+            rows = [row for row in state["requests"].values()
+                    if row["device_id"] == device_id and row["status"] in {"approved", "claimed"}]
+            if not rows:
+                return None
+            return max(rows, key=lambda row: row.get("claimed_at", row["expires_at"])).get("ssh_public_key")
+
+    def ssh_fingerprints(self):
+        """REMOTE-PAIR-1: `{device_id: (fingerprint, claimed_at)}` from each device's
+        latest approval that carried a key. A display hint, never authority."""
+        with self.transaction() as state:
+            latest = {}
+            for row in state["requests"].values():
+                if row["status"] not in {"approved", "claimed"} or not row.get("ssh_fingerprint"):
+                    continue
+                when = row.get("claimed_at", row["expires_at"])
+                if row["device_id"] not in latest or when > latest[row["device_id"]][1]:
+                    latest[row["device_id"]] = (row["ssh_fingerprint"], when)
+            return latest
+
     def forget_device(self, device_id):
         """Drop a revoked device's durable approvals; a revoke keeps nothing."""
         with self.transaction() as state:
@@ -296,7 +425,10 @@ class PairingStore:
                 return self.public(row)
             if row["status"] != "approved":
                 raise ServiceError("pairing_request_unavailable", status=409)
-            credential = self.authority.issue(row["device_id"], device_name=row["device_name"])
+            web = (row.get("client") or {}).get("kind") == "web"
+            credential = self.authority.issue(row["device_id"], device_name=row["device_name"],
+                                              role="web" if web else None,
+                                              retire_others=row.get("already_paired") is True)
             row["status"] = "claimed"
             # The row now outlives its TTL. The secret stays only as the stored
             # hash it already was, and it authorizes nothing further: a second

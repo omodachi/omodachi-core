@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/herdr-text.schema.json",
+  "title": "Herdr text sent",
+  "description": "HERDR-3: the reply to `POST /v1/herdr/panes/{pane}/text {\"text\": string, \"submit\"?: bool}`. The text went to the pane as one `pane.send_text` (never chunked, at most 16 KiB of UTF-8, no control characters but `\\n` and `\\t`). With `submit`, the visible screen is read before the send and up to eight times after it, 350 ms apart, and Enter is pressed only once the end of the text (or a new `[Pasted text #N +M lines]` token) is on it. `delivered` is that Herdr took the text; `submitted` is that Enter followed. `reason` says why not: `not_requested` (no `submit`), `not_seen` (the text never showed up - probably a dialog has focus - so nothing was submitted), `submit_failed` (the Enter itself was refused). HERDR-4: `proof` says what the screen showed when Enter was pressed: `tail` (the end of the text appeared), `paste` (Claude's paste token appeared) or `line` (a reply shorter than eight characters: a line that changed now ends with it - the input line - which is a weaker reading, so a client says \"Sent\" without claiming it was seen). It is `null` when nothing was submitted. VERIFY-1: with `submit`, when Herdr reports the pane's agent as `blocked` (a permission or approval dialog has the keyboard), nothing is typed at all - a dialog reads letters as its own shortcuts, so a reply would answer it - and the reply is `delivered: false`, `reason: herdr_agent_blocked`: answer the dialog with the keys. ATTACH-1: the request may carry `attachments` - upload ids (`upload.schema.json`) in chip order, each a string or `{\"id\", \"marker\": \"[Image #N]\" | \"[File #N]\"}`, at most ten. Each marker in `text` that has an attachment behind it becomes that file's absolute host path where it stands; an attachment whose marker is not in the text has its path put in front, in order (Collie ADR 0060). A marker with no attachment behind it is typed as written. An id that is gone is `409 attachment_gone`, and nothing is typed. The audit line counts the attachments, never names them.",
+  "type": "object",
+  "required": ["contract_revision", "action", "pane", "delivered", "submitted", "reason", "proof"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "action": {"const": "text"},
+    "pane": {"type": "string", "pattern": "^w[0-9]{1,9}:p[0-9]{1,9}$"},
+    "delivered": {"type": "boolean"},
+    "submitted": {"type": "boolean"},
+    "reason": {"enum": [null, "not_requested", "not_seen", "submit_failed", "herdr_agent_blocked"]},
+    "proof": {"enum": [null, "tail", "paste", "line"]}
+  }
+}

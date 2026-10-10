@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import tempfile
+import time
 import unittest
 
 import aiohttp
@@ -146,14 +147,49 @@ class ListingTests(unittest.TestCase):
             # Re-pairing forgot the dead hash instead of carrying it for ever.
             self.assertEqual(auth.list_devices()[0]["expired_credentials"], 0)
 
-    def test_a_device_with_a_live_credential_still_cannot_pair_twice(self):
+    def test_a_device_with_a_live_credential_can_ask_again_and_ends_with_one(self):
+        # TAIL-2 P0-2. This was `409 pairing_device_exists` (TAIL-1 §4.4: away
+        # from home the only way back was revoke + Approve at the computer).
+        # The request now waits for the same local Approve, says the device
+        # is already paired, and the claim retires the old credential with
+        # the renewal grace.
         with tempfile.TemporaryDirectory() as temp:
             auth = DeviceAuthenticator.from_file(Path(temp) / "device.secret")
             store = PairingStore(auth, Path(temp) / "pairing.json")
-            auth.issue("ipad")
+            old = auth.issue("ipad").token
+            request = store.request(device_id="ipad", device_name="iPad")
+            self.assertEqual(request["status"], "pending")
+            self.assertTrue(request["already_paired"])
+            self.assertTrue(store.pending()["requests"][0]["already_paired"])
+            # Nothing is granted by asking: the old credential still works.
+            self.assertEqual(auth.verify(old), "ipad")
+            store.decide(request["request_id"], approve=True)
+            claimed = store.claim(request["request_id"], request["request_secret"])
+            self.assertEqual(auth.verify(claimed["credential"]), "ipad")
+            now = int(time.time())
+            # The old one works for the grace period only, then not at all.
+            self.assertEqual(auth.verify(old, now), "ipad")
+            with self.assertRaises(CredentialError):
+                auth.verify(old, now + auth.grace_seconds + 1)
+            self.assertEqual(auth.verify(claimed["credential"], now + auth.grace_seconds + 1), "ipad")
+
+    def test_a_rejected_repeat_request_leaves_the_device_paired(self):
+        with tempfile.TemporaryDirectory() as temp:
+            auth = DeviceAuthenticator.from_file(Path(temp) / "device.secret")
+            store = PairingStore(auth, Path(temp) / "pairing.json")
+            old = auth.issue("ipad").token
+            request = store.request(device_id="ipad", device_name="iPad")
+            store.decide(request["request_id"], approve=False)
             with self.assertRaises(ServiceError) as refused:
-                store.request(device_id="ipad", device_name="iPad")
-            self.assertEqual(refused.exception.code, "pairing_device_exists")
+                store.claim(request["request_id"], request["request_secret"])
+            self.assertEqual(refused.exception.code, "pairing_request_unavailable")
+            self.assertEqual(auth.verify(old, int(time.time()) + auth.grace_seconds + 1), "ipad")
+
+    def test_a_first_request_is_not_called_already_paired(self):
+        with tempfile.TemporaryDirectory() as temp:
+            auth = DeviceAuthenticator.from_file(Path(temp) / "device.secret")
+            store = PairingStore(auth, Path(temp) / "pairing.json")
+            self.assertFalse(store.request(device_id="ipad", device_name="iPad")["already_paired"])
 
 
 class RenewalTests(unittest.TestCase):

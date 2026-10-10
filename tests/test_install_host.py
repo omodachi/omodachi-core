@@ -86,7 +86,7 @@ class FirewallTests(unittest.TestCase):
             install_host.shutil.which = original_which
         self.addCleanup(restore)
 
-    def test_core_and_sunshine_ports_open_for_private_lans_and_tailscale_only(self):
+    def test_core_and_sunshine_ports_open_for_private_lans_only(self):
         recorder = Recorder()
         self.install(recorder)
         rules = [" ".join(call) for call in recorder.ufw_calls() if call[2] == "allow"]
@@ -97,10 +97,9 @@ class FirewallTests(unittest.TestCase):
                           "47984,47989,48010 comment omodachi-sunshine", rules)
             self.assertIn(f"sudo ufw allow in proto udp from {cidr} to any port "
                           "47998:48000 comment omodachi-sunshine", rules)
-        self.assertIn("sudo ufw allow in on tailscale0 to any port 8099 proto tcp "
-                      "comment omodachi-core", rules)
-        self.assertIn("sudo ufw allow in on tailscale0 to any port 47998:48000 proto udp "
-                      "comment omodachi-sunshine", rules)
+        # TAIL-2 P1-2: no tailscale0 rules - ts-input accepts tailscale0
+        # before ufw, so they never filtered anything (TAIL-1 §5.6).
+        self.assertFalse([rule for rule in rules if "tailscale0" in rule])
         # Nothing is ever opened to the whole internet.
         for rule in rules:
             self.assertNotIn("from any", rule)
@@ -110,11 +109,21 @@ class FirewallTests(unittest.TestCase):
     def test_a_host_without_tailscale_gets_only_the_private_lan_rules(self):
         recorder = Recorder(tailscale=False)
         self.install(recorder)
-        self.assertFalse([call for call in recorder.ufw_calls() if "tailscale0" in call])
+        self.assertFalse([call for call in recorder.ufw_calls()
+                          if "tailscale0" in call and "allow" in call and "delete" not in call])
 
-    def test_install_deletes_no_rule_at_all(self):
+    def test_install_deletes_only_our_own_tailscale0_rules(self):
         # RELEASE-9: hand-written rules, whatever their comment, are not ours.
-        recorder = Recorder()
+        # TAIL-2: the one deletion is the no-op tailscale0 rule an earlier
+        # version added, by its comment.
+        recorder = Recorder(added=ADDED + "ufw allow in on tailscale0 to any port 22 proto tcp comment 'mine'\n")
+        self.install(recorder)
+        self.assertEqual([" ".join(call) for call in recorder.ufw_calls() if "delete" in call],
+                         ["sudo ufw --force delete allow in on tailscale0 to any port 47998:48000 proto udp"])
+
+    def test_install_without_old_rules_deletes_nothing(self):
+        recorder = Recorder(added="Added user rules (see 'ufw status' for running firewall):\n"
+                                  "ufw limit 22/tcp comment 'omarchy-sshd'\n")
         self.install(recorder)
         self.assertEqual([call for call in recorder.ufw_calls() if "delete" in call], [])
 
@@ -184,8 +193,29 @@ class FirewallTruthTests(unittest.TestCase):
     def test_active_ufw_with_a_deny_default_names_the_ranges(self):
         text = self.summary(self.VERBOSE_ACTIVE)
         self.assertIn("ufw is active and denies incoming traffic by default", text)
-        self.assertIn("10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 and tailscale0", text)
+        self.assertIn("10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 only", text)
         self.assertIn("47990 is not opened", text)
+
+    def test_with_tailscale_the_summary_says_ufw_does_not_filter_the_tailnet(self):
+        # TAIL-2 P1-2 / TAIL-1 §5.6: ts-input accepts tailscale0 before ufw.
+        text = self.summary(self.VERBOSE_ACTIVE)
+        self.assertNotIn("and tailscale0", text)
+        self.assertIn("Over Tailscale, ufw does not apply", text)
+        self.assertIn("ts-input", text)
+        self.assertIn("tailnet's access rules (ACLs)", text)
+        self.assertIn("22", text)
+
+    def test_without_tailscale_there_is_no_tailnet_sentence(self):
+        import contextlib, io
+        from unittest import mock
+        recorder = Recorder(status=self.VERBOSE_ACTIVE, tailscale=False)
+        out = io.StringIO()
+        with mock.patch.object(install_host, "run", recorder.run), \
+                mock.patch.object(install_host.subprocess, "run", recorder.run), \
+                mock.patch.object(install_host.shutil, "which", lambda name: "/usr/bin/" + name), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            install_host.configure_firewall()
+        self.assertNotIn("Over Tailscale", out.getvalue())
 
     def test_active_ufw_that_allows_incoming_by_default_is_not_called_a_filter(self):
         text = self.summary(self.VERBOSE_ACTIVE.replace("deny (incoming)", "allow (incoming)"))
@@ -905,20 +935,20 @@ class PinnedSunshineTests(unittest.TestCase):
         self.check, self.ensure = check, ensure
         return result, out.getvalue(), err.getvalue(), install
 
-    OURS = {"version": "328d2313c92dc4db675a8eafe96a7e32460c2758",
-            "binary": "/home/u/.local/share/omodachi/sunshine/328d231/sunshine",
-            "directory": "/home/u/.local/share/omodachi/sunshine/328d231",
+    OURS = {"version": "e9f1b089255e235b5e6aa13ed89b7dd3f569de87",
+            "binary": "/home/u/.local/share/omodachi/sunshine/e9f1b08/sunshine",
+            "directory": "/home/u/.local/share/omodachi/sunshine/e9f1b08",
             "arguments": ["capture=wlr", "origin_web_ui_allowed=pc"],
             "written_by_installer": True, "enabled": "enabled", "active": "active"}
 
     def test_the_pinned_tree_under_our_unit_is_kept_and_nothing_is_downloaded(self):
         result, out, err, install = self.run_install(self.OURS)
         self.assertEqual((result["installed"], result["reason"], result["pinned"]),
-                         (False, "already_installed", "328d231"))
+                         (False, "already_installed", "e9f1b08"))
         install.assert_not_called()
         # The manifest checked is the one versions.json pins, not the tree's own word.
         self.assertEqual(self.check.call_args.args[1],
-                         "701043786fea2a92f66c7a4ac9e419072c80bb530c7e026157d3d88934cdee68")
+                         "90fe7f94be08e722e69aedea73a2a257d886c4b37a1a50b95692b951da5cfdad")
         # The unit is still brought to what this core writes, without a restart
         # unless that changed it, and keeping the encoder arguments it had.
         self.assertEqual(self.ensure.call_args.kwargs["restart"], False)
@@ -931,8 +961,8 @@ class PinnedSunshineTests(unittest.TestCase):
         result, out, _, install = self.run_install(
             self.OURS, pristine="its MANIFEST.sha256 is not the one the pinned archive carries")
         self.assertEqual(install.call_args.args[0].rsplit("/", 1)[-1],
-                         "omodachi-sunshine-328d231-x86_64.tar.zst")
-        self.assertRegex(install.call_args.kwargs["sha256"], "^0f5a8f0b")
+                         "omodachi-sunshine-e9f1b08-x86_64.tar.zst")
+        self.assertRegex(install.call_args.kwargs["sha256"], "^1d13e3aa")
         self.assertIn("is not trusted as the pinned build", out)
         self.ensure.assert_not_called()
 
@@ -957,14 +987,28 @@ class PinnedSunshineTests(unittest.TestCase):
             present = dict(self.OURS, version=version)
             result, out, err, install = self.run_install(present)
             self.assertEqual(install.call_args.args[0].rsplit("/", 1)[-1],
-                             "omodachi-sunshine-328d231-x86_64.tar.zst", version)
-            self.assertRegex(install.call_args.kwargs["sha256"], "^0f5a8f0b")
+                             "omodachi-sunshine-e9f1b08-x86_64.tar.zst", version)
+            self.assertRegex(install.call_args.kwargs["sha256"], "^1d13e3aa")
+
+    def test_the_328d231_build_is_replaced_by_its_clean_public_rebuild(self):
+        # SUNSHINE-2: the same fork code, but 328d231's archive carries its
+        # builder's paths and names a commit that is not public; an install of
+        # it, ours and pristine, is replaced by the pinned e9f1b08 archive.
+        present = dict(self.OURS, version="328d2313c92dc4db675a8eafe96a7e32460c2758",
+                       binary="/home/u/.local/share/omodachi/sunshine/328d231/sunshine",
+                       directory="/home/u/.local/share/omodachi/sunshine/328d231")
+        result, out, err, install = self.run_install(present)
+        self.assertEqual(install.call_args.args[0].rsplit("/", 1)[-1],
+                         "omodachi-sunshine-e9f1b08-x86_64.tar.zst")
+        self.assertRegex(install.call_args.kwargs["sha256"], "^1d13e3aa")
+        self.assertIn("pinned e9f1b08", out)
+        self.check.assert_not_called()     # a different commit is not even inspected
 
     def test_an_older_fork_or_an_explicit_archive_is_installed(self):
         older = dict(self.OURS, version="a2fd635")
         result, out, err, install = self.run_install(older)
-        self.assertEqual(install.call_args.args[0].rsplit("/", 1)[-1], "omodachi-sunshine-328d231-x86_64.tar.zst")
-        self.assertIn("pinned 328d231", out)
+        self.assertEqual(install.call_args.args[0].rsplit("/", 1)[-1], "omodachi-sunshine-e9f1b08-x86_64.tar.zst")
+        self.assertIn("pinned e9f1b08", out)
         self.assertNotIn("/releases/latest/", out)
         result, out, err, install = self.run_install(self.OURS, spec="latest", sha256="e" * 64)
         self.assertIn("/releases/latest/", install.call_args.args[0])
@@ -1166,6 +1210,78 @@ def _commit_all(tree) -> str:
     _git_in(tree, "add", "-A")
     _git_in(tree, "commit", "--quiet", "--allow-empty", "-m", "fixture")
     return _git_in(tree, "rev-parse", "HEAD")
+
+
+class SunshineBuildDefaultTests(unittest.TestCase):
+    """SUNSHINE-2: a bare --sunshine-build builds the fork's public repository
+    at the full commit the pinned archive was built from, through the same
+    git-URL path (exact commit, fetched detached, checked) as any other URL."""
+
+    def test_the_default_is_the_public_repository_at_the_pinned_full_commit(self):
+        from omodachi_core import sunshine_package
+        url, commit = install_host.default_sunshine_build(ROOT)
+        pin = sunshine_package.pinned()
+        self.assertEqual(url, sunshine_package.SUNSHINE_REPOSITORY)
+        self.assertEqual(commit, pin["commit"])
+        self.assertTrue(commit.startswith(pin["version"]))
+        self.assertTrue(install_host.is_git_url(url))
+        self.assertEqual(install_host.sunshine_build_refusal(url, commit), "")
+
+    def main(self, *argv, pinned=None):
+        import contextlib
+        import io
+        from unittest import mock
+        from omodachi_core import sunshine_package
+        err = io.StringIO()
+        with tempfile.TemporaryDirectory() as scratch, \
+                mock.patch.object(Path, "home", return_value=Path(scratch)), \
+                mock.patch.object(install_host.sys, "platform", "linux"), \
+                mock.patch.object(install_host, "install_local", return_value=0) as install, \
+                mock.patch.object(install_host, "pam_outdated", return_value=False), \
+                mock.patch.object(sunshine_package, "pinned", side_effect=pinned,
+                                  wraps=None if pinned else sunshine_package.pinned), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = install_host.main(["--local", *argv])
+        return code, install, err.getvalue()
+
+    def test_a_bare_flag_builds_the_pinned_public_commit(self):
+        from omodachi_core import sunshine_package
+        code, install, err = self.main("--sunshine-build")
+        self.assertEqual(code, 0, err)
+        options = install.call_args.kwargs
+        self.assertEqual((options["sunshine_build"], options["sunshine_build_commit"]),
+                         (sunshine_package.SUNSHINE_REPOSITORY, "e9f1b089255e235b5e6aa13ed89b7dd3f569de87"))
+
+    def test_what_was_named_is_what_is_built(self):
+        from omodachi_core import sunshine_package
+        _, install, _ = self.main("--sunshine-build", "--sunshine-build-commit", "b" * 40)
+        self.assertEqual((install.call_args.kwargs["sunshine_build"],
+                          install.call_args.kwargs["sunshine_build_commit"]),
+                         (sunshine_package.SUNSHINE_REPOSITORY, "b" * 40))
+        _, install, _ = self.main("--sunshine-build", "/home/u/fork")
+        self.assertEqual((install.call_args.kwargs["sunshine_build"],
+                          install.call_args.kwargs["sunshine_build_commit"]), ("/home/u/fork", None))
+        _, install, _ = self.main()
+        self.assertEqual((install.call_args.kwargs["sunshine_build"],
+                          install.call_args.kwargs["sunshine_build_commit"]), (None, None))
+
+    def test_a_pin_without_a_usable_commit_refuses_the_bare_flag(self):
+        from omodachi_core import sunshine_package
+        broken = sunshine_package.SunshinePackageError("sunshine_package_pin_invalid",
+                                                       "versions.json has no usable sunshine_package pin")
+        code, install, err = self.main("--sunshine-build", pinned=broken)
+        self.assertEqual(code, 2)
+        self.assertIn("refusing to install: --sunshine-build has no commit to build", err)
+        install.assert_not_called()
+
+    def test_the_readme_names_the_pinned_archive_and_its_public_commit(self):
+        from omodachi_core import sunshine_package
+        pin = sunshine_package.pinned()
+        body = (ROOT / "README.md").read_text()
+        self.assertIn(pin["url"], body)
+        self.assertIn(f"--sunshine-build {sunshine_package.SUNSHINE_REPOSITORY} \\\n", body)
+        self.assertIn(f"--sunshine-build-commit {pin['commit']}\n", body)
+        self.assertNotIn("328d231", body)
 
 
 def mock_home(home):

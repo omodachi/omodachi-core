@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-queue.schema.json",
+  "title": "Default-agent message queue",
+  "description": "AGENT-QUEUE-1: the reply to the queue routes. `POST /v1/agent/default/chat/queue {request_id, text}` - the composer's Send while a turn runs: codex 0.160's own durable queue (`thread/queue/add`, experimental) keeps the words and starts them, in order, when the turn ends (after a Stop they wait). `POST …/chat/queue/{id}:send` - Send now: into the running turn (`thread/queue/delete` then `turn/steer`; `delivery: \"steered\"`), between turns started as a turn of its own (`thread/queue/start`; `\"started\"`), or - when the turn ended in between - back on the queue first in line (`\"queued\"`). `POST …/chat/queue/{id}:edit {text}` - new words in its place (`thread/queue/update`). `POST …/chat/queue/{id}:delete`. `queue` is always the queue now (as the snapshot's). An approval is never queued. Refusals: `409 agent_queue_unavailable` (this codex has no queue: steer instead), `409 agent_queue_item_gone` (it started or was removed meanwhile), `409 agent_command_while_working` (`/plan`, `/compact`, `/review`, `/diff` wait for the turn to end), `409 request_conflict`, `400 invalid_task`. Native and web credentials.",
+  "type": "object",
+  "required": ["contract_revision", "agent_id", "queue"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "agent_id": {"const": "default"},
+    "accepted": {"const": true},
+    "delivery": {"enum": ["queued", "steered", "started"]},
+    "turnID": {"type": ["string", "null"]},
+    "queued": {"$ref": "agent-chat-snapshot.schema.json#/$defs/queued"},
+    "edited": {"const": true},
+    "deleted": {"type": "boolean"},
+    "queue": {"$ref": "agent-chat-snapshot.schema.json#/properties/queue"}
+  }
+}

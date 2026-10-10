@@ -34,5 +34,13 @@
       "h264"
     ]
   },
+  "text_input": {
+    "available": true,
+    "layout": "us",
+    "variant": null,
+    "max_chars": 1024,
+    "max_bytes": 4096,
+    "compose": true
+  },
   "contract_revision": "omodachi.v1"
 }

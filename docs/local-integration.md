@@ -26,10 +26,13 @@ working.
 
 Credentials are issued and revoked by a separate process while the daemon runs;
 the daemon reloads the credential registry on every check. Store the output in a
-`0600` file. `omodachi-host` reads its credential from `OMODACHI_TOKEN`. Two subcommands
-need none: `omodachi-host theme-changed` and `omodachi-host font-changed` are
-what the installed Omarchy hooks run, and their authority is the verified Unix
-peer, the same as pairing.
+`0600` file. `omodachi-host` reads its credential from `OMODACHI_TOKEN`. Some
+subcommands need none: `omodachi-host theme-changed` and `omodachi-host
+font-changed` are what the installed Omarchy hooks run, and `omodachi-host
+remote stop [--session-id ID | --all]` is how the person at the computer ends
+any Remote session (REMOTE-STOP-1); their authority is the verified Unix peer,
+the same as pairing. `remote stop` ignores `OMODACHI_TOKEN` even when it is
+set, because a device credential could only end that device's own session.
 
 ```sh
 omodachid --secret-file <private-dir>/device.secret --issue-token ipad
@@ -55,6 +58,11 @@ instance.
 
 ## HTTP surface
 
+HERDR-11: the JSON reads (`/v1/state`, `/v1/capabilities`, `/v1/catalog`,
+`/v1/herdr`, `/v1/herdr/layout`, `/v1/herdr/panes/{pane}/reply`) carry an
+`ETag` and answer `304` to an `If-None-Match` that names it, and a body of 1 KiB
+or more is gzipped for a client whose `Accept-Encoding` takes gzip.
+
 Every `/v1/*` request needs `Authorization: Bearer <device credential>`. The
 network never issues credentials. Device identity is always taken from the
 credential, never from request JSON. Unknown JSON fields are rejected at
@@ -64,14 +72,15 @@ operation boundaries.
 | --- | --- |
 | `GET /` | unauthenticated boundary hint; this is the host API, not a web UI |
 | `GET /health` | service and revision health, plus `host_id` and `tls_fingerprint_sha256`; no device data |
-| `GET /v1/state` | host, bar, workspace, focus, agent, Herdr, catalog and Remote snapshot with state revision, event cursor and instance ID |
+| `GET /v1/state` | host, bar, workspace, focus, agent, Herdr, catalog and Remote snapshot with state revision, event cursor and instance ID. HERDR-11: a client that sends `X-Omodachi-Catalog: <revision>` it already holds gets `catalog: {revision, entries: [], unchanged: true}` instead of the rows (they were ~587 KB of a ~590 KB read) |
 | `GET /v1/capabilities` | reported capability flags |
 | `GET /v1/catalog` | three-source merged catalog with condition/provider state, route policy and readiness; `?q=` searches the same catalog |
 | `GET /v1/herdr` | sanitized summary plus the detailed read-only snapshot |
 | `GET /v1/theme`, `GET /v1/theme/background` | the host's current Omarchy theme and its wallpaper (see [theme.md](theme.md)) |
 | `GET /v1/fonts`, `GET /v1/fonts/{id}` | the host monospace family, its fontconfig fallback chain and Omarchy's icon font (see [fonts.md](fonts.md)) |
 | `GET /v1/icons/{name}?size=64` | one application icon from the host's icon theme (see [icons.md](icons.md)) |
-| `GET /v1/herdr/layout` | the owned `omodachi` Herdr session as workspaces, tabs and panes (see [herdr.md](herdr.md)) |
+| `GET /v1/herdr/layout` | the owned `omodachi` Herdr session as workspaces, tabs and panes (see [herdr.md](herdr.md)); `ETag: "<session>:<revision>"` |
+| `GET /v1/herdr/panes/{pane}/reply` | HERDR-11: a codex or claude pane's latest reply, from the agent's own log (see [herdr.md](herdr.md)) |
 | `GET /v1/shortcuts` | host keybinding rows from the shortcut provider (see [Shortcuts](#shortcuts)) |
 | `GET /v1/preferences` | host preference values and profile defaults |
 | `GET /v1/events` (WebSocket) | device events with full replay or an explicit snapshot/resync |
@@ -79,6 +88,7 @@ operation boundaries.
 | `POST /v1/workspaces/{id}/select` | switch the host workspace through the catalog entry |
 | `POST /v1/control/wake` | wake the host display through the reviewed host adapter |
 | `POST /v1/pairing/requests`, `POST /v1/pairing/requests/{id}/claim` | local pairing handshake; claim also returns the pinned host identity and endpoints (see [pairing.md](pairing.md)) |
+| `GET /v1/host/roads` | TAIL-2: every road to this host (typed `lan`/`mdns`/`tailnet` endpoints) and its MagicDNS name while Tailscale runs; authenticated, never on `/health` |
 | `POST /v1/media/pairing/*`, `GET`/`DELETE /v1/media/pairing/requests/{id}` | Sunshine-fork pairing bridge |
 | `POST /v1/agent/tasks`, `POST /v1/agent/default:ensure` | default-agent lifecycle |
 | `GET`/`POST /v1/agent/default/chat*` | agent chat snapshot, events, messages, interrupt, commands, handoff and empty-thread recovery |

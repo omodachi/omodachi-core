@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/notifications-prefs.schema.json",
+  "title": "LITE-1b what a web device wants pushed",
+  "description": "GET /v1/notifications/prefs and PUT {expected_revision, changes} (409 stale_revision when another tab changed them first), web credential only. `changes` may hold any of kinds (a partial map), snooze_until, quiet_when_native_connected, quiet_at_desk (NOTIFY-1), lang. `host_enabled` is the switch on the host's Devices page and is not the device's to change.",
+  "type": "object",
+  "required": [
+    "contract_revision",
+    "device_id",
+    "revision",
+    "kinds",
+    "snooze_until",
+    "quiet_when_native_connected",
+    "quiet_at_desk",
+    "lang",
+    "subscribed",
+    "host_enabled"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kinds": {
+      "type": "object",
+      "required": [
+        "agent_approval",
+        "agent_needs_input",
+        "agent_done",
+        "herdr_blocked",
+        "host_notification",
+        "herdr_done"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "agent_approval": {
+          "type": "boolean"
+        },
+        "agent_needs_input": {
+          "type": "boolean"
+        },
+        "agent_done": {
+          "type": "boolean"
+        },
+        "herdr_blocked": {
+          "type": "boolean"
+        },
+        "host_notification": {
+          "type": "boolean"
+        },
+        "herdr_done": {
+          "type": "boolean",
+          "description": "NOTIFY-1: an agent in a Herdr pane finished and nobody has looked at it yet (state.unseen). Off by default."
+        }
+      }
+    },
+    "snooze_until": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Unix seconds; nothing is pushed before it."
+    },
+    "quiet_when_native_connected": {
+      "type": "boolean",
+      "description": "NOTIFY-2: hold a push back only while a native Omodachi App of this host is in front (live /v1/events stream, PUT /v1/presence foreground) and says it alerts that kind itself. A kind the App does not alert is always pushed. (LITE-1b: any native companion with a live stream held back every kind.)"
+    },
+    "quiet_at_desk": {
+      "type": "boolean",
+      "description": "NOTIFY-1: hold pushes while the person is at the computer (state.desk.present) and send what is still waiting once they leave it or lock it; what was answered at the computer meanwhile is dropped. Default true. Herdr pushes also wait 30 s and go as one digest per host (tag herdr), whatever this says."
+    },
+    "lang": {
+      "enum": [
+        "en",
+        "zh-Hans"
+      ],
+      "description": "The language the host writes this device's push titles in."
+    },
+    "subscribed": {
+      "type": "boolean"
+    },
+    "host_enabled": {
+      "type": "boolean"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-history.schema.json",
+  "title": "Default-agent earlier messages",
+  "description": "AGENT-QUEUE-1: the reply to `GET /v1/agent/default/chat/history?before=<row id>&limit=<1-200, default 100>` - the rows just before the row `before` (no `before`: the newest), oldest first, at most `limit`, budgeted like a snapshot. `earlier` says there are more before them. Core answers from its own rows and reads codex's record a page of 10 turns at a time when it needs older ones (`thread/turns/list`, newest first); a codex that does not page was read whole at attach and is answered from core's copy. Refusals: `409 agent_history_row_unknown` (`before` is no row core has - the conversation changed; read the snapshot again), `400 invalid_request`. Native and web credentials.",
+  "type": "object",
+  "required": ["contract_revision", "agent_id", "rows", "earlier"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "agent_id": {"const": "default"},
+    "rows": {"type": "array", "maxItems": 200, "items": {"$ref": "agent-chat-snapshot.schema.json#/$defs/row"}},
+    "earlier": {"type": "boolean"}
+  }
+}

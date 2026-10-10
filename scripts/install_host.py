@@ -36,9 +36,19 @@ idempotent. On the computer it:
     current theme headless so ~/.local/state/omarchy/current/theme gains the
     rendered omodachi-theme.json;
   - with sudo, adds ufw rules for 8099/tcp and the Sunshine ports from the
-    private ranges and tailscale0, and says whether ufw is actually filtering;
+    private ranges, removes the no-op tailscale0 rules earlier versions added,
+    and says whether ufw is actually filtering - and that over Tailscale it is
+    the tailnet's ACL, not ufw, that decides;
   - records what it made in ~/.local/state/omodachi (venv-ids.json,
-    sunshine-unit.json).
+    sunshine-unit.json);
+  - LITE-1b: when Tailscale is running, gives Odomo its https
+    address with one `tailscale serve` mapping to 127.0.0.1:8099 - on 443 if
+    it is free, else 8443, else none (the command is printed) - never a path
+    under somebody else's port, never `serve reset`; recorded in
+    ~/.local/state/omodachi/tailscale-serve.json (the node name ends up in
+    public certificate-transparency logs, as with any `tailscale serve`).
+    Not being Tailscale's operator is reported with its fix
+    (`sudo tailscale set --operator=$USER`), never run.
 
 `--pam` (opt-in, root, asks for the password) additionally installs the
 device-approval PAM helper and its lines in /etc/pam.d, described in
@@ -58,7 +68,8 @@ write stops the install. An outdated PAM entry (from before RELEASE-9) makes
 Install report a partial install and exit 3.
 
 `--remove` takes back what Install made and nothing else: the units, wrappers,
-desktop entry, venvs, the Sunshine fork, unit and login (disabling the unit only
+desktop entry, venvs, the tailscale serve mapping (only one Install made and
+nobody has changed since), the Sunshine fork, unit and login (disabling the unit only
 if Install enabled it; the fork's own state only if ~/.config/sunshine was
 created for it), the apps.json entry, the Omarchy template and hooks, the
 ufw rules, every authorized_keys line marked as Omodachi's, a Voxtype config
@@ -66,8 +77,8 @@ left mid-dictation, the PAM entry if --pam was used (with your password, in the
 terminal), and src when the plugin's bootstrap made it. `--purge` also deletes
 the device secret, certificate, pairings and the daemon's other state - only
 the files it creates (PURGE_RULES); anything else in ~/.config/omodachi,
-~/.cache/omodachi or ~/.local/state/omodachi, and agent-workspace, is kept and
-listed. RELEASE-10: a git checkout it made (src, the --sunshine-build cache)
+~/.cache/omodachi or ~/.local/state/omodachi, and agent-workspace (unless it is
+empty), is kept and listed. RELEASE-10: a git checkout it made (src, the --sunshine-build cache)
 goes only while it is exactly the commit it was made to hold
 (checkout_differs); one somebody changed is kept, or on a build moved to
 ~/.local/share/omodachi-kept, and never deleted. If the PAM entry or an authorized_keys line cannot be removed, it
@@ -166,10 +177,15 @@ def wrapper_is_ours(text: str) -> bool:
 WRAPPER = ('#!/bin/sh\nexec "$HOME/.local/share/omodachi/venv/bin/python" -I '
            '"$HOME/.local/share/omodachi/venv/bin/%s" "$@"\n')
 
-# The firewall rules copy omarchy-install-service-sunshine exactly: private
-# CIDRs and tailscale0 only, one comment per subsystem so the rules can be
-# found and removed again. Omodachi's network assumption is the same as
-# Omarchy's - same LAN or Tailscale, never a relay.
+# The firewall rules are the private CIDRs only, one comment per subsystem so
+# the rules can be found and removed again. Omodachi's network assumption is
+# the same as Omarchy's - same LAN or Tailscale, never a public relay.
+#
+# TAIL-2 P1-2: there are no `tailscale0` rules any more. TAIL-1 §5.6 measured
+# that Tailscale's own `ts-input` chain sits in INPUT before ufw's and accepts
+# everything arriving on tailscale0, so a ufw rule for that interface never
+# decides anything: over the tailnet, the tailnet's ACL is the filter. The
+# rules earlier versions added are removed on install (ours only, by comment).
 CORE_PORT = "8099"
 PRIVATE_CIDRS = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 CORE_COMMENT = "omodachi-core"
@@ -190,13 +206,29 @@ def _tailscale_present() -> bool:
                           capture_output=True).returncode == 0
 
 
-def _allow(proto: str, port: str, comment: str, *, tailscale: bool) -> None:
+def _allow(proto: str, port: str, comment: str) -> None:
     for cidr in PRIVATE_CIDRS:
         ufw("allow", "in", "proto", proto, "from", cidr, "to", "any",
             "port", port, "comment", comment)
-    if tailscale:
-        ufw("allow", "in", "on", "tailscale0", "to", "any", "port", port,
-            "proto", proto, "comment", comment)
+
+
+def _delete_owned_tailscale_rules() -> int:
+    """TAIL-2: drop the no-op `on tailscale0` rules earlier versions added.
+
+    Only a rule that is both on tailscale0 and carries one of our comments;
+    a tailscale0 rule somebody wrote by hand is theirs.
+    """
+    listing = ufw("show", "added").stdout or ""
+    targets = []
+    for line in listing.splitlines():
+        match = _ADDED.match(line.strip())
+        if match and match.group(2) in MANAGED_COMMENTS:
+            rule = shlex.split(match.group(1))
+            if "tailscale0" in rule:
+                targets.append(rule)
+    for rule in targets:
+        ufw("--force", "delete", *rule)
+    return len(targets)
 
 
 def _delete_by_comment(comments) -> int:
@@ -246,8 +278,20 @@ def firewall_state() -> dict:
             "default_incoming": incoming.group(1) if incoming else None}
 
 
+# TAIL-2 P1-2: what really filters the tailnet, said whenever Tailscale is here.
+TAILNET_TRUTH = ("Over Tailscale, ufw does not apply: Tailscale's ts-input rule accepts "
+                 "everything arriving on tailscale0 before ufw sees it, so every listening "
+                 "port (8099, 22, the Sunshine ports, 47990) is reachable from whoever your "
+                 "tailnet's access rules (ACLs) allow")
+
+
 def firewall_summary(state: dict, *, opened: bool, tailscale: bool) -> str:
-    ranges = ", ".join(PRIVATE_CIDRS) + (" and tailscale0" if tailscale else "")
+    text = _lan_firewall_summary(state, opened=opened)
+    return text + (". " + TAILNET_TRUTH if tailscale else "")
+
+
+def _lan_firewall_summary(state: dict, *, opened: bool) -> str:
+    ranges = ", ".join(PRIVATE_CIDRS)
     exposed = "; ".join(LISTENING)
     if not state["present"]:
         return (f"ufw is not installed, so nothing filters incoming connections: {exposed} "
@@ -267,25 +311,29 @@ def firewall_summary(state: dict, *, opened: bool, tailscale: bool) -> str:
     if not opened:
         return (f"ufw is active and denies incoming traffic by default; the Omodachi rules "
                 f"could not be added, so devices on the network cannot reach {exposed}")
-    return (f"ufw is active and denies incoming traffic by default: {CORE_PORT}/tcp, "
+    return (f"ufw is active and denies incoming traffic by default: on the LAN, {CORE_PORT}/tcp, "
             f"{SUNSHINE_TCP}/tcp and {SUNSHINE_UDP}/udp are open to {ranges} only "
             f"(comments {', '.join(MANAGED_COMMENTS)}); 47990 is not opened")
 
 
 def configure_firewall() -> int:
     if shutil.which("ufw") is None:
-        print(firewall_summary(firewall_state(), opened=False, tailscale=False), file=sys.stderr)
+        print(firewall_summary(firewall_state(), opened=False, tailscale=_tailscale_present()),
+              file=sys.stderr)
         return 0
     tailscale = _tailscale_present()
     opened = True
     try:
-        # RELEASE-9: Install adds rules and deletes none; a rule someone wrote
-        # by hand is theirs, whatever its comment says.
-        _allow("tcp", CORE_PORT, CORE_COMMENT, tailscale=tailscale)
+        # RELEASE-9: Install adds rules; a rule someone wrote by hand is
+        # theirs, whatever its comment says. The one deletion is TAIL-2's: our
+        # own `on tailscale0` rules from earlier versions, which never did
+        # anything (ts-input accepts tailscale0 before ufw).
+        _allow("tcp", CORE_PORT, CORE_COMMENT)
         # The managed Sunshine fork gets the official port set, scoped the
         # official way rather than to one developer machine.
-        _allow("tcp", SUNSHINE_TCP, SUNSHINE_COMMENT, tailscale=tailscale)
-        _allow("udp", SUNSHINE_UDP, SUNSHINE_COMMENT, tailscale=tailscale)
+        _allow("tcp", SUNSHINE_TCP, SUNSHINE_COMMENT)
+        _allow("udp", SUNSHINE_UDP, SUNSHINE_COMMENT)
+        _delete_owned_tailscale_rules()
         ufw("reload")
     except (OSError, subprocess.SubprocessError) as error:
         # A closed firewall is a reachability problem, not a broken install.
@@ -560,8 +608,14 @@ def install_sunshine(source: Path, *, spec=None, sha256=None, adapter=None,
         # A machine with no VAAPI render node - a VM, or a GPU whose driver is
         # not loaded - streams on the CPU. That is a working stream, and saying
         # so here is the difference between a known limit and a mystery.
-        print("no render node answered for VAAPI, so the fork will encode in software.",
-              flush=True)
+        # REMOTE-FIX-1: without `vainfo` nobody asked, so say that instead.
+        if shutil.which("vainfo") is None:
+            print("vainfo (libva-utils) is not installed and the fork's last probe did not say "
+                  "VAAPI, so the fork picks its own encoder; once its probe finds VAAPI the next "
+                  "install pins it.", flush=True)
+        else:
+            print("no render node answered for VAAPI, so the fork will encode in software.",
+                  flush=True)
     if not unit["enabled"]:
         print("the unit could not be enabled: " + str(unit["enable_detail"])
               + "\nRemote will stop working at the next reboot until it is.", file=sys.stderr)
@@ -811,6 +865,22 @@ def sunshine_build_refusal(checkout, commit) -> str:
         return ("--sunshine-build-commit only goes with a git URL; a local --sunshine-build "
                 "path is built as it stands, as your own tree")
     return ""
+
+
+def default_sunshine_build(source: Path = ROOT) -> tuple[str, str]:
+    """SUNSHINE-2: what a bare `--sunshine-build` builds, as (git URL, full commit).
+
+    The public fork (sunshine_package.SUNSHINE_REPOSITORY) at the full commit
+    the pinned archive was built from (`commit` in data/versions.json), so
+    building from source needs nothing but GitHub and gives the same tree the
+    published archive came from. It goes through the git-URL path like any
+    other: fetched detached into this installer's cache and checked (HEAD,
+    tree, clean) right before the fork's own script runs. It used to be
+    `../omodachi-sunshine` beside this checkout - a developer's layout that no
+    installed host has; a local tree is still built by naming its path.
+    """
+    package = _sunshine_package(source)
+    return package.SUNSHINE_REPOSITORY, package.pinned()["commit"]
 
 
 def _git(root: Path, *arguments, check=False):
@@ -1262,10 +1332,11 @@ CONFIG_DIR = ".config/omodachi"
 # RELEASE-8. What --remove and --purge may delete is what the installer (or
 # the daemon it installed) made, never the user's own files. ~/.local/share/
 # omodachi: agent-workspace is the agent's working directory - the user's
-# files - and is always kept, as is anything else nobody here made; src goes
-# only when the plugin's bootstrap can show it made it (the same id it keeps in
-# its .git and in ~/.local/state/omodachi/core-source.json); the venvs only
-# when this installer can (RELEASE-9, VENV_RECORD).
+# files - and is kept (REL2-VM-1: unless it is empty), as is anything else
+# nobody here made; src goes only when the plugin's bootstrap can show it
+# made it (the same id it keeps in its .git and in
+# ~/.local/state/omodachi/core-source.json); the venvs only when this
+# installer can (RELEASE-9, VENV_RECORD).
 SHARE_DIR = ".local/share/omodachi"
 SOURCE_RECORD = ".local/state/omodachi/core-source.json"
 SOURCE_ID_FILE = "omodachi-install-id"
@@ -1292,6 +1363,12 @@ PURGE_RULES = {
         r"herdr-sessions\.json": None,
         r"herdr-sessions\.json\.lock": None,
         r"\.herdr-sessions" + _TMP: None,
+        # POLISH-U: the folders new Herdr workspaces were made in, and the
+        # write audit (who wrote into which pane, never what) with its one roll.
+        r"herdr-folders\.json": None,
+        r"\.herdr-folders" + _TMP: None,
+        r"herdr-writes\.jsonl": None,
+        r"herdr-writes\.jsonl\.1": None,
         r"biometric-keys\.json": None,
         r"biometric-keys\.json\.lock": None,
         r"\.biometric-" + _TMP: None,
@@ -1299,6 +1376,10 @@ PURGE_RULES = {
         r"plugin\.token\.new": None,
         r"owned-herdr-pane\.json": None,
         r"agent-requests\.json": None,
+        # REL2-VM-1: what each device has seen (seen.py, NOTIFY-1) and its
+        # temp file; the daemon writes it, so a purge takes it.
+        r"seen\.json": None,
+        r"\.seen-" + _TMP: None,
         r"agent-lifecycle\.lock": None,
         r"\.agent-" + _TMP: None,
         r"sunshine-web-credentials\.json": None,
@@ -1315,6 +1396,13 @@ PURGE_RULES = {
         r"agent-handoff": {r"handoff_[0-9a-f]{32}\.json": None, r"\.agent-" + _TMP: None},
         r"agent": {r"ws-token": None, r"ws-token-" + _TMP: None,
                    r"endpoint\.json": None, r"endpoint-" + _TMP: None},
+        # LITE-1b C6: the host's VAPID key and the web devices' push
+        # subscriptions (the daemon makes both; a revoke drops a device's row).
+        r"vapid\.json": None,
+        r"\.vapid-" + _TMP: None,
+        r"push-subscriptions\.json": None,
+        r"push-subscriptions\.json\.lock": None,
+        r"\.push-subscriptions-" + _TMP: None,
     },
     ".cache/omodachi": {
         r"install-status\.json": None,
@@ -1344,6 +1432,13 @@ PURGE_RULES = {
         r"\.venv-ids\.json\.\d+\.tmp": None,
         r"sunshine-unit\.json": None,
         r"\.sunshine-unit\.json\." + _TMP: None,
+        # LITE-1b C7: the record of the `tailscale serve` mapping Install made.
+        r"tailscale-serve\.json": None,
+        r"\.tailscale-serve-" + _TMP: None,
+        # ATTACH-1: files sent from a phone to the Agent or a Herdr pane, and
+        # a stream that died half-way (`uploads.py` names both).
+        r"uploads": {r"(agent|herdr|file)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}\.[a-z0-9]{1,10}": None,
+                     r"\.upload-[0-9a-f]{32}\.(part|jpg)": None},
     },
 }
 
@@ -1553,6 +1648,18 @@ def remove_local(*, purge=False, sunshine=True) -> int:
             path.unlink()
         removed["units"][unit] = {"was": state or "unknown", "unit_file_removed": existed}
 
+    # LITE-1b C7: the serve mapping Install made, and only while it still is
+    # exactly that - here, with the daemon stopped and before the sources this
+    # runs from are deleted (the VM found it importing from a deleted src); a mapping somebody changed, or one that was already there,
+    # stays.
+    try:
+        removed["tailscale_serve"] = _odomo_serve(ROOT).remove(home, log=lambda line: print(line, flush=True))
+    except Exception as error:
+        removed["tailscale_serve"] = {"removed": False, "reason": "error:" + type(error).__name__}
+    if removed["tailscale_serve"].get("removed"):
+        print(f"turned off the tailscale serve mapping on port {removed['tailscale_serve']['port']} "
+              f"that Install made for Odomo", flush=True)
+
     # RELEASE-9: while a device dictates, the daemon points Voxtype's one
     # audio-device line at its own source and keeps the original bytes beside
     # it; it puts them back when dictation ends. A daemon stopped in between
@@ -1673,7 +1780,9 @@ def remove_local(*, purge=False, sunshine=True) -> int:
     # ~/.local/share/omodachi: what the installer made is gone (sunshine/,
     # hooks/, the venvs and src were each judged above); the rest -
     # agent-workspace, and anything nobody here made - stays, with or
-    # without --purge.
+    # without --purge. REL2-VM-1: except an agent-workspace with nothing in
+    # it - Install made that directory and nobody put anything there.
+    _remove_empty(share / "agent-workspace")
     if share.is_dir() and not share.is_symlink():
         kept += [child for child in sorted(share.iterdir())
                  if child.name != "src" and str(child) not in removed["venvs"]["kept"]]
@@ -1688,6 +1797,38 @@ def remove_local(*, purge=False, sunshine=True) -> int:
         print("\nOmodachi Host was only PARTLY removed:\n  - " + "\n  - ".join(left), flush=True)
         return PARTIAL
     return 0
+
+
+def _odomo_serve(source: Path):
+    """LITE-1b C7: the `tailscale serve` front door, from the synced sources."""
+    sys.path.insert(0, str(source / "src"))
+    from omodachi_core import odomo_serve
+    return odomo_serve
+
+
+def ensure_tailscale_serve(source: Path) -> dict:
+    """Give Odomo its https address when Tailscale runs here.
+
+    `odomo_serve.ensure`: 443 if it is free, 8443 if 443 is somebody else's,
+    nothing (and the command to do it by hand) if both are; never a path
+    under someone else's port and never `serve reset`; an operator problem is
+    printed with its fix, never fixed with sudo. Install does not fail on any
+    of it - Odomo is an extra.
+    """
+    try:
+        result = _odomo_serve(source).ensure(log=lambda line: print(line, flush=True))
+    except Exception as error:  # the rest of the install already happened
+        result = {"state": "off", "reason": "error:" + type(error).__name__}
+    if result["state"] == "on":
+        print(f"Odomo: {result['url']} (tailscale serve on port {result['port']}"
+              + ("" if result.get("owner") == "omodachi" else ", a mapping that was already there")
+              + ")", flush=True)
+    elif result["reason"] in ("tailscale_not_installed", "tailscale_not_running"):
+        print("Odomo: no address (Tailscale is not running here). Once it is, run "
+              "`omodachi-host odomo enable`.", flush=True)
+    else:
+        print(f"Odomo: no address ({result['reason']})", flush=True)
+    return result
 
 
 def _host_identity(source: Path):
@@ -2306,6 +2447,7 @@ def install_local(*, firewall=True, sunshine=True, sunshine_package=None,
     run(["systemctl", "--user", "daemon-reload"])
     run(["systemctl", "--user", "enable", *UNITS])
     run(["systemctl", "--user", "restart", *UNITS])
+    ensure_tailscale_serve(source)
     return 0
 
 
@@ -2362,8 +2504,8 @@ def main(argv=None) -> int:
     group.add_argument("--host", metavar="USER@HOST", help="rsync this checkout and install there")
     group.add_argument("--local", action="store_true", help="install from the synced tree here")
     parser.add_argument("--firewall", action=argparse.BooleanOptionalAction, default=True,
-                        help="open port 8099 and the Sunshine ports for private LANs and "
-                             "tailscale0; needs sudo, and a failure only warns")
+                        help="open port 8099 and the Sunshine ports for private LANs; "
+                             "needs sudo, and a failure only warns")
     parser.add_argument("--remove-firewall", action="store_true",
                         help="remove the Omodachi ufw rules and do nothing else")
     parser.add_argument("--remove", action="store_true",
@@ -2399,9 +2541,11 @@ def main(argv=None) -> int:
     parser.add_argument("--sunshine-build", metavar="PATH|GIT-URL", nargs="?", const="",
                         help="build the fork here with its own scripts/package_release.sh "
                              "instead of downloading an archive; needs the build dependencies "
-                             "in the fork's FORK.md. A git URL also needs "
-                             "--sunshine-build-commit. A local PATH is your own tree and is "
-                             "built as it stands, unverified by this installer")
+                             "in the fork's FORK.md. With no argument it builds the fork's public "
+                             "repository (SUNSHINE_REPOSITORY) at the full commit the pinned "
+                             "archive was built from (`commit` in data/versions.json). A git URL "
+                             "also needs --sunshine-build-commit. A local PATH is your own tree "
+                             "and is built as it stands, unverified by this installer")
     parser.add_argument("--sunshine-build-commit", metavar="SHA",
                         help="with --sunshine-build <git-url>: the full 40-character commit to "
                              "build; it is fetched detached and checked (HEAD, tree, clean) "
@@ -2441,15 +2585,24 @@ def main(argv=None) -> int:
             return remove_local(purge=args.purge, sunshine=args.sunshine)
         if args.remove_firewall:
             return remove_firewall()
-        build = args.sunshine_build
+        build, build_commit = args.sunshine_build, args.sunshine_build_commit
         if build == "":
-            build = str(ROOT.parent / "omodachi-sunshine")
+            # SUNSHINE-2: the public fork at the pinned archive's own commit,
+            # unless a commit was named.
+            tree = source if (source / "src").is_dir() else ROOT
+            try:
+                build, pinned_commit = default_sunshine_build(tree)
+            except _sunshine_package(tree).SunshinePackageError as error:
+                print(f"refusing to install: --sunshine-build has no commit to build: "
+                      f"{error.detail}", file=sys.stderr)
+                return 2
+            build_commit = build_commit or pinned_commit
         code = install_local(firewall=args.firewall, sunshine=args.sunshine, vnc=args.vnc,
                              sunshine_package=args.sunshine_package,
                              sunshine_sha256=args.sunshine_sha256,
                              sunshine_adapter=args.sunshine_adapter,
                              sunshine_build=build,
-                             sunshine_build_commit=args.sunshine_build_commit)
+                             sunshine_build_commit=build_commit)
         if code == 0 and args.pam:
             code = install_pam(source if (source / "src").is_dir() else ROOT,
                                services=args.pam_services, timeout=args.pam_timeout)

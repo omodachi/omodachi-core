@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/herdr-keys.schema.json",
+  "title": "Herdr keys sent",
+  "description": "HERDR-3: the reply to `POST /v1/herdr/panes/{pane}/keys {\"keys\": [...]}`. The keys went to the pane as one `pane.send_keys` on the session socket: no controller was taken and the pane was not resized. Request keys are Herdr's names - `Escape` (`esc`), `Tab`, `Enter`, `Space`, `Backspace`, `Up`, `Down`, `Left`, `Right`, `F1`-`F12`, one printable character, or `ctrl+`/`alt+`/`shift+` joined to one of those (`shift+tab`, `ctrl+c`) - one to 32 per call. `PageUp`, `PageDown`, `Home`, `End`, `Insert` and `Delete` are `400 herdr_key_unsupported`; anything else is `400 invalid_key`.",
+  "type": "object",
+  "required": ["contract_revision", "action", "pane", "sent"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "action": {"const": "keys"},
+    "pane": {"type": "string", "pattern": "^w[0-9]{1,9}:p[0-9]{1,9}$"},
+    "sent": {"type": "integer", "minimum": 1, "maximum": 32}
+  }
+}

@@ -21,16 +21,19 @@ geometry epochs or connection generations. A request that names a stale
 
 Every `/v1/*` request carries `Authorization: Bearer <device credential>`, and
 the device that created a session is the only one that can read or change it.
+The one exception is ending it: the person at the computer can end any
+session, see [Ending a session from the computer](#ending-a-session-from-the-computer-remote-stop-1).
 
 | Method and path | Behavior |
 | --- | --- |
-| `GET /v1/remote/capabilities` | backends and why each is or is not available, `default_backend`, modes, placements, `lock_local_input_supported`, `bar_occlusion`, encoder limits |
+| `GET /v1/remote/capabilities` | backends and why each is or is not available, `default_backend`, modes, placements, `lock_local_input_supported`, `bar_occlusion`, encoder limits, `text_input` |
 | `POST /v1/remote/sessions` | create; `201` with the session, or `409 remote_session_exists` naming who holds it |
 | `GET /v1/remote/sessions/{id}` | the whole session |
 | `POST /v1/remote/sessions/{id}/resize` | new geometry for the same output; returns the session with a new `connection` and `revision` |
 | `POST /v1/remote/sessions/{id}/backend` | change backend through the same path |
 | `POST /v1/remote/sessions/{id}/heartbeat` | `{revision, state}` |
 | `POST /v1/remote/sessions/{id}/presented` | optional telemetry; the response records whether the presented rectangle was a correct aspect fit |
+| `POST /v1/remote/sessions/{id}/text` | `{text, id?}` → `{typed, chars, method, replayed?}`: text the keyboard has no key for, or a whole compose-field draft, typed on the host with `wtype` (REMOTE-INPUT-1/2, [below](#typing-remote-input-1)) |
 | `DELETE /v1/remote/sessions/{id}` | idempotent release |
 | `GET /v1/remote/sessions/{id}/audio` (WSS) | the microphone uplink, see [audio-uplink-contract.md](audio-uplink-contract.md) |
 | `GET /v1/remote/sessions/{id}/vnc` (WSS) | the VNC byte bridge, see [wayvnc.md](wayvnc.md) |
@@ -86,6 +89,19 @@ now is (`bar_geometry.py`), so `state.bar.geometry.logo` follows it.
  "app_name":"Omodachi Desktop","output_id":"OMODACHI-…",
  "stream_pixels":{"width":2560,"height":1440},"fps":60}
 ```
+
+TAIL-2: the Sunshine `host` in an HTTPS answer is the road the request
+arrived on - its LAN address for a device at home, and for a device on the
+tailnet this host's MagicDNS name (REMOTE-FIX-2; the 100.x / fd7a: literal only
+when Tailscale names no MagicDNS name: iOS App Transport Security refuses the
+fork's self-signed certificate on a tailnet literal with -1200 / -9802, while
+`*.ts.net` carries the app's exception) - so Moonlight dials the road the app is already using
+(the backend's own answer, the address this computer would use to reach its
+LAN, stays for loopback and the local IPC). `GET /v1/remote/capabilities` over
+HTTPS adds `road: {kind, relayed, reason}` for the requesting device; when
+Tailscale is relaying that device over DERP (no direct path) and VNC is
+available, `default_backend` is `vnc` and `reason` is `tailnet_relayed`
+(TAIL-1 §5.4 measured VNC over DERP at ~2.8 MiB/s with 1-2 s of lag).
 
 ```json
 {"backend":"vnc","transport":"wss","path":"/v1/remote/sessions/rs_…/vnc",
@@ -422,12 +438,76 @@ has to re-read or reconnect; the event is there to explain why the host
 blinked. The daemon also writes one journal line:
 `{"omodachi":"remote","event":"shell_restarted",…}`.
 
+## Ending a session from the computer (REMOTE-STOP-1)
+
+A device can end only its own session. The person at the computer can end
+**any** session, whoever holds it and whether or not that device still
+answers — on 2026-09-24 a Take over on a phone got stuck with the app's panel
+unable to open, the computer's screen was off, and `remote stop` with the
+panel's credential answered `permission_denied`.
+
+"The person at the computer" is the desktop user's own processes, proven by
+the Unix socket and by nothing a network client can present:
+
+| Caller | Transport | May end |
+| --- | --- | --- |
+| a paired device | HTTPS `DELETE`, or its credential on the Unix socket | its own session only (`403 permission_denied` otherwise) |
+| the panel's credential (`com.omodachi.host`) | HTTPS | its own session only — which is none; unchanged |
+| the panel's credential | the same-UID Unix socket, `remote.stop` | any session |
+| no credential: `local.remote.stop` | the same-UID Unix socket | any session, or all of them |
+
+`local.remote.stop` takes `{}` (the live session; none is
+`session_not_found`), `{"session_id": "rs_…"}` (that one; an id this host never
+had is `session_not_found`) or `{"all": true}` (every session — a host has at
+most one — and none live is not an error). A root peer is refused like any
+other stranger. It answers
+
+```json
+{"released": true, "errors": [], "ended_by": "local_owner",
+ "sessions": [{"session_id": "rs_…", "owner_device_id": "ios-…", "mode": "takeover",
+               "released": true, "errors": []}]}
+```
+
+Ending a session this way is the ordinary release: the same `restore()` as a
+device's own `DELETE` (screens back on, workspaces home, input unlocked, the
+bar back where `official_bar_position` found it, idle back on, the output
+destroyed). The device that held it gets the usual `remote.session.changed`
+with `state: "released"` and `reason: "ended_on_computer"`, and a later
+`GET` of the session says the same. A device's own `DELETE` still says
+`reason: "released"`.
+
+Every release writes one journal line saying who ended it and nothing else:
+
+```
+{"omodachi":"remote","event":"session_ended","session":"rs_…","mode":"takeover",
+ "owner":"ios-…","reason":"ended_on_computer","ended_by":"local_owner","errors":[]}
+```
+
+`ended_by` is `local_owner`, the device id that ended its own session, or
+`host` for the daemon's own reasons (`heartbeat_timeout`, `daemon_stopping`);
+`errors` lists only the names of restore steps that failed.
+
+From the computer:
+
+- `omodachi-host remote stop` — the live session; `--session-id ID` — that one;
+  `--all` — every one, exit 0 when there is none. Works from a terminal, a
+  text console or SSH as the desktop user; it needs no credential and ignores
+  `OMODACHI_TOKEN`.
+- The Omodachi panel's Overview offers **End Remote session** while a session
+  is live (Extra screen; a Take over has this screen off and the panel locked).
+- A key: Omodachi installs no Hyprland bindings and edits none of yours. One
+  line in your own bindings file running `omodachi-host remote stop --all`
+  works during a Take over as long as the computer's keyboard is live — not
+  when the session was started with "lock the computer's keyboard and mouse"
+  (`lock_local_input`), which disables every physical keyboard and pointer in
+  the compositor until the session ends.
+
 ## Recovery
 
 Every mutation is journaled to `~/.local/state/omodachi/remote/OMODACHI-*.json`
 **before** it is issued. All four exits run the same `restore()`:
 
-- a normal `DELETE`;
+- a normal `DELETE`, or the computer's own `remote stop` (above);
 - a missed heartbeat — no beat within `ttl_seconds` (default 30, the CLI uses 60);
 - daemon start, which finishes every journal it finds;
 - `omodachi-host remote recover`.
@@ -498,6 +578,74 @@ If the host preference `allow_dynamic_resolution` is false, a resize that would
 change output geometry is refused with `403 dynamic_resolution_policy_denied`;
 an encoder-only change (pixels, fps, bitrate) is still allowed.
 
+A resize first stops the backend's stream. The managed Sunshine fork refuses to
+stop a stream that has not sent its first ping yet (`session_not_stopped`) and
+lets it go within its 10 s ping timeout, so a resize that meets that refusal
+tries the stop again (0.5, 1, 1.5, 2 s, … for up to 12 s, journal line
+`resize_waits_for_stream`) and then applies the new geometry (REMOTE-ROTATE-1:
+a turn right after the previous turn's stream opened used to fail the resize,
+mark the session `failed` and restore it). Any other stop error, or a refusal
+that outlasts the window, fails the resize as before.
+
+## Typing (REMOTE-INPUT-1)
+
+The app sends everything a US keyboard can produce — letters, digits,
+punctuation, Space, Return, Tab, Backspace, arrows — as real key events down the
+stream, the way a hardware keyboard does. It used to send the soft keyboard's
+text as Moonlight's UTF-8 text event, which the Sunshine fork types on Linux as
+Ctrl+Shift+U + hex. fcitx5 (Omarchy's input method) and most terminals do not
+finish that sequence, so "y" arrived as "U+".
+
+What no key produces — 中文 committed by the phone's own input method, emoji,
+accented letters — goes to `POST /v1/remote/sessions/{id}/text {"text"}` and is
+typed by `wtype` (the virtual-keyboard tool Omarchy installs for Voxtype), as
+the desktop user, into the focused window: the same window the stream's keys
+reach. The command is `wtype -k VoidSymbol -- <text>`: Chromium drops the first
+key of every new virtual keyboard, and `VoidSymbol` types nothing anywhere. Only the device that holds the session, only while it is `ready`. At
+most 1024 characters / 4 KiB; control characters are refused (`400
+invalid_request`) because those are keys. The answer is `{typed: true, chars,
+method: "wtype"}`; the text is never echoed and never journaled. The app holds
+any keys typed after the text until the answer arrives, so the two roads never
+overtake each other. A host from before this route answers `404`; the app then
+drops what it cannot type rather than sending the Ctrl+Shift+U sequence.
+
+`GET /v1/remote/capabilities` carries `text_input: {available, layout,
+variant}`. `layout`/`variant` are Hyprland's `input:kb_layout` /
+`input:kb_variant`. Keys are positions, so on a host whose layout is not plain
+`us` the app sends every printable character through this route instead (Space,
+Return and Tab stay keys); with the host's fcitx5 switched to pinyin, ASCII keys
+still go through it and become 中文 there.
+
+### The compose field (REMOTE-INPUT-2)
+
+The app's Remote keyboard has a compose field: the phone's own input method
+(pinyin candidates, predictions, autocorrect, dictation, paste) writes into a
+field in the app, and **Send** types the whole draft through this route. So
+this route also takes:
+
+- **Line breaks and tabs.** `wtype` types `\n` as the Return key and `\t` as
+  Tab (its own remap table). "Enter after" in the app is a trailing `\n`; a
+  pasted paragraph keeps its line breaks, and the app asks before it sends more
+  than one line. Every other control character is still refused.
+- **`id`** (8–64 of `A-Za-z0-9_-`, the app sends a UUID): one press of Send.
+  The same device sending the same id for the same session again — a retry
+  after a reply lost on a reconnect — gets the first answer back with
+  `replayed: true`, and nothing is typed a second time; a retry that arrives
+  while the first is still typing waits for it. The typing finishes even if
+  the request that started it gave up. The same id with different text is
+  `400 invalid_request`. An attempt refused before `wtype` ran (`session_not_ready`,
+  `remote_text_unavailable`) typed nothing and does not spend the id. The last
+  64 ids are remembered.
+
+`text_input` adds `max_chars: 1024`, `max_bytes: 4096` (the app shows a draft
+over either before Send) and `compose: true`. A host without `compose` gets the
+app's per-key typing instead of the field.
+
+Not used, on purpose: the clipboard plus a paste chord (it replaces what the
+user copied, fills the clipboard history, and needs a different chord per
+program) and changing fcitx5's Unicode key (it edits the user's input-method
+configuration).
+
 ## Error codes
 
 | Code | Status | Meaning |
@@ -509,13 +657,15 @@ an encoder-only change (pixels, fps, bitrate) is still allowed.
 | `permission_denied` | 403 | another device owns the session |
 | `media_pairing_required` | 409 | the Sunshine backend has no paired certificate for this device |
 | `wayvnc_0_10_1_required` | 503 | the VNC backend is not installed |
-| `sunshine_desktop_unavailable` | 503 | the fork is not running the managed desktop control |
+| `sunshine_desktop_unavailable` | 503 | the fork's control answers but it cannot serve a managed GPU stream: capture is not `wlr`, or its encoder is neither configured as VAAPI nor probed as VAAPI (e.g. a VM, which would encode in software). An unpinned fork whose own probe chose VAAPI is available (REMOTE-FIX-1, [sunshine-ipc.md](sunshine-ipc.md)) |
 | `sunshine_assets_missing` | - | not an error: a capabilities `reason` reported next to `available: true`. The managed fork's `assets/shaders/opengl` is not beside the binary its unit starts, so it is encoding in software. See [sunshine-ipc.md](sunshine-ipc.md) |
 | `remote_runtime_unavailable` | 503 | there is no graphical session, so there is no manager |
 | `dynamic_resolution_policy_denied` | 403 | the host preference forbids this geometry change |
 | `host_waking` | 409 | the host screen was asleep or the screensaver was active; `POST /v1/control/wake` first, then retry |
 | `vnc_bridge_unavailable` | 409 / 503 | this session is not a ready VNC session (409), or its WayVNC listener is not accepting connections (503) |
 | `vnc_bridge_exists` | 409 | one VNC bridge is already open on this session |
+| `remote_text_unavailable` | 503 | `POST …/text`: `wtype` is not installed, or there is no graphical session to type into |
+| `remote_text_failed` | 503 | `POST …/text`: `wtype` ran and did not succeed |
 
 A 401 `permission_denied` for a refused device credential carries
 `error.reason`: `credential_expired`, `credential_revoked`, `device_purged` or
@@ -526,6 +676,7 @@ routes add two codes of their own:
 | --- | --- | --- |
 | `credential_renewal_not_due` | 409 | `POST /v1/pairing/renew` before the credential's last week. `error.detail` carries `expires_at` and `renewable_at` |
 | `plugin_credential` | 409 | the host panel's own credential: it is not renewed and not revoked without `--force` |
+| `auth_unavailable` | 503 | REMOTE-PAIR-1: the credential registry could not be read or written just then. Not a verdict on the credential - a client keeps it and asks again; only a 401 is a refusal |
 
 Errors carry `{"error":{"code","message"}}` and, for the codes above that say
 so, a bounded `error.detail` object of strings, integers and booleans.
@@ -545,6 +696,58 @@ The routes themselves are documented in [clipboard.md](clipboard.md).
 | `clipboard_invalid` | 400 | an empty write, or a body that is not text at all |
 | `clipboard_unavailable` | 503 | there is no clipboard bridge: no graphical session, or `wl-copy`/`wl-paste` did not answer |
 
+### The Herdr bridge's codes (HERDR-3)
+
+Typing into a pane (`POST /v1/herdr/panes/{pane}/keys|text`, see
+[herdr.md](herdr.md)) adds these to the Herdr bridge's `herdr_unavailable`,
+`herdr_control_in_use` and `herdr_request_failed`.
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `invalid_key` | 400 | not a key in Herdr's grammar (`cmd+c`, `C-c`, two letters, a control byte) |
+| `herdr_key_unsupported` | 400 | `PageUp`, `PageDown`, `Home`, `End`, `Insert` or `Delete`: Herdr has no way to send it |
+| `herdr_too_many_keys` | 413 | more than 32 keys in one call |
+| `invalid_text` | 400 | empty text, `\r`, or a control character other than `\n` and `\t` |
+| `herdr_text_too_long` | 413 | more than 16 KiB of UTF-8. Refused rather than cut or chunked |
+| `herdr_pane_gone` | 404 | Herdr no longer has that pane |
+
+### Starting and making Herdr sessions (HERDR-5)
+
+`POST /v1/herdr/sessions/{name}/start` and `POST /v1/herdr/sessions {name}`
+(see [herdr.md](herdr.md)) add these.
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `invalid_session` | 400 | `start`: the host lists no session by that name (start never invents one) |
+| `invalid_session_name` | 400 | `create`: not 1-32 of `A-Z a-z 0-9 . _ -` with a letter or digit first |
+| `herdr_session_exists` | 409 | `create`: the host already has a session by that name, running or stopped |
+| `herdr_session_start_failed` | 503 | the session's server did not come up and answer within ten seconds |
+
+### A new Herdr workspace in a folder (HERDR-6)
+
+`POST /v1/herdr/sessions/{name}/workspaces {cwd, name?}` and
+`GET /v1/herdr/folders?under=` (see [herdr.md](herdr.md)) add these;
+`invalid_session` is a session that is not listed as running.
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `invalid_folder` | 400 | not a path: empty, a control character, longer than 4096 characters |
+| `folder_outside_home` | 400 | the folder, links followed, is not the home folder or inside it |
+| `folder_private` | 400 | a private place in the home folder (`~/.ssh`, `~/.gnupg`, credentials, browser profiles, Omodachi's own state) |
+| `folder_not_found` | 404 | no folder there: nothing, or a file |
+| `folder_unreadable` | 400 | `browse`: the folder is there but cannot be listed |
+| `invalid_workspace_name` | 400 | the name is longer than 64 characters or has a control character |
+
+### Starting an agent with the workspace (HERDR-11)
+
+`POST /v1/herdr/sessions/{name}/workspaces {cwd?, name?, launch?}`: an empty or
+missing `cwd` is the home folder; `launch` must be one of the folders
+document's `launchers`, exactly.
+
+| Code | Status | Meaning |
+| --- | --- | --- |
+| `herdr_launch_not_allowed` | 400 | `launch` is not one of the host's launchers (nothing was made) |
+
 ## Command line
 
 ```sh
@@ -554,11 +757,13 @@ omodachi-host remote start --mode takeover --backend vnc --viewport 1194x834 \
 omodachi-host remote resize --viewport 834x1194 --orientation portrait
 omodachi-host remote resize --quality-preset balanced            # STREAM-1
 omodachi-host remote resize --quality-preset custom --fps 30 --bitrate-kbps 30000
-omodachi-host remote stop
+omodachi-host remote stop                # any device's session; no credential (REMOTE-STOP-1)
+omodachi-host remote stop --all          # the same, and nothing live is not an error
 omodachi-host remote recover
 omodachi-host remote recover --orphans   # also remove OMODACHI-* outputs no journal here owns
 ```
 
 `start` defaults to a 60-second TTL so a forgotten command-line session restores
 itself. The other commands resolve the session ID themselves, because there is
-only one.
+only one. `stop` is the local owner's operation (`local.remote.stop`): it
+needs no `OMODACHI_TOKEN` and ends whichever device's session is live.

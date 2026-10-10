@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/herdr-reply.schema.json",
+  "title": "A Herdr pane's latest agent reply",
+  "description": "HERDR-11: `GET /v1/herdr/panes/{pane}/reply`, in the device's selected session. For a codex or claude pane, the agent's latest reply as plain text, read from the agent's own session log (codex's rollout under `~/.codex/sessions`, Claude Code's project log under `~/.claude/projects`) - read-only, a byte-offset tail, never the PTY. The log is tied to the pane through the pane's processes (`pane.process_info`, then `/proc`): codex by the rollout open in its process tree (or its one thread lock), claude by a `--resume`/`--session-id` on its command line or by its working folder when it is the only claude there; a Herdr that reports the agent's session itself is believed first. Anything that cannot be matched reliably is `available: false` with a `reason` (`not_an_agent`, `no_match`, `ambiguous`, `no_reply`) that a client never shows: it shows no reply at all. `text` is at most 32 KiB (`truncated`). `complete` is whether the agent's turn ended after this reply (null when the log does not say). `phase` is codex's own label (`commentary` while it works, `final_answer`). `ETag` answers `If-None-Match` with 304. `404 herdr_pane_gone` for a pane the session no longer has. Native and web credentials.",
+  "type": "object",
+  "required": ["contract_revision", "session", "pane", "available", "reason", "agent", "text", "at", "complete", "phase", "truncated"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "session": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+    "pane": {"type": "string", "pattern": "^w[0-9]{1,9}:p[0-9]{1,9}$"},
+    "available": {"type": "boolean"},
+    "reason": {"type": ["string", "null"], "pattern": "^[a-z_]{1,40}$"},
+    "agent": {"oneOf": [{"type": "null"}, {"enum": ["codex", "claude"]}]},
+    "text": {"type": ["string", "null"], "maxLength": 32772},
+    "at": {"type": ["string", "null"], "maxLength": 64},
+    "complete": {"type": ["boolean", "null"]},
+    "phase": {"oneOf": [{"type": "null"}, {"enum": ["commentary", "final_answer"]}]},
+    "truncated": {"type": "boolean"}
+  }
+}

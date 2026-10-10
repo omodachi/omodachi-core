@@ -52,6 +52,8 @@ class ControlledRPC:
             return {'turn': {'id': 'turn-one', 'status': 'inProgress'}}, self.ordinal
         if method == 'turn/interrupt':
             return {}, self.ordinal
+        if method == 'thread/queue/list':  # AGENT-QUEUE-1: a codex without the queue
+            raise AgentChatError('provider_request_rejected')
         raise AssertionError(method)
 
     def notify(self, method, **params):
@@ -108,7 +110,12 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         events = []
         while not chat.events.empty(): events.append(chat.events.get_nowait())
         first_answer = next(e for e in events if e['event']['type']=='message')
-        self.assertEqual(first_answer['event']['value']['text'], '', 'queued partial event cannot mutate retroactively')
+        # AGENT-NEW-1: a message that has only started (no text yet) is held
+        # back; it goes out with its first visible delta, as a copy that later
+        # deltas cannot mutate retroactively.
+        self.assertEqual(first_answer['event']['value']['text'], 'Actual JSON delta')
+        self.assertFalse(any(e['event']['type'] == 'message' and not e['event']['value']['text'].strip()
+                             for e in events))
         self.assertTrue(events[-1]['event']['interrupted'])
         await chat.close()
         self.assertTrue(rpc.closed)
@@ -334,7 +341,7 @@ class ApprovalTests(unittest.IsolatedAsyncioTestCase):
         chat = CodexDefaultAgentChat(self.binding(), rpc)
         state = await chat.attach()
         self.assertEqual(state['identity']['providerSessionID'], 'thread-owned')
-        self.assertEqual([m for m, _ in rpc.calls][-1], 'thread/read')
+        self.assertEqual([m for m, _ in rpc.calls if m != 'thread/queue/list'][-1], 'thread/read')
         self.assertFalse(any(m == 'thread/start' for m, _ in rpc.calls))
 
     async def test_credential_refresh_is_answered_from_the_codex_store(self):

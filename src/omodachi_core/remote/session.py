@@ -123,6 +123,9 @@ class RemoteManager:
         self.shell = shell
         self.render_density = render_density
         self.clock, self.monotonic, self.events = clock, monotonic, events
+        # REMOTE-ROTATE-1: the pause between tries of a backend stop the fork
+        # refused because its stream has not pinged yet. A test replaces it.
+        self.sleep = time.sleep
         self.default_ttl = ttl_seconds
         # Host policy: with dynamic resolution off, a session keeps the output
         # geometry it started with. Encoder-only changes stay allowed.
@@ -143,6 +146,9 @@ class RemoteManager:
         self._reconfigure_failures = 0
         self._record: dict | None = None
         self._journal: Journal | None = None
+        # POLISH-R2. A release whose restore failed, still being finished in
+        # the background: {"record", "steps", "attempts", "next", "since"}.
+        self._unfinished: dict | None = None
 
     # --- helpers -----------------------------------------------------------
 
@@ -369,6 +375,7 @@ class RemoteManager:
         live = self.current()
         if live is not None:
             raise RemoteError("remote_session_exists", 409, **self._owner_detail(live))
+        self._settle_unfinished()
         allowed = {"backend", "mode", "viewport_points", "orientation", "logical_long_edge",
                    "quality", "decoder", "placement", "lock_local_input", "ttl_seconds",
                    "quality_preset", "adaptive", "bar_occlusion_points"}
@@ -447,7 +454,9 @@ class RemoteManager:
             self.session.connection = backend.prepare(self.session, profile)
         except BaseException as error:
             self._advance("failed", reason=getattr(error, "code", "create_failed"), publish=False)
-            self.restore(self._record, "create_failed")
+            errors = self.restore(self._record, "create_failed")
+            if errors:
+                self._keep_unfinished(self._record, errors)
             self._publish("create_failed")
             raise
         self._advance("ready", reason="created")
@@ -739,7 +748,7 @@ class RemoteManager:
         self._advance("resizing", reason=reason)
         try:
             if previous is not None:
-                previous.stop(session)
+                self._stop_settling(previous, session, reason=reason)
                 if backend_name != session.backend:
                     previous.release(session)
             if not any(row.name == session.output_name for row in self.hyprland.monitors()):
@@ -779,6 +788,45 @@ class RemoteManager:
             raise
         self._advance("ready", reason=reason)
         return session
+
+    # REMOTE-ROTATE-1. How long a re-plan waits for the fork to let go of a
+    # stream that has not pinged yet. The fork drops such a stream after its
+    # ping timeout (10 s); the same budget as a create waiting for the last
+    # session's backend (`SETTLE_SECONDS`).
+    STOP_SETTLE_SECONDS = 12.0
+    STOP_RETRY_DELAYS = (0.5, 1.0, 1.5, 2.0)
+    STOP_REFUSALS = frozenset({"session_not_stopped", "sunshine_stop_incomplete"})
+
+    def _stop_settling(self, backend, session, *, reason):
+        """Stop the backend for a re-plan, waiting out a stream not yet stopped.
+
+        Leo's iPad, 2026-10-05 (and reproduced from a simulator the same
+        evening): a turn re-planned the takeover while the stream the last
+        re-plan had just opened was still waiting for its first ping. The fork
+        answered `session_not_stopped`, the resize failed, and the session was
+        marked failed and restored - a turn of the device ended the session.
+        That refusal is a "not yet", not a loss: the fork lets the stream go
+        within its ping timeout, so the stop is tried again until then. Any
+        other error, or still refused at the deadline, fails the resize as
+        before.
+        """
+        deadline = self.monotonic() + self.STOP_SETTLE_SECONDS
+        attempt = 0
+        while True:
+            try:
+                return backend.stop(session)
+            except RemoteError as error:
+                if error.code not in self.STOP_REFUSALS or self.monotonic() >= deadline:
+                    if attempt:
+                        _print_journal({"event": "resize_stop_gave_up", "session": session.id,
+                                        "error": error.code, "attempts": attempt + 1, "reason": reason})
+                    raise
+                if attempt == 0:
+                    _print_journal({"event": "resize_waits_for_stream", "session": session.id,
+                                    "error": error.code, "reason": reason})
+                delay = self.STOP_RETRY_DELAYS[min(attempt, len(self.STOP_RETRY_DELAYS) - 1)]
+                attempt += 1
+                self.sleep(min(delay, max(0.0, deadline - self.monotonic())))
 
     def heartbeat(self, session_id):
         session = self.get(session_id)
@@ -1004,18 +1052,117 @@ class RemoteManager:
             self._journal.write(self._record)
         return changed
 
-    def release(self, session_id, reason="released"):
+    def release(self, session_id, reason="released", *, ended_by="host"):
+        """`ended_by` is who asked, for the journal line: `local_owner`, the
+        device id that held the session, or `host` for this daemon's own
+        reasons (heartbeat timeout, shutdown). REMOTE-STOP-1."""
         if self.session is None or self.session.id != session_id:
             return {"released": True, "errors": []}
         if self.session.state == "released":
             return {"released": True, "errors": []}
+        if self.session.state == "failed" and self._unfinished is not None \
+                and self._unfinished["record"].get("id") == session_id:
+            # POLISH-R2: the same release asked again (the App retries a DELETE
+            # once). The session already ended and said so; this only tries the
+            # steps that are still unfinished, and is journaled as a retry.
+            errors = self._finish_unfinished(cause="repeat_release")
+            return {"released": not errors, "errors": errors}
         self._advance("stopping", reason=reason, publish=False)
         errors = self.restore(self._record, reason)
         self._advance("failed" if errors else "released", reason=reason)
+        # Who ended it, never anything else: the session id, its owner's device
+        # id, the mode, the reason and which restore steps failed (by code).
+        _print_journal({"event": "session_ended", "session": self.session.id, "mode": self.session.mode,
+                        "owner": self.session.device_id, "reason": reason,
+                        "ended_by": ended_by if isinstance(ended_by, str) and ended_by else "host",
+                        "errors": [row.get("step") for row in errors]})
+        if errors:
+            self._keep_unfinished(self._record, errors)
         return {"released": not errors, "errors": errors}
+
+    # --- POLISH-R2: a restore that failed is finished, not forgotten --------
+
+    # A failed backend restore used to stay failed until the daemon restarted.
+    # On 2026-10-05 that left the managed fork holding a lease nobody owned -
+    # desktop.stop met a stream still waiting for its first ping, so
+    # desktop.release was never sent - and every later claim, by anyone, was
+    # `desktop_busy` until Sunshine was restarted by hand. The fork lets such a
+    # stream go after its ping timeout (10 s), so the steps that failed are
+    # tried again in the background until they succeed, without blocking the
+    # DELETE that ended the session.
+    RETRY_DELAYS = (1.0, 2.0, 3.0, 5.0, 8.0, 13.0, 20.0, 30.0)
+    RETRY_GIVE_UP = 600.0
+
+    def _keep_unfinished(self, record, errors):
+        steps = [row.get("step") for row in errors if row.get("step")]
+        record["failed_steps"] = steps
+        try:
+            self._journal_for(record).write(record)
+        except OSError:
+            pass
+        self._unfinished = {"record": record, "steps": steps, "attempts": 0,
+                            "next": self.monotonic() + self.RETRY_DELAYS[0], "since": self.monotonic()}
+
+    def _finish_unfinished(self, *, cause):
+        pending = self._unfinished
+        if pending is None:
+            return []
+        record = pending["record"]
+        errors = self.restore(record, "restore_retry", only=set(pending["steps"]))
+        pending["attempts"] += 1
+        if not errors:
+            self._unfinished = None
+            if self.session is not None and self.session.id == record.get("id") and self.session.state == "failed":
+                self.session.state = "released"
+                self.session.reason = "released"
+            _print_journal({"event": "session_restore_finished", "session": record.get("id"),
+                            "steps": pending["steps"], "attempts": pending["attempts"], "cause": cause})
+            return []
+        pending["steps"] = [row.get("step") for row in errors if row.get("step")]
+        delay = self.RETRY_DELAYS[min(pending["attempts"], len(self.RETRY_DELAYS) - 1)]
+        pending["next"] = self.monotonic() + delay
+        if pending["attempts"] == 1 or cause == "repeat_release":
+            _print_journal({"event": "session_restore_retried", "session": record.get("id"),
+                            "errors": pending["steps"], "attempts": pending["attempts"], "cause": cause})
+        if self.monotonic() - pending["since"] > self.RETRY_GIVE_UP:
+            # Left for `remote recover` and the next daemon start; the journal
+            # still names exactly what is unfinished.
+            _print_journal({"event": "session_restore_abandoned", "session": record.get("id"),
+                            "errors": pending["steps"], "attempts": pending["attempts"]})
+            self._unfinished = None
+        return errors
+
+    # How long a create waits for the previous session's backend to let go.
+    # The fork drops a stream that never pinged after 10 s.
+    SETTLE_SECONDS = 12.0
+
+    def _settle_unfinished(self, sleep=time.sleep):
+        """Before a new session claims the backend, finish the last one's.
+
+        Only the backend step is worth waiting for: it is the one that makes
+        the fork refuse the claim. The wait is bounded; the claim itself still
+        says `desktop_busy` if the fork has not let go by then.
+        """
+        if self._unfinished is None:
+            return
+        deadline = self.monotonic() + self.SETTLE_SECONDS
+        while self._unfinished is not None:
+            self._finish_unfinished(cause="next_create")
+            if self._unfinished is None or "backend" not in self._unfinished["steps"]:
+                return
+            if self.monotonic() >= deadline:
+                return
+            sleep(0.5)
+
+    def unfinished(self):
+        return None if self._unfinished is None else {
+            "session_id": self._unfinished["record"].get("id"), "steps": list(self._unfinished["steps"]),
+            "attempts": self._unfinished["attempts"]}
 
     def maintain(self):
         """Expire a session whose client stopped sending heartbeats."""
+        if self._unfinished is not None and self.monotonic() >= self._unfinished["next"]:
+            self._finish_unfinished(cause="background")
         session = self.current()
         if session is None or session.state != "ready":
             return None
@@ -1025,11 +1172,16 @@ class RemoteManager:
 
     # --- the one restore path ---------------------------------------------
 
-    def restore(self, record, reason="released"):
+    def restore(self, record, reason="released", *, only=None):
         """Undo every journaled mutation, in reverse order, best effort.
 
         Each step reports its own failure and the next step still runs, so a
         stuck backend cannot leave the physical screen dark.
+
+        POLISH-R2: `only` names the steps to run - what an earlier pass left
+        unfinished. A journal that records `failed_steps` is finished that way
+        at startup too, so an hour-old takeover is not replayed over a desktop
+        the user has since rearranged.
         """
         errors = []
         takeover = record.get("takeover") or {}
@@ -1044,7 +1196,11 @@ class RemoteManager:
                  ("idle", lambda: self._restore_idle(record)),
                  ("bar", lambda: self._restore_bar(record)),
                  ("output", lambda: self._restore_output(record))]
+        if only is None and record.get("failed_steps"):
+            only = set(record["failed_steps"])
         for name, step in steps:
+            if only is not None and name not in only:
+                continue
             try:
                 step()
             except Exception as error:  # every step is independent
@@ -1207,6 +1363,8 @@ class RemoteManager:
                 continue
             record.setdefault("journal_path", str(path))
             errors = self.restore(record, "daemon_restarted")
+            if errors:
+                self._keep_unfinished(record, errors)
             results.append({"session_id": record.get("id"), "output": record.get("output_name"), "errors": errors})
         if self.session is not None and self.session.state in LIVE:
             self.session.state, self.session.reason = "released", "recovered"

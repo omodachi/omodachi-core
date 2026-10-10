@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/agent-chat-command.schema.json",
+  "title": "One slash command's answer",
+  "description": "`POST /v1/agent/default/chat/commands/{command}:execute {revision, arguments, request_id}`. AGENT-NEW-1: an answer never carries a provider structure for a client to print. `display` is `{key, args}`: a sentence the App and Odomo word in the reader's language from scalar arguments (or lists of them); `result.summary` is the same sentence in plain English for a client that does not know the key. `native_request` asks the client to open its own thing: `choose_model` (the header's model picker; with `model`/`effort` when `/model <id> [effort]` named a valid choice, which then rides the next message, because codex has no stable model setter), `new_conversation` (the New conversation confirmation), `copy_last_response` / `export_conversation` (`text` goes to the clipboard). Refusals: `409 agent_command_unsupported` (the catalog's `reason_code` says why), `409 agent_busy`, `409 model_unavailable`, `409 reasoning_effort_unavailable`, `400 invalid_model_arguments`, `400 command_arguments_unsupported`, `400 command_argument_required`, `409 no_assistant_response`. AGENT-PLAN-1: `/plan` turns codex's Plan collaboration mode on (`plan.on`) or, when it is on, off (`plan.off`); `/plan <words>` turns it on and sends the words in the same turn (`plan.sent`, status `accepted`). `args.mode` is the mode it leaves the thread in; refusals add `409 agent_mode_unavailable` (a codex that will not change modes).",
+  "type": "object",
+  "required": ["contract_revision", "status", "command_id", "request_id", "result", "display"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_revision": {"const": "omodachi.v1"},
+    "status": {"enum": ["completed", "accepted", "native_action_required"]},
+    "command_id": {"type": "string"},
+    "request_id": {"type": "string"},
+    "result": {
+      "type": "object",
+      "required": ["summary"],
+      "properties": {"summary": {"type": "string", "minLength": 1, "not": {"pattern": "[{}\\[\\]]"}}}
+    },
+    "display": {
+      "type": "object",
+      "required": ["key", "args"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {"enum": ["pwd", "status", "model.choose", "model.selected", "skills", "mcp", "usage", "rename",
+                         "compact", "new", "copy", "export", "plan.on", "plan.off", "plan.sent"]},
+        "args": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {"type": ["string", "number", "boolean", "null"]},
+              {"type": "array", "items": {"anyOf": [
+                {"type": ["string", "number"]},
+                {"type": "object", "additionalProperties": {"type": ["string", "number", "null"]}}]}}
+            ]
+          }
+        }
+      }
+    },
+    "native_request": {
+      "type": "object",
+      "required": ["action", "arguments"],
+      "additionalProperties": false,
+      "properties": {
+        "action": {"enum": ["choose_model", "new_conversation", "copy_last_response", "export_conversation"]},
+        "arguments": {"type": "string"},
+        "model": {"type": "string"},
+        "effort": {"type": ["string", "null"]},
+        "text": {"type": "string"}
+      }
+    }
+  }
+}

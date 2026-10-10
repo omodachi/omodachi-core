@@ -20,6 +20,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 from omodachi_core import sunshine_package as package
 
@@ -228,6 +229,137 @@ class EncoderTests(unittest.TestCase):
         self.assertEqual(package.encoder_arguments(nodes=["/dev/dri/renderD128"],
                                                    probe=lambda node: False),
                          ["capture=wlr"])
+
+
+    def test_a_host_without_vainfo_takes_the_forks_own_vaapi_verdict(self):
+        """REMOTE-FIX-1: `None` is "could not ask" (no `vainfo`), not "no"."""
+        nodes = ["/dev/dri/renderD128", "/dev/dri/renderD129"]
+        self.assertEqual(package.encoder_arguments(nodes=nodes, probe=lambda node: None, probed="vaapi"),
+                         ["capture=wlr", "encoder=vaapi"])
+        for verdict in ("software", "nvenc", None):
+            self.assertEqual(package.encoder_arguments(nodes=nodes, probe=lambda node: None, probed=verdict),
+                             ["capture=wlr"], verdict)
+        # `vainfo` that looked and refused every node outranks the log.
+        self.assertEqual(package.encoder_arguments(nodes=nodes, probe=lambda node: False, probed="vaapi"),
+                         ["capture=wlr"])
+        # No render node: nothing to pin, whatever the log says.
+        self.assertEqual(package.encoder_arguments(nodes=[], probed="vaapi"), ["capture=wlr"])
+
+    HYBRID = {"/dev/dri/renderD128": "i915", "/dev/dri/renderD129": "amdgpu"}
+
+    def hybrid(self, node):
+        return self.HYBRID.get(str(node))
+
+    def test_a_hybrid_laptop_tries_the_discrete_gpu_first(self):
+        """REMOTE-FIX-2: the first node that answers was the iGPU, whose
+        encode of the wlr capture arrives as tile columns."""
+        probed = []
+
+        def probe(node):
+            probed.append(str(node))
+            return True
+        self.assertEqual(
+            package.encoder_arguments(nodes=list(self.HYBRID), probe=probe, driver=self.hybrid),
+            ["capture=wlr", "encoder=vaapi", "adapter_name=/dev/dri/renderD129"])
+        self.assertEqual(probed, ["/dev/dri/renderD129"])
+        # The discrete node refusing still leaves the integrated one.
+        self.assertEqual(
+            package.encoder_arguments(nodes=list(self.HYBRID), driver=self.hybrid,
+                                      probe=lambda node: str(node).endswith("128")),
+            ["capture=wlr", "encoder=vaapi", "adapter_name=/dev/dri/renderD128"])
+
+    def test_without_vainfo_a_hybrid_laptop_pins_the_discrete_node(self):
+        """Leo's host: no `vainfo`, the fork chose VAAPI, i915 + amdgpu."""
+        self.assertEqual(
+            package.encoder_arguments(nodes=list(self.HYBRID), probe=lambda node: None,
+                                      probed="vaapi", driver=self.hybrid),
+            ["capture=wlr", "encoder=vaapi", "adapter_name=/dev/dri/renderD129"])
+        # nouveau has no VAAPI encoder: the Intel node is the VAAPI one.
+        drivers = {"/dev/dri/renderD128": "i915", "/dev/dri/renderD129": "nouveau"}
+        self.assertEqual(
+            package.encoder_arguments(nodes=list(drivers), probe=lambda node: None,
+                                      probed="vaapi", driver=lambda node: drivers[str(node)]),
+            ["capture=wlr", "encoder=vaapi", "adapter_name=/dev/dri/renderD128"])
+        # One node is the only candidate: the fork's default is that node.
+        self.assertEqual(
+            package.encoder_arguments(nodes=["/dev/dri/renderD128"], probe=lambda node: None,
+                                      probed="vaapi", driver=self.hybrid),
+            ["capture=wlr", "encoder=vaapi"])
+        # The manual override still wins over the ranking.
+        self.assertEqual(
+            package.encoder_arguments(adapter="/dev/dri/renderD128", nodes=list(self.HYBRID),
+                                      probe=lambda node: None, probed="vaapi", driver=self.hybrid),
+            ["capture=wlr", "encoder=vaapi", "adapter_name=/dev/dri/renderD128"])
+
+    def test_the_driver_is_read_from_sysfs(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "drivers" / "amdgpu").mkdir(parents=True)
+            device = root / "drm" / "renderD129" / "device"
+            device.mkdir(parents=True)
+            (device / "driver").symlink_to(root / "drivers" / "amdgpu")
+            self.assertEqual(package.node_driver("/dev/dri/renderD129", sys_drm=root / "drm"), "amdgpu")
+            self.assertIsNone(package.node_driver("/dev/dri/renderD130", sys_drm=root / "drm"))
+        ranked = package.ranked_nodes(["/dev/dri/renderD128", "/dev/dri/renderD129", "/dev/dri/renderD130"],
+                                      driver=lambda node: {"/dev/dri/renderD128": "i915",
+                                                           "/dev/dri/renderD129": "amdgpu"}.get(str(node)))
+        self.assertEqual([str(node) for node, _ in ranked],
+                         ["/dev/dri/renderD129", "/dev/dri/renderD130", "/dev/dri/renderD128"])
+
+    def test_vainfo_missing_is_could_not_look(self):
+        with mock.patch.object(package.shutil, "which", return_value=None):
+            self.assertIsNone(package._vainfo(Path("/dev/dri/renderD128")))
+
+
+class ForkLogTests(unittest.TestCase):
+    """REMOTE-FIX-1: the fork's startup verdict, from the log it truncates at start."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.log = self.home / package.SUNSHINE_LOG
+        self.log.parent.mkdir(parents=True)
+
+    def test_the_last_h264_verdict_is_the_answer(self):
+        self.log.write_text(
+            "[2026-10-04 18:04:01.109]: Info: Trying encoder [nvenc]\n"
+            "[2026-10-04 18:04:01.109]: Info: Encoder [nvenc] failed\n"
+            "[2026-10-04 18:04:01.109]: Info: Creating encoder [h264_vaapi]\n"
+            "[2026-10-04 18:04:01.234]: Info: Found H.264 encoder: h264_vaapi [vaapi]\n"
+            "[2026-10-04 18:04:01.234]: Info: Found HEVC encoder: hevc_vaapi [vaapi]\n")
+        self.assertEqual(package.fork_probed_encoder(self.home), "vaapi")
+        with self.log.open("a") as stream:
+            stream.write("[2026-10-04 19:00:00.000]: Info: Found H.264 encoder: libx264 [software]\n")
+        self.assertEqual(package.fork_probed_encoder(self.home), "software")
+
+    def test_no_log_or_no_verdict_yet_is_none(self):
+        self.assertIsNone(package.fork_probed_encoder(self.home))
+        self.log.write_text("[2026-10-04 18:04:01.108]: Info: // Testing for available encoders //\n")
+        self.assertIsNone(package.fork_probed_encoder(self.home))
+
+    def test_only_the_tail_is_read(self):
+        self.log.write_text("Info: Found H.264 encoder: h264_vaapi [vaapi]\n" + "x" * 2048 + "\n")
+        self.assertIsNone(package.fork_probed_encoder(self.home, limit=1024))
+        self.assertEqual(package.fork_probed_encoder(self.home), "vaapi")
+
+    def test_the_install_passes_the_running_forks_verdict(self):
+        seen = {}
+
+        def arguments(**fields):
+            seen.update(fields)
+            return ["capture=wlr"]
+        self.log.write_text("Info: Found H.264 encoder: h264_vaapi [vaapi]\n")
+        with mock.patch.object(package, "encoder_arguments", side_effect=arguments), \
+                mock.patch.object(package, "fetch", return_value=self.home / "a.tar.zst"), \
+                mock.patch.object(package, "digest", return_value="0" * 64), \
+                mock.patch.object(package, "unpack", return_value={"directory": str(self.home / "d"), "sha": "e9f1b08"}), \
+                mock.patch.object(package, "verify_manifest", return_value=[]), \
+                mock.patch.object(package, "install_packages", return_value={}), \
+                mock.patch.object(package, "unit_owner", return_value={"state": "absent"}), \
+                mock.patch.object(package, "ensure_unit", return_value={}):
+            package.install("a.tar.zst", self.home, sha256="0" * 64)
+        self.assertEqual(seen, {"adapter": None, "probed": "vaapi"})
 
 
 class UnitTests(unittest.TestCase):
@@ -688,15 +820,25 @@ class PinTests(unittest.TestCase):
     def test_a_pin_that_points_at_latest_or_has_no_checksum_is_refused(self):
         with tempfile.TemporaryDirectory() as scratch:
             table = Path(scratch) / "versions.json"
-            good = {"url": "https://x/releases/download/t/a.tar.zst", "manifest_sha256": "b" * 64}
-            for entry in ({"version": "328d231", "url": package.LATEST_PACKAGE, "sha256": "a" * 64,
-                           "manifest_sha256": "b" * 64},
-                          {**good, "version": "328d231", "sha256": ""},
-                          {**good, "version": "main", "sha256": "a" * 64},
-                          {"version": "328d231", "url": good["url"], "sha256": "a" * 64},
-                          {**good, "version": "328d231", "sha256": "a" * 64, "manifest_sha256": "x"}):
+            good = {"version": "e9f1b08", "commit": "e9f1b08" + "0" * 33, "sha256": "a" * 64,
+                    "url": "https://x/releases/download/t/a.tar.zst", "manifest_sha256": "b" * 64}
+            table.write_text(json.dumps({"sunshine_package": good}))
+            self.assertEqual(package.pinned(table)["commit"], good["commit"])   # the control
+            without = {key: value for key, value in good.items() if key != "commit"}
+            for entry in ({**good, "url": package.LATEST_PACKAGE},
+                          {**good, "sha256": ""},
+                          {**good, "version": "main"},
+                          {key: value for key, value in good.items() if key != "manifest_sha256"},
+                          {**good, "manifest_sha256": "x"},
+                          # SUNSHINE-2: the full public commit is part of the pin.
+                          without,
+                          {**good, "commit": "e9f1b08"},
+                          {**good, "commit": "a" * 40},
+                          {**good, "commit": ("e9f1b08" + "0" * 33).upper()},
+                          {**good, "commit": None}):
                 table.write_text(json.dumps({"sunshine_package": entry}))
-                with self.assertRaises(package.SunshinePackageError) as refused:
+                with self.subTest(entry=entry), \
+                        self.assertRaises(package.SunshinePackageError) as refused:
                     package.pinned(table)
                 self.assertEqual(refused.exception.code, "sunshine_package_pin_invalid")
 
@@ -706,24 +848,29 @@ class PinTests(unittest.TestCase):
             "show -p ExecStart": (0, "{ path=%s ; argv[]=%s capture=wlr ; ignore_errors=no }\n" % (binary, binary), ""),
             "is-enabled": (0, enabled + "\n", ""), "is-active": (0, "active\n", "")})
 
-    def test_the_pin_is_the_first_fork_that_serves_hevc(self):
+    def test_the_pin_is_the_clean_public_rebuild_of_the_first_fork_that_serves_hevc(self):
         # STREAM-1b: 328d231 accepts an HEVC profile and reports
-        # desktop.status.encoders. Nothing before it is the same runtime, so
-        # nothing before it may stand in for it.
+        # desktop.status.encoders. SUNSHINE-2: e9f1b08 is the public commit
+        # whose tree is 328d231's plus README.md and SECURITY.md, built on a
+        # clean builder with no build path in the binary. 328d231's build is
+        # the same runtime but carries its builder's paths and another
+        # manifest, so neither it nor anything before it stands in for it.
         pin = package.pinned()
-        self.assertEqual((pin["version"], pin["satisfied_by"]), ("328d231", []))
-        self.assertEqual(pin["sha256"], "0f5a8f0b4e654bde7bac3e82fc878c888b4d5f3011a2d6416a6f067b6dc565d9")
+        self.assertEqual((pin["version"], pin["satisfied_by"]), ("e9f1b08", []))
+        self.assertEqual(pin["commit"], "e9f1b089255e235b5e6aa13ed89b7dd3f569de87")
+        self.assertEqual(pin["sha256"], "1d13e3aa16ef7bd68daba216a01701f4f06630135f7ddc40a68f56234c98cef7")
         # RELEASE-9: the MANIFEST.sha256 inside that archive, measured from it.
         self.assertEqual(pin["manifest_sha256"],
-                         "701043786fea2a92f66c7a4ac9e419072c80bb530c7e026157d3d88934cdee68")
+                         "90fe7f94be08e722e69aedea73a2a257d886c4b37a1a50b95692b951da5cfdad")
         self.assertEqual(package.choose(environ={})["manifest_sha256"], pin["manifest_sha256"])
         self.assertTrue(pin["url"].endswith(
-            "/releases/download/sunshine-328d231/omodachi-sunshine-328d231-x86_64.tar.zst"))
+            "/releases/download/sunshine-e9f1b08/omodachi-sunshine-e9f1b08-x86_64.tar.zst"))
 
     def test_leos_hand_written_drop_in_is_found_and_only_the_pinned_build_satisfies(self):
         # The drop-in shape Leo's host has carried since SPEC-B1: same file
         # name as the installer's, no marker. It is read like any other.
-        for directory_name, satisfied in (("328d231", True), ("17c6043", False), ("e58627a", False)):
+        for directory_name, satisfied in (("e9f1b08", True), ("328d231", False), ("17c6043", False),
+                                          ("e58627a", False)):
             with tempfile.TemporaryDirectory() as scratch:
                 home = Path(scratch)
                 directory = home / package.INSTALL_ROOT / directory_name
@@ -763,20 +910,21 @@ class PinTests(unittest.TestCase):
     def test_a_release_install_reports_the_commit_in_its_source_file(self):
         with tempfile.TemporaryDirectory() as scratch:
             home = Path(scratch)
-            directory = home / package.INSTALL_ROOT / "328d231"
+            directory = home / package.INSTALL_ROOT / "e9f1b08"
             directory.mkdir(parents=True)
             (directory / "sunshine").write_text("#!/bin/sh\n")
-            (directory / "SOURCE").write_text("name=x\ncommit=328d2313c92dc4db675a8eafe96a7e32460c2758\n")
-            found = package.installed_fork(home, runner=self.show(home, "328d231"))
-            self.assertEqual(found["version"], "328d2313c92dc4db675a8eafe96a7e32460c2758")
+            (directory / "SOURCE").write_text("name=x\ncommit=e9f1b089255e235b5e6aa13ed89b7dd3f569de87\n")
+            found = package.installed_fork(home, runner=self.show(home, "e9f1b08"))
+            self.assertEqual(found["version"], "e9f1b089255e235b5e6aa13ed89b7dd3f569de87")
             self.assertTrue(package.satisfies(found["version"], package.choose(environ={})))
 
     def test_what_does_not_satisfy_the_pin(self):
         pin = package.choose(environ={})
-        for version in ("a2fd635", "17c6043", "e58627a", "328d231-dirty", "", "328d2"):
+        for version in ("a2fd635", "17c6043", "e58627a", "328d231", "328d2313c92dc4db675a8eafe96a7e32460c2758",
+                        "e9f1b08-dirty", "", "e9f1b"):
             self.assertFalse(package.satisfies(version, pin), version)
         # Only the pin may be skipped for: an explicit archive is always installed.
-        self.assertFalse(package.satisfies("328d231", package.choose("latest", "e" * 64, environ={})))
+        self.assertFalse(package.satisfies("e9f1b08", package.choose("latest", "e" * 64, environ={})))
 
     def test_a_unit_that_runs_something_else_is_not_a_managed_fork(self):
         with tempfile.TemporaryDirectory() as scratch:

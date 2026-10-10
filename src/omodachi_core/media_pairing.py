@@ -211,17 +211,26 @@ class SunshinePairingIPC:
                         or type(value.get("unreadable")) is not int or not 0 <= value["unreadable"] <= 4096
                         or type(value.get("truncated")) is not bool):
                     raise MediaPairingError("media_pairing_invalid_response", 502)
-                clients = []
+                clients = {}
                 for row in rows:
                     if (not isinstance(row, dict) or set(row) != {"client_cert_sha256", "name", "enabled"}
                             or not _match(_SHA, row["client_cert_sha256"]) or type(row["enabled"]) is not bool
                             or not isinstance(row["name"], str) or len(row["name"].encode()) > 80
                             or any(ord(c) < 32 or ord(c) == 127 for c in row["name"])):
                         raise MediaPairingError("media_pairing_invalid_response", 502)
-                    clients.append(dict(row))
-                if len({row["client_cert_sha256"] for row in clients}) != len(clients):
-                    raise MediaPairingError("media_pairing_invalid_response", 502)
-                return {"clients": clients, "unreadable": value["unreadable"], "truncated": value["truncated"]}
+                    # REMOTE-PAIR-1: the fork appends a record on every
+                    # successful pairing and never merges, so a phone that
+                    # re-paired the certificate it already had is listed twice.
+                    # It is one certificate - one revoke takes every record of
+                    # it - so it is one row here, enabled if any record is.
+                    seen = clients.get(row["client_cert_sha256"])
+                    if seen is None:
+                        clients[row["client_cert_sha256"]] = dict(row)
+                    else:
+                        seen["enabled"] = seen["enabled"] or row["enabled"]
+                        seen["name"] = seen["name"] or row["name"]
+                return {"clients": list(clients.values()), "unreadable": value["unreadable"],
+                        "truncated": value["truncated"]}
             if operation == "pairing.revoke":
                 # `not_found` is as good as `revoked`: either way that
                 # certificate is not authorized in the fork any more.
@@ -312,8 +321,15 @@ class MediaPairingStore:
 
 
 class MediaPairingBridge:
-    def __init__(self, ipc: SunshinePairingIPC, store: MediaPairingStore, *, clock=time.time, monotonic=time.monotonic):
+    def __init__(self, ipc: SunshinePairingIPC, store: MediaPairingStore, *, clock=time.time, monotonic=time.monotonic,
+                 on_rebind: Callable | None = None):
         self.ipc, self.store, self.clock, self.monotonic = ipc, store, clock, monotonic
+        # REMOTE-PAIR-1: told once a certificate has moved from an older
+        # identity to the one that just proved it holds it (see `_bind`). The
+        # service retires the older identity from there; this module only
+        # moves what it owns.
+        self.on_rebind = on_rebind
+        self._rebound: list[dict] = []
         self._pins: dict[str, tuple[bytearray, float]] = {}
         self._authorizers: dict[str, Callable] = {}
         self._maintenance_lock = threading.Lock()
@@ -339,6 +355,30 @@ class MediaPairingBridge:
     @staticmethod
     def _allowed(state, device_id):
         return state["devices"].get(device_id, {}).get("allowed") is True
+
+    @staticmethod
+    def _may_rebind(state, binding, device_id):
+        """Whether a certificate bound to another device may move to this one.
+
+        REMOTE-PAIR-1. The same phone pairing again comes back under a new
+        device id but with the Moonlight certificate it already had, because
+        the certificate lives in its Keychain and the Keychain outlives the
+        app. Refusing that (`media_pairing_binding_mismatch`) left Remote with
+        no way forward. The move itself happens only in `_bind`, after the
+        fork reports `paired` for this attempt - that is, after the client
+        finished the GameStream handshake, which signs the server's challenge
+        with the certificate's private key and which the fork verifies against
+        the certificate. A public fingerprint never moves anything.
+
+        Even with that proof, a certificate whose owner was revoked on the
+        computer (`revocation_pending`, or an explicit media deny) stays where
+        it is: the person at the computer took it back, and re-pairing is not
+        a way to undo a revoke.
+        """
+        if binding is None or binding["device_id"] == device_id:
+            return False
+        return (binding["status"] == "paired"
+                and state["devices"].get(binding["device_id"], {}).get("allowed") is not False)
 
     def _view(self, state, attempt):
         binding = state["bindings"].get(attempt["client_cert_sha256"])
@@ -394,7 +434,7 @@ class MediaPairingBridge:
             raise MediaPairingError("media_pairing_invalid_binding", 400)
         with self.store.transaction() as state:
             existing = state["bindings"].get(client_cert_sha256)
-            if existing and existing["device_id"] != device_id:
+            if existing and existing["device_id"] != device_id and not self._may_rebind(state, existing, device_id):
                 raise MediaPairingError("media_pairing_binding_mismatch", 403)
             rows = self.ipc.request("pairing.list")["requests"]
             matched = [row for row in rows if row["client_cert_sha256"] == client_cert_sha256
@@ -404,6 +444,12 @@ class MediaPairingBridge:
             return dict(matched[0])
 
     def submit(self, device_id, payload, *, authorize):
+        try:
+            return self._submit(device_id, payload, authorize=authorize)
+        finally:
+            self._announce_rebinds()
+
+    def _submit(self, device_id, payload, *, authorize):
         _authorize(authorize)
         if not _match(_DEVICE, device_id) or not isinstance(payload, dict) or set(payload) != {"request_id", "client_cert_sha256", "pin"}:
             raise MediaPairingError("media_pairing_invalid_request", 400)
@@ -423,7 +469,14 @@ class MediaPairingBridge:
                     self._poll(state, previous, authorize)
                 self.store.commit(state)
                 return self._view(state, previous)
-            if state["bindings"].get(fingerprint): raise MediaPairingError("media_certificate_already_associated", 409)
+            bound = state["bindings"].get(fingerprint)
+            if bound and bound["device_id"] == device_id:
+                raise MediaPairingError("media_certificate_already_associated", 409)
+            # REMOTE-PAIR-1: bound to an older identity of (by the end of the
+            # handshake, provably) this same phone. The attempt may go on; the
+            # binding only moves once the fork says `paired` (`_bind`).
+            if bound and not self._may_rebind(state, bound, device_id):
+                raise MediaPairingError("media_pairing_binding_mismatch", 403)
             if len(state["attempts"]) >= MAX_ATTEMPTS or sum(a["status"] not in TERMINAL for a in state["attempts"].values()) >= 8:
                 raise MediaPairingError("media_pairing_capacity", 429)
             remote = self.ipc.request("pairing.pending", request_id=request_id, client_cert_sha256=fingerprint)["request"]
@@ -477,6 +530,13 @@ class MediaPairingBridge:
 
     def approve_local(self, attempt_id, *, request_id, client_cert_sha256, local_authorize):
         """Plugin/Unix-local authority only; never a public companion operation."""
+        try:
+            return self._approve_local(attempt_id, request_id=request_id, client_cert_sha256=client_cert_sha256,
+                                       local_authorize=local_authorize)
+        finally:
+            self._announce_rebinds()
+
+    def _approve_local(self, attempt_id, *, request_id, client_cert_sha256, local_authorize):
         _authorize(local_authorize);_binding(request_id, client_cert_sha256)
         with self.store.transaction() as state:
             self._expire(state);self.store.commit(state)
@@ -513,10 +573,55 @@ class MediaPairingBridge:
         fp = attempt["client_cert_sha256"]
         existing = state["bindings"].get(fp)
         if existing and existing["device_id"] != attempt["device_id"]:
-            raise MediaPairingError("media_pairing_binding_mismatch", 403)
+            # REMOTE-PAIR-1: only a `paired` result moves a certificate, and
+            # `_poll` only gets here with `paired` once the fork has verified
+            # the client's signature for this exact request and fingerprint.
+            if status != "paired" or not self._may_rebind(state, existing, attempt["device_id"]):
+                raise MediaPairingError("media_pairing_binding_mismatch", 403)
+            self._rebind(state, existing, attempt)
+            existing = None
         state["bindings"][fp] = {"device_id": attempt["device_id"], "client_cert_sha256": fp,
             "request_id": attempt["request_id"],
             "paired_at": existing["paired_at"] if existing else self.clock(), "status": status}
+
+    def _rebind(self, state, existing, attempt):
+        """Move one certificate from its older identity to the one that proved it.
+
+        The older identity's streaming grant is retired with it: the phone that
+        held it is the phone that is now asking under a new id, so the grant
+        has nobody left to serve. Its attempt records for this certificate go
+        too - they are history whose binding is no longer theirs, and leaving
+        a `paired` one behind would let a later revoke of the older identity
+        take this certificate back from the new one (`revoke_device`).
+        """
+        previous, fp = existing["device_id"], attempt["client_cert_sha256"]
+        self._set_device(state, previous, allowed=False)
+        for ident in [row["attempt_id"] for row in state["attempts"].values()
+                      if row["device_id"] == previous and row["client_cert_sha256"] == fp]:
+            state["attempts"].pop(ident, None)
+            self._wipe(ident)
+        state["bindings"].pop(fp, None)
+        self._rebound.append({"from_device_id": previous, "device_id": attempt["device_id"],
+                              "client_cert_sha256": fp})
+
+    def _announce_rebinds(self):
+        """Tell the service about the moves that are on disk, after the lock.
+
+        A move that did not reach the state file (an error between `_bind` and
+        the commit) is not announced: the service would otherwise retire an
+        identity that still holds the certificate.
+        """
+        pending, self._rebound = self._rebound, []
+        if not pending or not callable(self.on_rebind):
+            return
+        with self.store.transaction() as state:
+            landed = [row for row in pending
+                      if state["bindings"].get(row["client_cert_sha256"], {}).get("device_id") == row["device_id"]]
+        for row in landed:
+            try:
+                self.on_rebind(dict(row))
+            except Exception:
+                pass
 
     def _probe_revocation(self):
         """Ask the fork once whether it can revoke a certificate at all.
@@ -591,7 +696,11 @@ class MediaPairingBridge:
             state["bindings"].pop(fingerprint, None)
             state["attempts"].pop(attempt["attempt_id"], None)
             return
-        self._bind(state, attempt, "revocation_pending")
+        existing = state["bindings"].get(fingerprint)
+        # REMOTE-PAIR-1: a certificate another identity still holds keeps its
+        # own binding; this attempt's leftover is only this attempt's record.
+        if not existing or existing["device_id"] == attempt["device_id"]:
+            self._bind(state, attempt, "revocation_pending")
         attempt.update(status="revocation_pending", reason="sunshine_certificate_revocation_unavailable",
                        updated_at=self.clock())
 
@@ -622,6 +731,12 @@ class MediaPairingBridge:
             attempt.update(status=remote["status"], reason="", updated_at=self.clock());self._wipe(attempt["attempt_id"])
 
     def status(self, device_id, attempt_id, *, authorize):
+        try:
+            return self._status(device_id, attempt_id, authorize=authorize)
+        finally:
+            self._announce_rebinds()
+
+    def _status(self, device_id, attempt_id, *, authorize):
         _authorize(authorize)
         with self.store.transaction() as state:
             attempt = state["attempts"].get(attempt_id)
@@ -860,6 +975,7 @@ class MediaPairingBridge:
                         budget -= 1
                 self.store.commit(state)
         finally: self._maintenance_lock.release()
+        self._announce_rebinds()
 
     def close(self):
         """Clear transient secrets on daemon shutdown; never revoke user trust."""

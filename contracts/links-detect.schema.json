@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omodachi.dev/contracts/v1/links-detect.schema.json",
+  "title": "LINKS-1 link detection and host-local rewrite vectors (client test data, not a wire document)",
+  "type": "object",
+  "$defs": {
+    "found": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "url",
+              "path"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "kind",
+          "text"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "case": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "links": {
+          "$ref": "#/$defs/found"
+        }
+      },
+      "required": [
+        "text",
+        "links"
+      ],
+      "additionalProperties": false
+    },
+    "road": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "lan",
+            "mdns",
+            "tailnet"
+          ]
+        }
+      },
+      "required": [
+        "host",
+        "kind"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "contract_revision": {
+      "const": "omodachi.v1"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "known_extensions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]{1,10}$"
+      }
+    },
+    "mirror": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/case"
+      }
+    },
+    "prose": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/case"
+      }
+    },
+    "host_local": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "host_local": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url",
+          "host_local"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "rewrite": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "road": {
+            "$ref": "#/$defs/road"
+          },
+          "expected": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "road",
+          "expected"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "contract_revision",
+    "notes",
+    "known_extensions",
+    "mirror",
+    "prose",
+    "host_local",
+    "rewrite"
+  ],
+  "additionalProperties": false
+}

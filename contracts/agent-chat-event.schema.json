@@ -18,6 +18,7 @@
           "enum": [
             "message",
             "tool",
+            "tool.output",
             "turnStarted",
             "turnFinished",
             "turnFailed",
@@ -27,13 +28,16 @@
             "agent.status.changed",
             "agent.usage.updated",
             "agent.auth.refreshed",
-            "agent.request.declined"
+            "agent.request.declined",
+            "agent.queue.changed",
+            "agent.checklist.updated"
           ]
         }
       },
       "required": [
         "type"
-      ]
+      ],
+      "description": "AGENT-FIX-2: `tool.output` carries a running command's new output as an increment: `value` = {kind: \"tool\", id, turnID, delta, detail_truncated?} (`kind` so that a client which reads every value as a row still decodes it). A client appends `delta` to that tool row's `detail` and keeps its newest 65536 characters; `detail_truncated` is how many earlier characters core no longer keeps. A client that does not know the type still advances its sequence; the row's full (clipped) value comes with the item's completion. AGENT-QUEUE-1: `agent.queue.changed` carries `queue` (the snapshot's `queue`, whole) and `agent.checklist.updated` carries `checklist` (the snapshot's `checklist`)."
     }
   },
   "required": [

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "folder_outside_home",
+    "message": "folder_outside_home"
+  },
+  "contract_revision": "omodachi.v1"
+}

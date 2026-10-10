@@ -116,3 +116,34 @@ degraded stream is still a stream. A unit core cannot read leaves the reason
 `null`; not being able to look is not the same as it being missing.
 `scripts/install_host.py` prints the same finding at install time. Neither
 builds the fork; that belongs to the release spec.
+
+### An unpinned encoder is not a missing one (REMOTE-FIX-1)
+
+The fork's `desktop.status` derives `encoder` from its *configuration*
+(`config::video.encoder == "vaapi"` in `nvhttp.cpp`), not from the encoder probe
+it runs at startup. A unit started without `encoder=vaapi` answers
+`{"available": false, "backend": "wlr", "encoder": "unavailable"}` for as long
+as it runs - at idle, during a stream, right after a restart - while the probe
+chose VAAPI and every stream it serves is GPU-encoded (nothing in
+`desktop.prepare` or the RTSP launch looks at that flag). Core therefore takes
+the fork's own verdict from its log, `~/.config/sunshine/sunshine.log`, which
+the fork truncates at every start: when `backend` is `wlr`, the only thing
+missing is the encoder, and the last `Found H.264 encoder: … [vaapi]` line says
+VAAPI, the backend is `available: true` with `encoder: "vaapi"`. Its `codecs`
+are still the fork's `encoders` (H.264 only while unpinned). A software verdict
+(a VM), no verdict yet, or no readable log stays `sunshine_desktop_unavailable`.
+
+The installer pins `encoder=vaapi` when `vainfo` names a render node, and - since
+`vainfo` is `libva-utils`, which nothing installs - also when it cannot ask and
+the running fork's log says VAAPI. REMOTE-FIX-2: render nodes are tried discrete
+GPU first (`amdgpu`, `radeon`, `nouveau`, `nvidia`), integrated (`i915`, `xe`)
+last, read from `/sys/class/drm/renderD*/device/driver`; without `vainfo` and
+with more than one node, the best-ranked node with a VAAPI driver is pinned as
+`adapter_name`. On a hybrid laptop the iGPU receives the wlr capture as an Intel
+Y-tiled dmabuf that the fork imports as linear (the picture arrives as 32-pixel
+tile columns); on the dGPU the same capture encodes cleanly. With a single node,
+or unreadable drivers, no `adapter_name` is written (the fork's default is the
+only candidate). `install_host.py --sunshine-adapter /dev/dri/renderDN`
+overrides all of it. The fork-side fix is for `desktop.status` to
+report the encoder its probe chose (`video::chosen_encoder`) rather than the
+configured name; until then core reads the log.

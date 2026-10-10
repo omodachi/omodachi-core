@@ -495,5 +495,8 @@ class SessionApiTests(HerdrApiTests):
         published = []
         self.hub.publish = lambda topic, payload, **kwargs: published.append((topic, payload))
         await asyncio.to_thread(self.service.notify_herdr_layout)
+        # OVERVIEW-1: the same poll may also move the "Needs you" list
+        # (`overview.changed`), which names no session of its own.
+        published = [row for row in published if row[0] != "overview.changed"]
         self.assertEqual({row[1]["session"] for row in published}, {"omodachi", "default"})
         self.assertTrue(all(row[0] == "herdr.layout.changed" for row in published))

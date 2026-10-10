@@ -39,6 +39,11 @@ DEFAULT_GRACE_SECONDS = 24 * 3600
 # (`http-error.schema.json` `error.reason`). Four answers, because the app has
 # a different next step for each: an expired credential is one approval away
 # from working again, a revoked one was taken back on purpose.
+# LITE-1a C4. The roles the registry writes down. `companion` (the App) and
+# `plugin` (this host's panel) are never stored: they are what a device is
+# when nothing says otherwise.
+DEVICE_ROLES = ("web",)
+
 CREDENTIAL_REASONS = ("credential_expired", "credential_revoked", "device_purged", "unknown_credential")
 
 
@@ -54,6 +59,20 @@ class CredentialError(ValueError):
             reason = "unknown_credential"
         self.reason = reason
         super().__init__("invalid device credential")
+
+
+class CredentialStoreUnavailable(ValueError):
+    """REMOTE-PAIR-1: the registry could not be read or written just now.
+
+    That is this host's problem, not a verdict on the credential. It stays a
+    `ValueError` so every live socket that only asks "is it still good" keeps
+    failing closed, but the HTTPS boundary answers it 503 rather than 401: an
+    app treats a 401 as "this host no longer knows me" and throws its
+    credential away, which is exactly how a phone ends up pairing again.
+    """
+
+    def __init__(self):
+        super().__init__("credential registry unavailable")
 
 
 class CredentialRenewalRefused(ValueError):
@@ -128,6 +147,10 @@ class DeviceAuthenticator:
         # when a credential expires without anybody re-pairing.
         self._issued_at: dict[str, int] = {}
         self._retire_at: dict[str, int] = {}
+        # LITE-1a C4. A device that paired from a browser holds a `web`
+        # credential: the same credential, reaching fewer routes
+        # (`browser_gate.WEB_ALLOWED`). Absent means the App.
+        self._roles: dict[str, str] = {}
         with self._transaction():
             pass
 
@@ -169,6 +192,7 @@ class DeviceAuthenticator:
         except FileNotFoundError:
             self._issued, self._revoked, self._names = {}, set(), {}
             self._issued_at, self._retire_at = {}, {}
+            self._roles = {}
             return
         with os.fdopen(fd, "rb") as stream:
             raw = stream.read(8 * 1024 * 1024 + 1)
@@ -198,11 +222,18 @@ class DeviceAuthenticator:
                         or any(not isinstance(k, str) or not _TOKEN_HASH.fullmatch(k)
                                or type(v) is not int or v < 0 for k, v in stamps.items())):
                     raise ValueError("invalid registry fields")
+            # LITE-1a: optional too; the only role written down is `web`.
+            roles = data.get("roles", {})
+            if (not isinstance(roles, dict)
+                    or any(not isinstance(k, str) or not _DEVICE_ID.fullmatch(k) or v not in DEVICE_ROLES
+                           for k, v in roles.items())):
+                raise ValueError("invalid registry fields")
         except (ValueError, TypeError, KeyError) as exc:
             raise ValueError("invalid credential registry") from exc
         self._issued, self._revoked, self._names = dict(issued), set(revoked), dict(names)
         self._issued_at = {k: v for k, v in issued_at.items() if k in self._issued}
         self._retire_at = {k: v for k, v in retire_at.items() if k in self._issued}
+        self._roles = dict(roles)
 
     def _save_locked(self) -> None:
         if self._state_path is None:
@@ -214,9 +245,12 @@ class DeviceAuthenticator:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 os.fchmod(stream.fileno(), 0o600)
-                json.dump({"issued": self._issued, "revoked": sorted(self._revoked),
-                           "names": self._names, "issued_at": self._issued_at,
-                           "retire_at": self._retire_at},
+                document = {"issued": self._issued, "revoked": sorted(self._revoked),
+                            "names": self._names, "issued_at": self._issued_at,
+                            "retire_at": self._retire_at}
+                if self._roles:
+                    document["roles"] = self._roles
+                json.dump(document,
                           stream, sort_keys=True, separators=(",", ":"))
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -273,21 +307,45 @@ class DeviceAuthenticator:
                 self._issued_at.pop(digest, None)
                 self._retire_at.pop(digest, None)
 
-    def issue(self, device_id: str, now: int | None = None, device_name: str | None = None) -> DeviceCredential:
+    def issue(self, device_id: str, now: int | None = None, device_name: str | None = None,
+              role: str | None = None, *, retire_others: bool = False) -> DeviceCredential:
+        """A new credential. `role="web"` (LITE-1a) marks a browser's; anything
+        else is the App's, and re-pairing as the App clears an earlier `web`.
+        `retire_others` (TAIL-2): a device that paired again while it still
+        held a live credential ends up with one, the way a renewal does - every
+        other live credential gets the grace period."""
         if not isinstance(device_id, str) or not _DEVICE_ID.fullmatch(device_id):
             raise ValueError("invalid device_id")
         if device_name is not None:
             device_name = self._name(device_name)
+        if role is not None and role not in DEVICE_ROLES:
+            raise ValueError("invalid role")
         issued_at = int(time.time() if now is None else now)
         token, digest = self._mint(device_id, issued_at)
         with self._transaction():
+            if retire_others:
+                retire = issued_at + self.grace_seconds
+                for other, owner in self._issued.items():
+                    if owner == device_id and other not in self._revoked:
+                        self._retire_at[other] = min(self._retire_at.get(other, retire), retire)
             self._drop_dead_locked(device_id, issued_at)
             self._issued[digest] = device_id
             self._issued_at[digest] = issued_at
             if device_name is not None:
                 self._names[device_id] = device_name
+            if role is not None:
+                self._roles[device_id] = role
+            else:
+                self._roles.pop(device_id, None)
             self._save_locked()
         return DeviceCredential(device_id, token, issued_at, issued_at + self.ttl_seconds)
+
+    def device_role(self, device_id: str) -> str:
+        """`plugin`, `web` or `companion` - which routes this device reaches."""
+        if device_id == PLUGIN_DEVICE_ID:
+            return "plugin"
+        with self._transaction():
+            return self._roles.get(device_id, "companion")
 
     def device_name(self, device_id: str) -> str | None:
         """The display name this device paired under, or None."""
@@ -353,7 +411,7 @@ class DeviceAuthenticator:
         except CredentialError:
             raise
         except (ValueError, KeyError, TypeError, OSError) as exc:
-            raise CredentialError("unknown_credential") from exc
+            raise CredentialStoreUnavailable() from exc
 
     def credential_info(self, token: str, now: int | None = None) -> dict:
         """What `GET /v1/pairing/credential` answers about the caller's own credential."""
@@ -442,6 +500,7 @@ class DeviceAuthenticator:
                 self._issued_at.pop(digest, None)
                 self._retire_at.pop(digest, None)
             named = self._names.pop(device_id, None) is not None
+            self._roles.pop(device_id, None)
             self._save_locked()
             return {"device_id": device_id, "removed_credentials": len(digests), "removed_name": named}
 
@@ -488,5 +547,6 @@ class DeviceAuthenticator:
                                # `plugin` is the host's own panel credential, not a paired
                                # companion. The Devices page draws it as a label rather
                                # than as a row with a Remove button.
-                               "role": "plugin" if device_id == PLUGIN_DEVICE_ID else "companion"})
+                               "role": "plugin" if device_id == PLUGIN_DEVICE_ID
+                                       else self._roles.get(device_id, "companion")})
             return result

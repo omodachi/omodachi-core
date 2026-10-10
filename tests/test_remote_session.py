@@ -41,12 +41,16 @@ class RemoteHarness(unittest.TestCase):
         # The asset probe reads a systemd unit; the harness answers "we did not
         # look" so no test depends on this machine having one.
         self.assets = {"present": None}
+        # REMOTE-FIX-1: the fork's own startup verdict, from its log; the
+        # harness says "no verdict" unless a test gives one.
+        self.probed = None
         self.manager = RemoteManager(
             hyprland=Hyprland(INSTANCE, runner=self.compositor, sleep=lambda _seconds: None),
             journal_dir=self.root / "remote",
             encoder=ENCODER,
             sunshine=SunshineBackend(self.sunshine, certificate_resolver=lambda device: FINGERPRINT,
-                                     address=lambda: "192.168.1.11", assets=lambda: self.assets),
+                                     address=lambda: "192.168.1.11", assets=lambda: self.assets,
+                                     probed_encoder=lambda: self.probed),
             vnc=VncBackend(FakeWayVNC.factory()),
             bar_position=OfficialBarPosition(home=self.root, read_position=self.bar.read,
                                              set_position=self.bar.set),
@@ -389,6 +393,60 @@ class ExtendTests(RemoteHarness):
         self.assertTrue(value["lock_local_input_supported"])
         self.assertEqual(value["encoder_limits"]["max_pixels"], 16_777_216)
         self.sunshine.available = False
+        self.assertEqual(self.manager.capabilities()["backends"]["sunshine"],
+                         {"available": False, "reason": "sunshine_desktop_unavailable"})
+
+    def test_an_unpinned_fork_whose_probe_chose_vaapi_is_available(self):
+        """REMOTE-FIX-1: Leo's host. The drop-in lost `encoder=vaapi`, so the
+        fork says `encoder: "unavailable"` from its configuration while its
+        startup probe chose VAAPI and streams on the GPU."""
+        self.sunshine.available, self.sunshine.encoder = False, "unavailable"
+        self.sunshine.encoders = ["h264"]
+        self.probed = "vaapi"
+        value = self.manager.capabilities()
+        self.assertEqual(value["backends"]["sunshine"],
+                         {"available": True, "reason": None, "backend": "wlr", "encoder": "vaapi",
+                          "codecs": ["h264"]})
+        self.assertEqual(value["default_backend"], "sunshine")
+        session = self.start(backend="sunshine")
+        self.assertEqual(session.backend, "sunshine")
+        # Unpinned, the fork serves H.264 only, whatever the client decodes.
+        self.assertEqual(session.profile.codec, "h264")
+
+    def test_an_unpinned_fork_without_a_vaapi_verdict_stays_unavailable(self):
+        self.sunshine.available, self.sunshine.encoder = False, "unavailable"
+        unavailable = {"available": False, "reason": "sunshine_desktop_unavailable"}
+        # A software probe (a VM): the fork really would encode on the CPU.
+        # No verdict yet (the probe runs after start), or no log at all.
+        for verdict in ("software", "nvenc", None):
+            self.probed = verdict
+            self.assertEqual(self.manager.capabilities()["backends"]["sunshine"], unavailable, verdict)
+            self.assertEqual(self.manager.capabilities()["default_backend"], "vnc")
+            with self.assertRaises(RemoteError) as caught:
+                self.start(backend="sunshine")
+            self.assertEqual((caught.exception.code, caught.exception.status),
+                             ("sunshine_desktop_unavailable", 503))
+        # A log that cannot be read is no verdict, not a crash.
+        def broken():
+            raise OSError("unreadable")
+        self.manager.backends["sunshine"].probed_encoder = broken
+        self.assertEqual(self.manager.capabilities()["backends"]["sunshine"], unavailable)
+
+    def test_the_vaapi_verdict_never_covers_a_capture_path_that_is_missing(self):
+        self.probed = "vaapi"
+        self.sunshine.available, self.sunshine.encoder = False, "unavailable"
+        original = self.sunshine.request
+
+        def no_capture(op, **fields):
+            value = original(op, **fields)
+            return dict(value, backend="unavailable") if op == "desktop.status" else value
+        self.sunshine.request = no_capture
+        self.assertEqual(self.manager.capabilities()["backends"]["sunshine"],
+                         {"available": False, "reason": "sunshine_desktop_unavailable"})
+        # And a pinned fork that answers `available: false` for its own reason
+        # is believed, verdict or not.
+        self.sunshine.request = original
+        self.sunshine.encoder = "vaapi"
         self.assertEqual(self.manager.capabilities()["backends"]["sunshine"],
                          {"available": False, "reason": "sunshine_desktop_unavailable"})
 
@@ -1773,3 +1831,193 @@ class IdleRetryTests(unittest.TestCase):
                            sleep=lambda _seconds: self.fail("waited for nothing"))
         idle.set(False)
         self.assertEqual(calls, ["disable"])
+
+
+class UnfinishedRestoreTests(RemoteHarness):
+    """POLISH-R2. A release whose backend step failed is finished, not forgotten.
+
+    2026-10-05 09:47 (host time): the fork met a stream still waiting for its
+    first ping, `desktop.stop` said not stopped, `desktop.release` was never
+    sent, and every later claim was `desktop_busy` until Sunshine was restarted
+    by hand. The App's retried DELETE also wrote a second `session_ended`.
+    """
+
+    def lines(self, call):
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            value = call()
+        events = [json.loads(line) for line in out.getvalue().splitlines() if line.startswith("{")]
+        return value, [row.get("event") for row in events if row.get("omodachi") == "remote"]
+
+    def stuck_release(self):
+        session = self.start(mode="takeover", backend="sunshine")
+        self.sunshine.fail_stop = True
+        result, events = self.lines(lambda: self.manager.release(session.id))
+        self.assertEqual([row["step"] for row in result["errors"]], ["backend"])
+        self.assertEqual(events.count("session_ended"), 1)
+        self.assertIsNotNone(self.sunshine.lease, "the fork still holds the lease: this is the wedge")
+        self.assertEqual(Journal(self.journals()[0]).read()["failed_steps"], ["backend"])
+        return session
+
+    def test_the_background_finishes_the_backend_and_the_fork_lets_go(self):
+        self.stuck_release()
+        self.manager.maintain()  # too early: nothing is retried yet
+        self.assertIsNotNone(self.sunshine.lease)
+        self.sunshine.fail_stop = False  # the fork dropped the stream that never pinged
+        self.now[0] += 1.5
+        _, events = self.lines(self.manager.maintain)
+        self.assertIsNone(self.sunshine.lease, "desktop.release was finally sent")
+        self.assertEqual(self.journals(), [], "and the journal is gone")
+        self.assertIsNone(self.manager.unfinished())
+        self.assertEqual(events, ["session_restore_finished"])
+        self.assertEqual(self.manager.session.state, "released")
+
+    def test_a_retry_that_still_fails_backs_off_and_keeps_trying(self):
+        self.stuck_release()
+        self.now[0] += 1.5
+        _, events = self.lines(self.manager.maintain)
+        self.assertEqual(events, ["session_restore_retried"])
+        self.now[0] += 1.0
+        _, events = self.lines(self.manager.maintain)
+        self.assertEqual(events, [], "backing off: no retry yet, and no repeated line")
+        self.sunshine.fail_stop = False
+        self.now[0] += 5.0
+        self.manager.maintain()
+        self.assertIsNone(self.sunshine.lease)
+        self.assertEqual(self.journals(), [])
+
+    def test_a_repeat_release_does_not_end_the_session_twice(self):
+        session = self.stuck_release()
+        result, events = self.lines(lambda: self.manager.release(session.id))
+        self.assertNotIn("session_ended", events)
+        self.assertEqual(events, ["session_restore_retried"])
+        self.assertEqual([row["step"] for row in result["errors"]], ["backend"])
+        self.sunshine.fail_stop = False
+        result, events = self.lines(lambda: self.manager.release(session.id))
+        self.assertEqual(result, {"released": True, "errors": []})
+        self.assertEqual(events, ["session_restore_finished"])
+        self.assertIsNone(self.sunshine.lease)
+
+    def test_the_retry_runs_only_the_steps_that_failed(self):
+        self.stuck_release()
+        before = len(self.timeline)
+        self.sunshine.fail_stop = False
+        self.now[0] += 1.5
+        self.manager.maintain()
+        touched = [row for row in self.timeline[before:] if row[0] in {"hyprctl", "reload", "idle"}]
+        self.assertEqual(touched, [], "workspaces, screens and idle were already put back")
+
+    def test_the_next_create_waits_for_the_backend_then_claims(self):
+        self.stuck_release()
+        waits = []
+
+        def sleep(seconds):
+            waits.append(seconds)
+            self.now[0] += seconds
+            if len(waits) == 2:
+                self.sunshine.fail_stop = False
+        original = self.manager._settle_unfinished
+        self.manager._settle_unfinished = lambda: original(sleep=sleep)
+        session = self.start(mode="extend", backend="sunshine")
+        self.assertEqual(session.state, "ready", "no desktop_busy for the next device")
+        self.assertEqual(len(waits), 2)
+        self.assertEqual(self.sunshine.lease["lease_id"], session.id)
+
+    def test_the_next_create_does_not_wait_forever(self):
+        self.stuck_release()
+        original = self.manager._settle_unfinished
+
+        def sleep(seconds):
+            self.now[0] += seconds
+        self.manager._settle_unfinished = lambda: original(sleep=sleep)
+        with self.assertRaises(RemoteError) as raised:
+            self.start(mode="extend", backend="sunshine")
+        self.assertEqual(raised.exception.code, "desktop_busy")
+
+    def test_a_restart_finishes_only_the_unfinished_steps(self):
+        self.stuck_release()
+        # A new daemon: no memory of the session, only its journal.
+        self.manager.session = None
+        self.manager._record = None
+        self.manager._unfinished = None
+        self.sunshine.fail_stop = False
+        before = len(self.timeline)
+        result = self.manager.recover()
+        self.assertEqual(result["recovered"][0]["errors"], [])
+        self.assertIsNone(self.sunshine.lease)
+        self.assertEqual(self.journals(), [])
+        touched = [row for row in self.timeline[before:] if row[0] in {"idle"}]
+        self.assertEqual(touched, [], "an old takeover is not replayed over today's desktop")
+
+
+class ResizeWaitsForStreamTests(RemoteHarness):
+    """REMOTE-ROTATE-1. A turn during the first-ping window re-plans; it does not end the session.
+
+    2026-10-05 (Leo's iPad, then a simulator on the host): a re-plan arrived
+    while the stream the last one opened had not pinged yet; the fork said
+    `session_not_stopped`, the resize failed and the session was marked failed
+    and restored.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.slept = []
+
+        def sleep(seconds):
+            self.slept.append(seconds)
+            self.now[0] += seconds
+
+        self.manager.sleep = sleep
+
+    def turn(self, session):
+        return self.manager.resize(session.id, {"expected_revision": session.revision,
+                                                "viewport_points": {"width": 834, "height": 1194},
+                                                "orientation": "portrait"})
+
+    def test_a_stop_refused_during_the_first_ping_is_retried_and_the_resize_lands(self):
+        session = self.start(mode="takeover", backend="sunshine")
+        revision = session.revision
+        self.sunshine.not_stopped = 3
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            session = self.turn(session)
+        self.assertEqual(session.state, "ready")
+        self.assertGreater(session.revision, revision)
+        portrait = session.profile.output_mode_pixels
+        self.assertLess(portrait.width, portrait.height, "the turn was applied")
+        self.assertEqual(self.sunshine.not_stopped, 0)
+        self.assertEqual(self.slept, [0.5, 1.0, 1.5])
+        self.assertIsNotNone(self.sunshine.lease, "the session kept its lease")
+        events = [json.loads(line).get("event") for line in out.getvalue().splitlines() if line.startswith("{")]
+        self.assertEqual(events.count("resize_waits_for_stream"), 1)
+        self.assertNotIn("session_ended", events)
+
+    def test_a_stream_that_never_lets_go_still_fails_the_resize_after_the_window(self):
+        session = self.start(mode="takeover", backend="sunshine")
+        self.sunshine.not_stopped = 1000
+        import contextlib, io
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RemoteError) as caught:
+                self.turn(session)
+        self.assertEqual(caught.exception.code, "session_not_stopped")
+        self.assertGreaterEqual(sum(self.slept), self.manager.STOP_SETTLE_SECONDS - 0.01)
+        self.assertLessEqual(sum(self.slept), self.manager.STOP_SETTLE_SECONDS + 0.01)
+        self.assertEqual(self.manager.session.state, "failed", "a real loss still ends it, as before")
+
+    def test_any_other_stop_error_is_not_waited_for(self):
+        session = self.start(mode="takeover", backend="sunshine")
+        original = self.sunshine.request
+
+        def broken(op, **fields):
+            if op == "desktop.stop":
+                raise RemoteError("binding_mismatch")
+            return original(op, **fields)
+
+        self.sunshine.request = broken
+        import contextlib, io
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(RemoteError):
+                self.turn(session)
+        self.assertEqual(self.slept, [])

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "upload_svg_refused",
+    "message": "SVG is not accepted: it is markup that can carry scripts, not a picture"
+  },
+  "contract_revision": "omodachi.v1"
+}

@@ -394,24 +394,34 @@ class DeviceAuthenticator:
             current = int(time.time() if now is None else now)
             if current < issued_at:
                 raise CredentialError("unknown_credential")
-            ageless = local and device_id == PLUGIN_DEVICE_ID
-            expired = not ageless and current - issued_at >= self.ttl_seconds
             with self._transaction():
-                if token_hash in self._revoked:
-                    raise CredentialError("credential_revoked")
-                if self._issued.get(token_hash) != device_id:
-                    raise CredentialError("credential_expired" if expired else "device_purged")
-                if self._issued_at.get(token_hash) != issued_at:
-                    self._issued_at[token_hash] = issued_at
-                    self._save_locked()
-                retire = self._retire_at.get(token_hash)
-                if expired or (retire is not None and current >= retire):
-                    raise CredentialError("credential_expired")
+                self._verify_locked(device_id, issued_at, token_hash, current, local=local)
             return device_id
         except CredentialError:
             raise
         except (ValueError, KeyError, TypeError, OSError) as exc:
             raise CredentialStoreUnavailable() from exc
+
+    def _verify_locked(self, device_id: str, issued_at: int, token_hash: str, current: int, *,
+                       local: bool = False) -> None:
+        """`verify`'s registry half, for a caller already inside `_transaction`.
+
+        SEC-RENEW-1: a check is only as good as the lock it was made under. A
+        caller that acts on the answer - `renew` mints on it - runs this in the
+        same transaction as the act, so a revoke cannot land between them.
+        """
+        ageless = local and device_id == PLUGIN_DEVICE_ID
+        expired = not ageless and current - issued_at >= self.ttl_seconds
+        if token_hash in self._revoked:
+            raise CredentialError("credential_revoked")
+        if self._issued.get(token_hash) != device_id:
+            raise CredentialError("credential_expired" if expired else "device_purged")
+        if self._issued_at.get(token_hash) != issued_at:
+            self._issued_at[token_hash] = issued_at
+            self._save_locked()
+        retire = self._retire_at.get(token_hash)
+        if expired or (retire is not None and current >= retire):
+            raise CredentialError("credential_expired")
 
     def credential_info(self, token: str, now: int | None = None) -> dict:
         """What `GET /v1/pairing/credential` answers about the caller's own credential."""
@@ -437,29 +447,43 @@ class DeviceAuthenticator:
         purged device (or an expired credential) never gets here - those are
         401s. Every other live credential of the device is retired too, with
         the same grace, so a device ends up holding exactly one credential.
+
+        SEC-RENEW-1: "still verifies" is decided in the transaction that mints.
+        It used to be `verify()` under one lock and the mint under a second, and
+        a `revoke_device` landing in between handed a just-revoked device a
+        fresh credential the revoke had never seen. Only the signature and
+        `iat` checks run outside: they read the token, not the registry.
         """
-        device_id = self.verify(token, now)
-        if device_id == PLUGIN_DEVICE_ID:
-            raise CredentialRenewalRefused("plugin_credential")
-        current = int(time.time() if now is None else now)
-        _, _, token_hash = self._decode(token)
-        with self._transaction():
-            expires_at = self._expires_locked(token_hash, device_id)
-            if expires_at is None:
+        device_id, issued_at, token_hash = self._decode(token)
+        try:
+            current = int(time.time() if now is None else now)
+            if current < issued_at:
                 raise CredentialError("unknown_credential")
-            renewable_at = expires_at - self.renew_window_seconds
-            if current < renewable_at:
-                raise CredentialRenewalRefused("credential_renewal_not_due", expires_at=expires_at,
-                                               renewable_at=renewable_at)
-            fresh, fresh_hash = self._mint(device_id, current)
-            retire = current + self.grace_seconds
-            for digest, owner in self._issued.items():
-                if owner == device_id and digest not in self._revoked:
-                    self._retire_at[digest] = min(self._retire_at.get(digest, retire), retire)
-            self._drop_dead_locked(device_id, current)
-            self._issued[fresh_hash] = device_id
-            self._issued_at[fresh_hash] = current
-            self._save_locked()
+            with self._transaction():
+                self._verify_locked(device_id, issued_at, token_hash, current)
+                if device_id == PLUGIN_DEVICE_ID:
+                    raise CredentialRenewalRefused("plugin_credential")
+                expires_at = self._expires_locked(token_hash, device_id)
+                if expires_at is None:
+                    raise CredentialError("unknown_credential")
+                renewable_at = expires_at - self.renew_window_seconds
+                if current < renewable_at:
+                    raise CredentialRenewalRefused("credential_renewal_not_due", expires_at=expires_at,
+                                                   renewable_at=renewable_at)
+                fresh, fresh_hash = self._mint(device_id, current)
+                retire = current + self.grace_seconds
+                for digest, owner in self._issued.items():
+                    if owner == device_id and digest not in self._revoked:
+                        self._retire_at[digest] = min(self._retire_at.get(digest, retire), retire)
+                self._drop_dead_locked(device_id, current)
+                self._issued[fresh_hash] = device_id
+                self._issued_at[fresh_hash] = current
+                self._save_locked()
+        except (CredentialError, CredentialRenewalRefused):
+            raise
+        except (ValueError, KeyError, TypeError, OSError) as exc:
+            # As `verify` answers it: the registry, not the credential.
+            raise CredentialStoreUnavailable() from exc
         return DeviceCredential(device_id, fresh, current, current + self.ttl_seconds)
 
     def revoke(self, token: str) -> None:

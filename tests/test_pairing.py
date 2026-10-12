@@ -439,3 +439,121 @@ class PluginCredentialTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ServiceError):
             self.revoke("ios-companion", force="yes")
         self.assertEqual(self.revoke("ios-companion")["revoked"], 1)
+
+
+class RevokeRaceTests(unittest.IsolatedAsyncioTestCase):
+    """SEC-RENEW-1: nothing a device can be handed outlives a revoke that raced it.
+
+    Each test lets the other side run at a point where neither holds a lock -
+    the only places another thread or process can get in - and then asks what
+    the device is left with once the revoke has returned.
+    """
+
+    async def asyncSetUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        base = Path(self.temp.name)
+        self.home = base / "home"
+        (self.home / ".ssh").mkdir(parents=True, mode=0o700)
+        self.auth = DeviceAuthenticator.from_file(base / "device.secret")
+        self.store = PairingStore(self.auth, base / "pairing.json")
+        self.service = create_service(Hub(authenticator=self.auth), demo=True, media_pairing=_MediaStub())
+        self.service.pairing = self.store
+        from omodachi_core.ssh_keys import AuthorizedKeys
+        self.service.ssh_keys = AuthorizedKeys(self.home)
+
+    async def asyncTearDown(self):
+        self.temp.cleanup()
+
+    def revoke(self, device):
+        return self.service._dispatch_local("local.devices.revoke", {"device_id": device}, lambda: True)
+
+    def lines_for(self, device):
+        from omodachi_core.ssh_keys import AuthorizedKeys
+        return [row for row in AuthorizedKeys(self.home).listing() if row["device"] == device]
+
+    def pair(self, device, key=None):
+        row = self.store.request(self.store.begin()["invitation"], device, "iPad", ssh_public_key=key)
+        self.service._dispatch_local("local.pair.approve", {"request_id": row["request_id"], "remote": False},
+                                     lambda: True)
+        return row
+
+    async def test_a_claim_racing_a_revoke_never_keeps_a_credential(self):
+        """Approved, not yet claimed, and revoked: the claim lands between every two steps."""
+        steps = ((self.auth, "revoke_device"), (self.store, "forget_device"))
+        k = 1
+        while True:
+            device = f"ipad-{k}"
+            row = self.pair(device)
+            boundaries, claimed = [], []
+
+            def boundary():
+                boundaries.append(None)
+                if len(boundaries) == k:
+                    try:
+                        claimed.append(self.store.claim(row["request_id"], row["request_secret"])["credential"])
+                    except ServiceError:
+                        pass
+
+            def hooked(original):
+                def call(*args, **kwargs):
+                    boundary()
+                    try:
+                        return original(*args, **kwargs)
+                    finally:
+                        boundary()
+                return call
+
+            for owner, name in steps:
+                setattr(owner, name, hooked(getattr(type(owner), name).__get__(owner)))
+            try:
+                self.revoke(device)
+            finally:
+                for owner, name in steps:
+                    delattr(owner, name)
+            if len(boundaries) < k:
+                break
+            with self.subTest(boundary=k):
+                for credential in claimed:
+                    with self.assertRaises(ValueError, msg="a claim kept a credential the revoke never saw"):
+                        self.auth.verify(credential)
+                self.assertIsNone(self.store.grants_for(device))
+            k += 1
+        self.assertGreater(k, 1)
+
+    async def test_a_key_rotation_racing_a_revoke_leaves_no_line(self):
+        """`PUT /v1/ssh/key` passed its grant check; the revoke finishes before the write."""
+        row = self.pair("ipad-real", KEY)
+        self.store.claim(row["request_id"], row["request_secret"])
+        self.assertEqual(len(self.lines_for("ipad-real")), 1)
+        keys = self.service.ssh_keys
+        original = keys.replace
+
+        def replace(*args, **kwargs):
+            keys.replace = original
+            self.revoke("ipad-real")
+            return original(*args, **kwargs)
+
+        keys.replace = replace
+        with self.assertRaises(ServiceError) as refused:
+            self.service.ssh_key("ipad-real", {"public_key": f"ssh-ed25519 {OTHER_BODY} rotated"})
+        self.assertEqual(refused.exception.code, "ssh_approval_required")
+        self.assertEqual(self.lines_for("ipad-real"), [], "a revoked device got an authorized_keys line")
+
+    async def test_an_ssh_key_waiting_for_approve_goes_with_the_revoke(self):
+        row = self.pair("ipad-real")
+        self.store.claim(row["request_id"], row["request_secret"])
+        with self.assertRaises(ServiceError):
+            self.service.ssh_key("ipad-real", {"public_key": f"ssh-ed25519 {OTHER_BODY} later"})
+        waiting = dict(self.service._ssh_pending["ipad-real"])
+        self.revoke("ipad-real")
+        with self.assertRaises(ServiceError) as unknown:
+            self.service._dispatch_local("local.ssh.approve", {"device_id": "ipad-real"}, lambda: True)
+        self.assertEqual(unknown.exception.code, "ssh_request_unknown")
+        # The same request put back, as an offer still in flight when the
+        # revoke ran would: Approve writes nothing for a device with no
+        # credential left.
+        self.service._ssh_pending["ipad-real"] = waiting
+        with self.assertRaises(ServiceError) as unknown:
+            self.service._dispatch_local("local.ssh.approve", {"device_id": "ipad-real"}, lambda: True)
+        self.assertEqual(unknown.exception.code, "ssh_request_unknown")
+        self.assertEqual(self.lines_for("ipad-real"), [])

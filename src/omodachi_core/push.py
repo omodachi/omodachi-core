@@ -254,9 +254,15 @@ class PushStore:
                 "host_enabled": bool((row or {}).get("host_enabled", True))}
 
     # --- what a web device does -------------------------------------------
-    def subscribe(self, device: str, payload: dict) -> dict:
+    def subscribe(self, device: str, payload: dict, *, check=None) -> dict:
+        """`check` (SEC-RENEW-1) is the request's credential, asked again inside
+        the transaction `forget` also takes: a revoke finishing between the
+        route's own check and this write would otherwise leave a revoked
+        browser subscribed. It raises to refuse."""
         record = clean_subscription(payload, int(self._clock()))
         with self.transaction() as state:
+            if check is not None:
+                check()
             row = self._row(state, device, create=True)
             row["subscription"] = record
         return record

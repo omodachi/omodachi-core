@@ -341,6 +341,26 @@ def create_app(service: CoreService, *, auth_check_interval=1.0, odomo_bundle=No
             raise credential_refused(error, "credential revoked or expired") from None
         return value
 
+    def still_authorized(request):
+        """SEC-RENEW-1: `body()`'s recheck, as a callable a store runs under its own lock.
+
+        A grant that outlives a revoke - an `authorized_keys` line, a push
+        subscription - is checked where it is written, inside the lock the
+        revoke's cleanup of that store also takes. `body()` alone is one
+        thread hop too early.
+        """
+        device, token = request[DEVICE], request[TOKEN]
+
+        def authorize():
+            try:
+                if service.hub.authenticate(token) != device:
+                    raise ValueError
+            except CredentialStoreUnavailable:
+                raise  # 503, not 401: the registry, not the credential (REMOTE-PAIR-1)
+            except ValueError as error:
+                raise credential_refused(error, "credential revoked or expired") from None
+        return authorize
+
     async def pairing_request(request):
         try:
             payload = await asyncio.wait_for(request.json(), 5.0)
@@ -509,7 +529,8 @@ def create_app(service: CoreService, *, auth_check_interval=1.0, odomo_bundle=No
             removed = await asyncio.to_thread(store.unsubscribe, request[DEVICE])
             return web.json_response(service.resource({"device_id": request[DEVICE], "removed": removed}))
         payload = await body(request)
-        record = await asyncio.to_thread(store.subscribe, request[DEVICE], payload)
+        record = await asyncio.to_thread(store.subscribe, request[DEVICE], payload,
+                                         check=still_authorized(request))
         vapid = await asyncio.to_thread(service.vapid)
         from .push import endpoint_host
         return web.json_response(service.resource({
@@ -1539,7 +1560,8 @@ def create_app(service: CoreService, *, auth_check_interval=1.0, odomo_bundle=No
             if set(request.query):
                 raise ServiceError("invalid_request")
             return web.json_response(service.ssh_key_state(request[DEVICE]))
-        return web.json_response(service.ssh_key(request[DEVICE], await body(request)))
+        payload = await body(request)
+        return web.json_response(service.ssh_key(request[DEVICE], payload, authorize=still_authorized(request)))
 
     async def auth_key_switch(request):
         """The device's own half of the two switches, without re-enrolling.

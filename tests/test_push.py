@@ -678,6 +678,31 @@ class PushApiTests(_Base):
                                                 local_authorize=lambda: True)
         self.assertEqual(self.service.push_store.summary(), {})
 
+    async def test_a_revoke_between_the_routes_check_and_the_write_leaves_no_subscription(self):
+        """SEC-RENEW-1: the subscription is written only under a credential that still verifies.
+
+        `body()` rechecks the credential, then the write hops to a worker
+        thread. A `devices revoke` that finishes in that hop must not be
+        followed by a subscription for the browser it revoked.
+        """
+        _, claim = await self.pair_web()
+        self.service.media_pairing = type("Media", (), {
+            "revoke_device": lambda self, device, local_authorize: {"certificate_revocation_supported": False}})()
+        store = self.service.push_store
+        original = store.subscribe
+
+        def subscribe(*args, **kwargs):
+            store.subscribe = original
+            self.service._revoke_device("odomo-a", lambda: True)
+            return original(*args, **kwargs)
+
+        store.subscribe = subscribe
+        status, body, _ = await self.call("POST", "/v1/push/subscriptions", token=claim["credential"],
+                                          origin=self.origin, body={"endpoint": FCM, "keys": self.keys})
+        self.assertEqual(status, 401, "a revoked browser was subscribed")
+        self.assertEqual(body["error"]["reason"], "credential_revoked")
+        self.assertEqual(store.summary(), {}, "a revoked browser kept a push subscription")
+
     async def test_roads_say_how_many_web_devices_get_pushes(self):
         """LITE-1d: `odomo.push_devices` on the native app's roads, live."""
         from omodachi_core.host_identity import HostIdentity

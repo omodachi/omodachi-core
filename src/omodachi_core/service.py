@@ -1572,16 +1572,22 @@ class CoreService:
         if self.media_pairing is None:
             raise ServiceError("media_pairing_unavailable", status=503)
         media = self.media_pairing.revoke_device(device, local_authorize=local_authorize)
-        revoked = self.hub.auth.revoke_device(device)
         # PAIR-3: the durable approval is part of what a revoke takes
         # back. Leaving it behind would keep a grant source alive for a
         # device that no longer has a credential.
+        # SEC-RENEW-1: and it goes *before* the credentials. A claim mints
+        # under the pairing lock from an approved row; with the row still
+        # there after the registry was swept, a claim landing in between
+        # took home a credential this revoke never saw. Approval first, then
+        # credentials: a claim either finds no row, or its credential is
+        # already in the registry the sweep below revokes.
         pairing = getattr(self, "pairing", None)
         if pairing is not None:
             try:
                 pairing.forget_device(device)
             except (ServiceError, OSError, ValueError):
                 pass
+        revoked = self.hub.auth.revoke_device(device)
         with self._candidate_lock:
             self._media_candidates = {k: v for k, v in self._media_candidates.items() if k[2] != device}
         # A revoked device keeps nothing: its credential, its Sunshine
@@ -1599,6 +1605,9 @@ class CoreService:
         # LITE-1b: and no push subscription. A revoked browser is not
         # told anything about this computer again.
         self._forget_push(device)
+        # SEC-RENEW-1: nor a key waiting for `ssh approve`, which would
+        # otherwise write a line for a device that has no credential.
+        self._ssh_pending.pop(device, None)
         from .ssh_keys import SshKeyError
         try:
             ssh = self.ssh_keys.revoke(device)
@@ -2125,7 +2134,7 @@ class CoreService:
             if newer:
                 row["older_pairing_of"] = max(newer, key=lambda other: claimed.get(other, 0))
 
-    def ssh_key(self, device: str, payload: dict) -> dict:
+    def ssh_key(self, device: str, payload: dict, *, authorize=None) -> dict:
         """UX-4 §2. The device replaces the key this host holds for it.
 
         A device that reinstalls keeps its credential (iOS Keychain outlives
@@ -2139,6 +2148,11 @@ class CoreService:
         and this host writes it in place of whatever that device had. The
         authority is the credential on this request: a device can only ever
         replace its own line, and `device_id` is never read from the body.
+
+        SEC-RENEW-1: the grant and the credential (`authorize`, the route's
+        re-verification of the request's own token) are asked again under the
+        `authorized_keys` lock, right before the write. Asked only up here, a
+        `devices revoke` finishing in between left the revoked device a line.
         """
         from .ssh_keys import SshKeyError, fingerprint, parse_public_key
         fields(payload, ("public_key",))
@@ -2166,7 +2180,8 @@ class CoreService:
             raise ServiceError("ssh_approval_required",
                                "this device was not granted a terminal; approve it on the computer", 409)
         try:
-            result = self.ssh_keys.replace(public_key, device, self._ssh_expiry(device))
+            result = self.ssh_keys.replace(public_key, device, self._ssh_expiry(device),
+                                           check=lambda: self._ssh_still_granted(device, authorize))
         except SshKeyError as error:
             raise ServiceError(error.code, error.code, 409 if error.code.startswith("public_key_") else 400) from None
         except OSError:
@@ -2251,6 +2266,25 @@ class CoreService:
         arms[(device, entry_id)] = (token, now + self.CONFIRM_WINDOW)
         raise ServiceError("confirmation_required", "this action changes the computer; send it again to confirm",
                            409, confirm_token=token, expires_in=int(self.CONFIRM_WINDOW))
+
+    def _ssh_still_granted(self, device, authorize=None):
+        """SEC-RENEW-1: `ssh_keys.replace`'s `check` for a device writing its own line."""
+        if authorize is not None:
+            authorize()
+        if not (self._ssh_grants(device) or {}).get("ssh"):
+            raise ServiceError("ssh_approval_required",
+                               "this device was not granted a terminal; approve it on the computer", 409)
+
+    def _ssh_has_credential(self, device):
+        """SEC-RENEW-1: `ssh approve` writes a line only for a device that still
+        holds a live credential - the one it offered the key with."""
+        try:
+            live = any(row["device_id"] == device and row.get("active_credentials")
+                       for row in self.hub.auth.list_devices())
+        except (ValueError, OSError):
+            live = False
+        if not live:
+            raise ServiceError("ssh_request_unknown", status=404)
 
     def _ssh_grants(self, device):
         pairing = getattr(self, "pairing", None)
@@ -2360,7 +2394,8 @@ class CoreService:
             # names the current holder before the approval.
             holder = self.ssh_keys.owner_of(row["public_key"])
             result = self.ssh_keys.replace(row["public_key"], device, self._ssh_expiry(device),
-                                           take_from=holder if holder not in (None, device) else None)
+                                           take_from=holder if holder not in (None, device) else None,
+                                           check=lambda: self._ssh_has_credential(device))
         except SshKeyError as error:
             raise ServiceError(error.code, error.code, 409) from None
         except OSError:

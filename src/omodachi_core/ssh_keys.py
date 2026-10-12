@@ -28,7 +28,9 @@ sshd_config or any key that is not marked as ours.
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 import datetime as _datetime
+import fcntl
 import hashlib
 import os
 from pathlib import Path
@@ -36,6 +38,7 @@ import re
 import stat
 import tempfile
 import time as _time
+from typing import Callable
 
 MARKER = "# omodachi:"
 # The key types OpenSSH 9/10 still accepts for this purpose. An unknown type is
@@ -155,7 +158,14 @@ def duplicate_devices(rows) -> dict:
 
 
 class AuthorizedKeys:
-    """One `authorized_keys` file, read and rewritten whole and atomically."""
+    """One `authorized_keys` file, read and rewritten whole and atomically.
+
+    SEC-RENEW-1: and one rewrite at a time. Every change is read-modify-write
+    of the whole file, so two of them interleaved lose one: a renewal that
+    re-read the file before a revoke landed wrote the revoked line back. Each
+    rewrite holds `_locked`, across threads and processes (`omodachi-host ssh`
+    runs outside the daemon).
+    """
 
     def __init__(self, home: Path | None = None):
         self.home = Path(home) if home is not None else Path.home()
@@ -163,6 +173,24 @@ class AuthorizedKeys:
     @property
     def path(self) -> Path:
         return self.home / ".ssh/authorized_keys"
+
+    @contextmanager
+    def _locked(self):
+        """An exclusive `flock` on `~/.ssh` itself, so no lock file is left in it.
+
+        A lock taken on its own descriptor, so two threads of one process
+        exclude each other too. Not re-entrant: the public methods take it and
+        nothing they call does.
+        """
+        directory = self.path.parent
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
 
     # --- reading -----------------------------------------------------------
 
@@ -255,28 +283,29 @@ class AuthorizedKeys:
         """
         kind, body = parse_public_key(public_key)
         owner = device_name(device)
-        lines = self._read()
-        for index, line in enumerate(lines):
-            if self._body(line) != (kind, body):
-                continue
-            existing = self._owner(line)
-            if existing == owner:
-                if self._hardened(line, expires_at):
-                    return {"authorized": True, "changed": False, "device": owner,
-                            "reason": "already_authorized", "fingerprint": fingerprint(body)}
-                self._write(lines[:index] + [owned_line(kind, body, owner, expires_at)] + lines[index + 1:])
-                return {"authorized": True, "changed": True, "device": owner,
-                        "reason": "restricted", "fingerprint": fingerprint(body)}
-            # Somebody else's line, or one the user wrote by hand, already
-            # carries this key. Adding a second copy would let a revoke look
-            # like it worked while the key still opens the door.
-            raise SshKeyError("public_key_not_owned" if existing is None else "public_key_owned_by_other_device")
-        self._write(lines + [owned_line(kind, body, owner, expires_at)])
-        return {"authorized": True, "changed": True, "device": owner, "reason": "added",
-                "fingerprint": fingerprint(body)}
+        with self._locked():
+            lines = self._read()
+            for index, line in enumerate(lines):
+                if self._body(line) != (kind, body):
+                    continue
+                existing = self._owner(line)
+                if existing == owner:
+                    if self._hardened(line, expires_at):
+                        return {"authorized": True, "changed": False, "device": owner,
+                                "reason": "already_authorized", "fingerprint": fingerprint(body)}
+                    self._write(lines[:index] + [owned_line(kind, body, owner, expires_at)] + lines[index + 1:])
+                    return {"authorized": True, "changed": True, "device": owner,
+                            "reason": "restricted", "fingerprint": fingerprint(body)}
+                # Somebody else's line, or one the user wrote by hand, already
+                # carries this key. Adding a second copy would let a revoke look
+                # like it worked while the key still opens the door.
+                raise SshKeyError("public_key_not_owned" if existing is None else "public_key_owned_by_other_device")
+            self._write(lines + [owned_line(kind, body, owner, expires_at)])
+            return {"authorized": True, "changed": True, "device": owner, "reason": "added",
+                    "fingerprint": fingerprint(body)}
 
     def replace(self, public_key: str, device: str, expires_at: int | None = None,
-                take_from: str | None = None) -> dict:
+                take_from: str | None = None, *, check: Callable[[], None] | None = None) -> dict:
         """One device, one line: the key it offers now replaces what it had.
 
         UX-4. `authorize` appends, which is right for a pairing - the device is
@@ -303,43 +332,52 @@ class AuthorizedKeys:
         fingerprint. The line moves; it is never copied, so the key still has
         exactly one owner and that owner's revoke still takes it back. A line
         the user wrote by hand is never taken.
+
+        SEC-RENEW-1: `check` is the caller's "may this device still have a
+        line", asked under the lock and before anything is read; it raises to
+        refuse. A device revoke takes the credential and the approval first and
+        this file's lines last, so a check made here either sees the revoke or
+        runs before its lines are taken - never a line written after them.
         """
         kind, body = parse_public_key(public_key)
         owner = device_name(device)
         donor = device_name(take_from) if take_from is not None else None
-        lines = self._read()
-        moved = []
-        for line in lines:
-            if self._body(line) != (kind, body):
-                continue
-            existing = self._owner(line)
-            if existing == owner:
-                continue
-            if existing is not None and existing == donor:
-                moved.append(line)
-                continue
-            # This key body is on somebody else's line, or on one the user
-            # wrote by hand. Taking it over would let one device's revoke
-            # silently disarm another's access, or edit a line we do not own.
-            raise SshKeyError("public_key_not_owned" if existing is None else "public_key_owned_by_other_device")
-        if moved:
-            lines = [line for line in lines if line not in moved]
-        mine = [line for line in lines if self._owner(line) == owner]
-        dropped = [fingerprint(found[1]) for line in mine
-                   if (found := self._body(line)) is not None and found != (kind, body)]
-        if (not moved and len(mine) == 1 and self._body(mine[0]) == (kind, body)
-                and self._hardened(mine[0], expires_at)):
-            return {"authorized": True, "changed": False, "device": owner,
-                    "reason": "already_authorized", "fingerprint": fingerprint(body),
-                    "removed": 0, "replaced": []}
-        kept = [line for line in lines if self._owner(line) != owner]
-        self._write(kept + [owned_line(kind, body, owner, expires_at)])
-        result = {"authorized": True, "changed": True, "device": owner,
-                  "reason": "moved" if moved else "replaced" if mine else "added", "fingerprint": fingerprint(body),
-                  "removed": len(mine), "replaced": dropped}
-        if moved:
-            result["moved_from"] = donor
-        return result
+        with self._locked():
+            if check is not None:
+                check()
+            lines = self._read()
+            moved = []
+            for line in lines:
+                if self._body(line) != (kind, body):
+                    continue
+                existing = self._owner(line)
+                if existing == owner:
+                    continue
+                if existing is not None and existing == donor:
+                    moved.append(line)
+                    continue
+                # This key body is on somebody else's line, or on one the user
+                # wrote by hand. Taking it over would let one device's revoke
+                # silently disarm another's access, or edit a line we do not own.
+                raise SshKeyError("public_key_not_owned" if existing is None else "public_key_owned_by_other_device")
+            if moved:
+                lines = [line for line in lines if line not in moved]
+            mine = [line for line in lines if self._owner(line) == owner]
+            dropped = [fingerprint(found[1]) for line in mine
+                       if (found := self._body(line)) is not None and found != (kind, body)]
+            if (not moved and len(mine) == 1 and self._body(mine[0]) == (kind, body)
+                    and self._hardened(mine[0], expires_at)):
+                return {"authorized": True, "changed": False, "device": owner,
+                        "reason": "already_authorized", "fingerprint": fingerprint(body),
+                        "removed": 0, "replaced": []}
+            kept = [line for line in lines if self._owner(line) != owner]
+            self._write(kept + [owned_line(kind, body, owner, expires_at)])
+            result = {"authorized": True, "changed": True, "device": owner,
+                      "reason": "moved" if moved else "replaced" if mine else "added", "fingerprint": fingerprint(body),
+                      "removed": len(mine), "replaced": dropped}
+            if moved:
+                result["moved_from"] = donor
+            return result
 
     def owner_of(self, public_key: str) -> str | None:
         """The device whose owned line carries exactly this key, if any."""
@@ -364,29 +402,30 @@ class AuthorizedKeys:
         hold one key is a no-op - which is the common case and has to stay one.
         """
         target = device_name(device) if device is not None else None
-        lines = self._read()
-        owned: dict[str, list[int]] = {}
-        for index, line in enumerate(lines):
-            owner = self._owner(line)
-            if owner is None or self._body(line) is None:
-                continue
-            if target is not None and owner != target:
-                continue
-            owned.setdefault(owner, []).append(index)
-        drop: set[int] = set()
-        devices = {}
-        for owner, indexes in sorted(owned.items()):
-            if len(indexes) < 2:
-                continue
-            *older, newest = indexes
-            drop.update(older)
-            devices[owner] = {
-                "kept": fingerprint(self._body(lines[newest])[1]),
-                "removed": [fingerprint(self._body(lines[index])[1]) for index in older],
-            }
-        if drop:
-            self._write([line for index, line in enumerate(lines) if index not in drop])
-        return {"pruned": True, "removed": len(drop), "devices": devices}
+        with self._locked():
+            lines = self._read()
+            owned: dict[str, list[int]] = {}
+            for index, line in enumerate(lines):
+                owner = self._owner(line)
+                if owner is None or self._body(line) is None:
+                    continue
+                if target is not None and owner != target:
+                    continue
+                owned.setdefault(owner, []).append(index)
+            drop: set[int] = set()
+            devices = {}
+            for owner, indexes in sorted(owned.items()):
+                if len(indexes) < 2:
+                    continue
+                *older, newest = indexes
+                drop.update(older)
+                devices[owner] = {
+                    "kept": fingerprint(self._body(lines[newest])[1]),
+                    "removed": [fingerprint(self._body(lines[index])[1]) for index in older],
+                }
+            if drop:
+                self._write([line for index, line in enumerate(lines) if index not in drop])
+            return {"pruned": True, "removed": len(drop), "devices": devices}
 
     def refresh_expiry(self, device: str, expires_at: int | None) -> dict:
         """Give every line this device owns the RELEASE-9 shape and this end.
@@ -395,17 +434,18 @@ class AuthorizedKeys:
         exactly as long as the credential that was approved to open it.
         """
         owner = device_name(device)
-        lines = self._read()
-        changed = 0
-        for index, line in enumerate(lines):
-            body = self._body(line)
-            if self._owner(line) != owner or body is None or self._hardened(line, expires_at):
-                continue
-            lines[index] = owned_line(body[0], body[1], owner, expires_at)
-            changed += 1
-        if changed:
-            self._write(lines)
-        return {"device": owner, "changed": changed, "expires_at": expires_at}
+        with self._locked():
+            lines = self._read()
+            changed = 0
+            for index, line in enumerate(lines):
+                body = self._body(line)
+                if self._owner(line) != owner or body is None or self._hardened(line, expires_at):
+                    continue
+                lines[index] = owned_line(body[0], body[1], owner, expires_at)
+                changed += 1
+            if changed:
+                self._write(lines)
+            return {"device": owner, "changed": changed, "expires_at": expires_at}
 
     def reconcile(self, expiries: dict) -> dict:
         """Rewrite every owned line into the RELEASE-9 shape, once, at start.
@@ -415,34 +455,36 @@ class AuthorizedKeys:
         so sshd stops accepting it at once; it stays in the file, still marked,
         for `--remove` and `ssh list` to find.
         """
-        lines = self._read()
-        changed = []
-        now = int(_time.time())
-        for index, line in enumerate(lines):
-            owner, body = self._owner(line), self._body(line)
-            if owner is None or body is None:
-                continue
-            expires_at = expiries.get(owner)
-            if expires_at is None:
-                current = line_expiry(split_options(line)[0])
-                expires_at = current if current is not None and current <= now else now
-            if self._hardened(line, expires_at):
-                continue
-            lines[index] = owned_line(body[0], body[1], owner, expires_at)
-            changed.append(owner)
-        if changed:
-            self._write(lines)
-        return {"changed": len(changed), "devices": sorted(set(changed))}
+        with self._locked():
+            lines = self._read()
+            changed = []
+            now = int(_time.time())
+            for index, line in enumerate(lines):
+                owner, body = self._owner(line), self._body(line)
+                if owner is None or body is None:
+                    continue
+                expires_at = expiries.get(owner)
+                if expires_at is None:
+                    current = line_expiry(split_options(line)[0])
+                    expires_at = current if current is not None and current <= now else now
+                if self._hardened(line, expires_at):
+                    continue
+                lines[index] = owned_line(body[0], body[1], owner, expires_at)
+                changed.append(owner)
+            if changed:
+                self._write(lines)
+            return {"changed": len(changed), "devices": sorted(set(changed))}
 
     def revoke(self, device: str) -> dict:
         """Delete every line marked for this device, and only those."""
         owner = device_name(device)
-        lines = self._read()
-        kept = [line for line in lines if self._owner(line) != owner]
-        removed = len(lines) - len(kept)
-        if removed:
-            self._write(kept)
-        return {"revoked": True, "removed": removed, "device": owner}
+        with self._locked():
+            lines = self._read()
+            kept = [line for line in lines if self._owner(line) != owner]
+            removed = len(lines) - len(kept)
+            if removed:
+                self._write(kept)
+            return {"revoked": True, "removed": removed, "device": owner}
 
 
 def remove_marked_lines(home) -> list[str]:
@@ -455,16 +497,19 @@ def remove_marked_lines(home) -> list[str]:
     owned line, is an empty list and no write.
     """
     keys = AuthorizedKeys(Path(home))
-    lines = keys._read()
-    removed, kept = [], []
-    for line in lines:
-        owner = keys._owner(line)
-        if owner is None:
-            kept.append(line)
-            continue
-        body = keys._body(line)
-        removed.append(f"{fingerprint(body[1]) if body else 'unparseable-key'} {owner}")
-    if removed:
-        keys._write(kept)
-    return removed
+    if not keys.path.parent.is_dir():
+        return []  # nothing to remove, and an uninstall creates no ~/.ssh
+    with keys._locked():
+        lines = keys._read()
+        removed, kept = [], []
+        for line in lines:
+            owner = keys._owner(line)
+            if owner is None:
+                kept.append(line)
+                continue
+            body = keys._body(line)
+            removed.append(f"{fingerprint(body[1]) if body else 'unparseable-key'} {owner}")
+        if removed:
+            keys._write(kept)
+        return removed
 

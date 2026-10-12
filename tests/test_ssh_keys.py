@@ -332,5 +332,58 @@ class Release9RestrictedLinesTests(unittest.TestCase):
         self.assertFalse(self.keys.path.exists())
 
 
+
+class ConcurrentRewriteTests(unittest.TestCase):
+    """SEC-RENEW-1: two rewrites of the file never lose one of them.
+
+    A renewal's `refresh_expiry` (the daemon's event loop) and a revoke (a
+    worker thread, or `omodachi-host ssh revoke` in another process) each read
+    the whole file and write it back. The revoke here runs from a second
+    `AuthorizedKeys` on its own thread at the moment the renewal has read the
+    file and not yet written it; once both are done the revoked line must be
+    gone. Unlocked, the revoke finishes in that gap and the renewal writes the
+    line back - with a later expiry.
+    """
+
+    EXPIRES = 1790000000
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.keys = AuthorizedKeys(self.home)
+        self.keys.authorize(IPAD, "omodachi-ipad", expires_at=self.EXPIRES)
+        self.keys.authorize(PHONE, "omodachi-phone", expires_at=self.EXPIRES)
+
+    def between_read_and_write(self, rewrite):
+        import threading
+        original, other = self.keys._read, AuthorizedKeys(self.home)
+        threads = []
+
+        def read():
+            lines = original()
+            if not threads:
+                threads.append(threading.Thread(target=other.revoke, args=("omodachi-ipad",)))
+                threads[0].start()
+                # Long enough for an unlocked revoke to finish in the gap; a
+                # locked one waits for `rewrite` whatever this is.
+                threads[0].join(0.5)
+            return lines
+
+        self.keys._read = read
+        rewrite()
+        threads[0].join(5)
+        self.assertFalse(threads[0].is_alive())
+        return [row["device"] for row in AuthorizedKeys(self.home).listing()]
+
+    def test_a_renewal_does_not_write_a_revoked_line_back(self):
+        left = self.between_read_and_write(lambda: self.keys.refresh_expiry("omodachi-ipad", self.EXPIRES + 86400))
+        self.assertEqual(left, ["omodachi-phone"])
+
+    def test_a_rotation_of_another_device_does_not_write_a_revoked_line_back(self):
+        left = self.between_read_and_write(lambda: self.keys.replace(_ed25519(3, "alex@phone-new"), "omodachi-phone"))
+        self.assertEqual(left, ["omodachi-phone"])
+
+
 if __name__ == "__main__":
     unittest.main()

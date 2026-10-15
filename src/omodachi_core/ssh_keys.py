@@ -275,15 +275,21 @@ class AuthorizedKeys:
             if os.path.exists(name):
                 os.unlink(name)
 
-    def authorize(self, public_key: str, device: str, expires_at: int | None = None) -> dict:
+    def authorize(self, public_key: str, device: str, expires_at: int | None = None, *,
+                  check: Callable[[], None] | None = None) -> dict:
         """Append one owned line. Running it again changes nothing.
 
         An owned line for the same key that is not yet in the RELEASE-9 shape
         (no `restrict`, or another expiry) is rewritten in place into it.
+
+        SEC-RENEW-2: `check` as in `replace` - asked under the lock, before
+        anything is read, and it raises to refuse.
         """
         kind, body = parse_public_key(public_key)
         owner = device_name(device)
         with self._locked():
+            if check is not None:
+                check()
             lines = self._read()
             for index, line in enumerate(lines):
                 if self._body(line) != (kind, body):
@@ -305,7 +311,8 @@ class AuthorizedKeys:
                     "fingerprint": fingerprint(body)}
 
     def replace(self, public_key: str, device: str, expires_at: int | None = None,
-                take_from: str | None = None, *, check: Callable[[], None] | None = None) -> dict:
+                take_from: str | None = None, *, check: Callable[[], None] | None = None,
+                move_only: bool = False) -> dict:
         """One device, one line: the key it offers now replaces what it had.
 
         UX-4. `authorize` appends, which is right for a pairing - the device is
@@ -338,10 +345,18 @@ class AuthorizedKeys:
         refuse. A device revoke takes the credential and the approval first and
         this file's lines last, so a check made here either sees the revoke or
         runs before its lines are taken - never a line written after them.
+
+        SEC-RENEW-2: `move_only` makes `take_from`'s line the only thing that
+        may be written. When that device no longer holds this exact key - its
+        revoke already took the line - nothing is written and the answer is
+        `public_key_not_held`, instead of a fresh line for a key the revoke
+        just took back.
         """
         kind, body = parse_public_key(public_key)
         owner = device_name(device)
         donor = device_name(take_from) if take_from is not None else None
+        if move_only and donor is None:
+            raise SshKeyError("public_key_not_held")
         with self._locked():
             if check is not None:
                 check()
@@ -360,6 +375,8 @@ class AuthorizedKeys:
                 # wrote by hand. Taking it over would let one device's revoke
                 # silently disarm another's access, or edit a line we do not own.
                 raise SshKeyError("public_key_not_owned" if existing is None else "public_key_owned_by_other_device")
+            if move_only and not moved:
+                raise SshKeyError("public_key_not_held")
             if moved:
                 lines = [line for line in lines if line not in moved]
             mine = [line for line in lines if self._owner(line) == owner]

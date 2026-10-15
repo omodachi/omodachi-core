@@ -1441,7 +1441,8 @@ class CoreService:
                         # RELEASE-9: the credential is issued at the claim, so
                         # the line ends one TTL (plus the grace day) from now.
                         result["ssh"] = self._authorize_ssh(result["ssh_public_key"], result["device_id"],
-                                                            self._ssh_expiry(None))
+                                                            self._ssh_expiry(None),
+                                                            request_id=result["request_id"])
                         granted["ssh"] = bool(result["ssh"].get("authorized"))
                     if granted:
                         result["grants"] = pairing.grant(result["request_id"], **granted)["grants"]
@@ -1563,15 +1564,19 @@ class CoreService:
                     # LITE-1a C4: a browser has no Remote to repair.
                     if (row.get("client") or {}).get("kind") == "web":
                         raise ServiceError("web_client_no_remote", status=409)
+                # SEC-RENEW-2: and asked again under the media store's lock,
+                # where the grant is written. Asked only up here, a revoke
+                # finishing in between left the revoked device allowed.
                 return self.media_pairing.grant_remote(payload["device_id"], remote_allowed=True,
-                    source_request_id=payload["source_request_id"], local_authorize=local_authorize)
+                    source_request_id=payload["source_request_id"], local_authorize=local_authorize,
+                    check=self._approval_check(payload["device_id"], payload["source_request_id"],
+                                               "pairing_approval_required", 403))
             raise ServiceError("route_unavailable", status=404)
 
     def _revoke_device(self, device, local_authorize):
         """`devices revoke`: every grant one device holds, taken back in one call."""
         if self.media_pairing is None:
             raise ServiceError("media_pairing_unavailable", status=503)
-        media = self.media_pairing.revoke_device(device, local_authorize=local_authorize)
         # PAIR-3: the durable approval is part of what a revoke takes
         # back. Leaving it behind would keep a grant source alive for a
         # device that no longer has a credential.
@@ -1581,12 +1586,19 @@ class CoreService:
         # took home a credential this revoke never saw. Approval first, then
         # credentials: a claim either finds no row, or its credential is
         # already in the registry the sweep below revokes.
+        # SEC-RENEW-2: and before the media deny too. `grant_remote` re-asks
+        # the approval under the media lock; with the deny first, a grant
+        # landing between the deny and this step found its approval still
+        # here and left the revoked device allowed. The rule for every step
+        # below: a grant re-asks its source under the lock it writes with,
+        # so the source has to go before the store it guards.
         pairing = getattr(self, "pairing", None)
         if pairing is not None:
             try:
                 pairing.forget_device(device)
             except (ServiceError, OSError, ValueError):
                 pass
+        media = self.media_pairing.revoke_device(device, local_authorize=local_authorize)
         revoked = self.hub.auth.revoke_device(device)
         with self._candidate_lock:
             self._media_candidates = {k: v for k, v in self._media_candidates.items() if k[2] != device}
@@ -1673,18 +1685,35 @@ class CoreService:
         offered = self._offered_ssh_key(new)
         if offered:
             try:
+                # A cheap filter, not the authority. SEC-RENEW-2: everything
+                # that decides is asked again under the authorized_keys lock,
+                # right before the write: `new` may still hold a line, `old`
+                # was not revoked, and the line is still `old`'s (`move_only`).
+                # Asked only out here, a revoke finishing in between got a
+                # fresh line written for the identity it had just revoked.
                 if self.ssh_keys.owner_of(offered) == old:
-                    ssh = self.ssh_keys.replace(offered, new, self._ssh_expiry(new), take_from=old)
-                    pending = self._ssh_pending.get(new)
-                    if pending and pending.get("public_key") == offered:
-                        self._ssh_pending.pop(new, None)
-                    grants = self._ssh_grants(new)
-                    if grants is not None:
-                        self.pairing.grant(grants["request_id"], ssh=True)
-                    _ssh_journal({"event": "ssh.key.moved", "device_id": new, "from_device_id": old,
-                                  "fingerprint": ssh["fingerprint"], "proof": proof})
+                    ssh = self.ssh_keys.replace(offered, new, self._ssh_expiry(new), take_from=old,
+                                                move_only=True, check=lambda: self._ssh_may_move(old, new))
             except (SshKeyError, ServiceError, OSError, ValueError):
                 ssh = None
+        if ssh is not None:
+            pending = self._ssh_pending.get(new)
+            if pending and pending.get("public_key") == offered:
+                self._ssh_pending.pop(new, None)
+            # SEC-RENEW-2: the grant needs no recheck of its own, because of
+            # where it is written. `grant` only updates the approval row it
+            # names and never creates one, and a revoke of `new` deletes that
+            # row (`forget_device`) before its credentials and its lines. A
+            # grant before that is deleted with its row; one after finds no
+            # row (404).
+            grants = self._ssh_grants(new)
+            if grants is not None:
+                try:
+                    self.pairing.grant(grants["request_id"], ssh=True)
+                except (ServiceError, OSError, ValueError):
+                    pass
+            _ssh_journal({"event": "ssh.key.moved", "device_id": new, "from_device_id": old,
+                          "fingerprint": ssh["fingerprint"], "proof": proof})
         try:
             retired = self._revoke_device(old, lambda: True)
         except (ServiceError, OSError, ValueError) as error:
@@ -1705,7 +1734,8 @@ class CoreService:
             return {"device_id": device, "media_authorized": False, "reason": "media_pairing_unavailable"}
         try:
             return self.media_pairing.grant_remote(device, remote_allowed=True,
-                source_request_id=request_id, local_authorize=local_authorize)
+                source_request_id=request_id, local_authorize=local_authorize,
+                check=self._approval_check(device, request_id, "pairing_request_expired", 404))
         except (ServiceError, MediaPairingError) as error:
             return {"device_id": device, "media_authorized": False, "reason": error.code}
         except OSError:
@@ -2286,6 +2316,43 @@ class CoreService:
         if not live:
             raise ServiceError("ssh_request_unknown", status=404)
 
+    def _ssh_may_move(self, old, new):
+        """SEC-RENEW-2: `_supersede_device`'s `check`, asked under the authorized_keys lock.
+
+        `new` has to hold a live credential: `_ssh_has_credential`, the rule
+        `ssh approve` writes by. `_ssh_still_granted` would be the wrong rule
+        here. The move exists because `new`'s own approval could not land the
+        key (`old` held it), so `new` has no SSH grant to re-ask, and the
+        callback carries no request credential either.
+
+        `old` must not have been revoked. A revoke takes the credentials before
+        the lines, so an `old` whose credentials are revoked is one whose line
+        is about to go, and a re-pairing is not a way to keep it - the rule
+        `media_pairing._may_rebind` already applies to the certificate. A
+        purged `old` (no registry row) is refused the same way.
+        """
+        try:
+            rows = {row["device_id"]: row for row in self.hub.auth.list_devices()}
+        except (ValueError, OSError):
+            rows = {}
+        if not (rows.get(new) or {}).get("active_credentials"):
+            raise ServiceError("ssh_request_unknown", status=404)
+        if old not in rows or rows[old].get("revoked_credentials"):
+            raise ServiceError("ssh_key_owner_revoked", status=409)
+
+    def _approval_check(self, device, request_id, code, status):
+        """SEC-RENEW-2: "is this approval still on record", as a `check` a store
+        runs under its own lock (`PairingStore.holds_approval`)."""
+        def check():
+            pairing = getattr(self, "pairing", None)
+            try:
+                held = pairing is not None and pairing.holds_approval(device, request_id)
+            except (ServiceError, OSError, ValueError):
+                held = False
+            if not held:
+                raise ServiceError(code, status=status)
+        return check
+
     def _ssh_grants(self, device):
         pairing = getattr(self, "pairing", None)
         if pairing is None:
@@ -2413,11 +2480,21 @@ class CoreService:
             answer["moved_from"] = result["moved_from"]
         return answer
 
-    def _authorize_ssh(self, public_key, device, expires_at=None):
-        """Land one companion's public key, reporting failure instead of hiding it."""
+    def _authorize_ssh(self, public_key, device, expires_at=None, *, request_id=None):
+        """Land one companion's public key, reporting failure instead of hiding it.
+
+        SEC-RENEW-2: with `request_id`, the approval that grants it is asked
+        again under the authorized_keys lock. A revoke forgets the approval
+        first and the lines last, so a line written after its check passed is
+        one the same revoke removes.
+        """
         from .ssh_keys import SshKeyError
+        check = (self._approval_check(device, request_id, "pairing_request_expired", 404)
+                 if request_id is not None else None)
         try:
-            return self.ssh_keys.authorize(public_key, device, expires_at)
+            return self.ssh_keys.authorize(public_key, device, expires_at, check=check)
+        except ServiceError as error:
+            return {"authorized": False, "changed": False, "device": device, "error": error.code}
         except SshKeyError as error:
             return {"authorized": False, "changed": False, "device": device, "error": error.code}
         except OSError:

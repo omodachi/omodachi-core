@@ -206,7 +206,11 @@ class BiometricKeyStore:
             return [{"device_id": device_id, **{k: v for k, v in row.items() if k != "public_key"}}
                     for device_id, row in sorted(self._load().items())]
 
-    def enroll(self, device_id, *, public_key_b64, label, secure_enclave, enabled):
+    def enroll(self, device_id, *, public_key_b64, label, secure_enclave, enabled, check=None):
+        """SEC-RENEW-2: `check` is the request's credential, asked again under
+        the lock `revoke` takes too; it raises to refuse. A device revoke takes
+        the credential before this key, so a key whose check passed is removed
+        by the same revoke, and one written after it is never written."""
         if not isinstance(label, str) or not 1 <= len(label) <= _LABEL_LIMIT or any(
                 ord(c) < 32 or ord(c) == 127 for c in label):
             raise ServiceError("invalid_request", "invalid key label")
@@ -215,6 +219,8 @@ class BiometricKeyStore:
         except ValueError:
             raise ServiceError("invalid_request", "invalid public key") from None
         with _registry_lock(self.path):
+            if check is not None:
+                check()
             keys = self._load()
             # Re-enrolling replaces; a device has exactly one key, and a key
             # that changed is a biometric set that changed.
@@ -356,7 +362,7 @@ class ApprovalBroker:
         self._challenges[device_id] = {"challenge": value, "expires_at": now + self.CHALLENGE_TTL}
         return value
 
-    def enroll(self, device_id, payload) -> dict:
+    def enroll(self, device_id, payload, *, check=None) -> dict:
         if not isinstance(payload, dict) or set(payload) - {"public_key", "label", "challenge",
                                                             "signature", "secure_enclave", "enabled"}:
             raise ServiceError("invalid_request")
@@ -376,9 +382,11 @@ class ApprovalBroker:
                                      challenge=str(payload["challenge"]), public_key_b64=public_key)
         if not verify_signature(_b64(public_key), message, _b64(str(payload["signature"]), limit=256)):
             raise ServiceError("biometric_signature_invalid", status=403)
+        # SEC-RENEW-2: `check` (the route's re-verification of the request's
+        # own credential) runs inside the key store's lock, not only before it.
         result = self.keys.enroll(device_id, public_key_b64=public_key, label=str(payload["label"]),
                                   secure_enclave=bool(payload.get("secure_enclave", False)),
-                                  enabled=payload["enabled"])
+                                  enabled=payload["enabled"], check=check)
         self._journal({"event": "auth.key.enrolled", "device_id": device_id,
                        "secure_enclave": result["secure_enclave"], "label": result["label"],
                        "enabled": result["enabled"]})

@@ -397,13 +397,22 @@ class MediaPairingBridge:
         if source_request_id: row["source_request_id"] = source_request_id
         return row
 
-    def grant_remote(self, device_id, *, remote_allowed, source_request_id, local_authorize):
-        """Local host hook, only after an explicit local 'Approve + Remote'."""
+    def grant_remote(self, device_id, *, remote_allowed, source_request_id, local_authorize, check=None):
+        """Local host hook, only after an explicit local 'Approve + Remote'.
+
+        SEC-RENEW-2: `check` is the caller's "is that approval still on
+        record", asked inside this store's lock and before the grant is
+        written; it raises to refuse. A device revoke forgets the approval
+        before it denies the device here, so a grant whose check passed is
+        denied again by the same revoke.
+        """
         _authorize(local_authorize)
         if (not _match(_DEVICE, device_id) or remote_allowed is not True
                 or not isinstance(source_request_id, str) or not re.fullmatch(r"pair_[0-9a-f]{32}", source_request_id)):
             raise MediaPairingError("media_permission_not_explicit", 400)
         with self.store.transaction() as state:
+            if check is not None:
+                check()
             self._set_device(state, device_id, allowed=True, source_request_id=source_request_id)
             self.store.commit(state)
             return {"device_id": device_id, "media_authorized": True}

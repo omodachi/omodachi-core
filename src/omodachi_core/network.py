@@ -1548,7 +1548,8 @@ def create_app(service: CoreService, *, auth_check_interval=1.0, odomo_bundle=No
                 "keys": enrolled}))
         if request.method == "DELETE":
             return web.json_response(service.resource(keys.revoke(device)))
-        return web.json_response(service.resource(keys.enroll(device, await body(request))))
+        return web.json_response(service.resource(keys.enroll(device, await body(request),
+                                                              check=still_authorized(request))))
 
     async def ssh_key(request):
         """UX-4 §2. `PUT /v1/ssh/key` - this device states the key it offers.

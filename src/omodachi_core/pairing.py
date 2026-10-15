@@ -374,6 +374,18 @@ class PairingStore:
             row = max(rows, key=lambda row: row.get("claimed_at", row["expires_at"]))
             return {"request_id": row["request_id"], **dict(row.get("grants") or EMPTY_GRANTS)}
 
+    def holds_approval(self, device_id, request_id):
+        """SEC-RENEW-2: whether this exact approval is still on record for this device.
+
+        It is what a grant written from a local Approve re-asks under the lock
+        it writes with. `devices revoke` forgets a device's approvals before it
+        takes anything else back, so a grant that still finds its approval here
+        is one the revoke's later steps will take back.
+        """
+        with self.transaction() as state:
+            row = state["requests"].get(request_id)
+            return bool(row and row["device_id"] == device_id and row["status"] in {"approved", "claimed"})
+
     def offered_ssh_key(self, device_id):
         """REMOTE-PAIR-1: the SSH public key this device's latest approval carried."""
         with self.transaction() as state:
